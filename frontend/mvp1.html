@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RE-Archaeology MVP1 - Neo4j</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        .main-container {
+            height: 100vh;
+            overflow: hidden;
+        }
+        .sidebar {
+            background-color: #343a40;
+            color: white;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        .content-pane {
+            height: 100vh;
+            overflow-y: auto;
+            background-color: white;
+        }
+        .artifacts-pane {
+            background-color: #f8f9fa;
+            height: 100vh;
+            overflow-y: auto;
+            border-left: 1px solid #dee2e6;
+        }
+        .thread-item {
+            cursor: pointer;
+            padding: 0.75rem;
+            border-bottom: 1px solid #495057;
+            transition: background-color 0.2s;
+        }
+        .thread-item:hover {
+            background-color: #495057;
+        }
+        .thread-item.active {
+            background-color: #007bff;
+        }
+        .user-info {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+        }
+        .hypothesis-card {
+            border-left: 4px solid #007bff;
+            margin-bottom: 1rem;
+        }
+        .site-marker {
+            background-color: #28a745;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- User Authentication Modal -->
+    <div class="modal fade" id="authModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Welcome to RE-Archaeology Agent</h5>
+                </div>
+                <div class="modal-body">
+                    <div id="loginForm">
+                        <h6>Login</h6>
+                        <div class="mb-3">
+                            <input type="email" class="form-control" id="loginEmail" placeholder="Email">
+                        </div>
+                        <button class="btn btn-primary w-100" onclick="loginUser()">Login</button>
+                        <hr>
+                        <button class="btn btn-outline-secondary w-100" onclick="showRegistration()">New User? Register</button>
+                    </div>
+                    <div id="registerForm" style="display: none;">
+                        <h6>Register</h6>
+                        <div class="mb-3">
+                            <input type="text" class="form-control" id="registerName" placeholder="Full Name">
+                        </div>
+                        <div class="mb-3">
+                            <input type="email" class="form-control" id="registerEmail" placeholder="Email">
+                        </div>
+                        <div class="mb-3">
+                            <select class="form-control" id="registerRole">
+                                <option value="reader">Reader</option>
+                                <option value="contributor">Contributor</option>
+                                <option value="researcher">Researcher</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-success w-100" onclick="registerUser()">Register</button>
+                        <hr>
+                        <button class="btn btn-outline-secondary w-100" onclick="showLogin()">Back to Login</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Info Display -->
+    <div class="user-info">
+        <div class="dropdown">
+            <button class="btn btn-outline-primary dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown">
+                <i class="fas fa-user"></i> <span id="currentUserName">Loading...</span>
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="logout()">Logout</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="container-fluid main-container">
+        <div class="row h-100">
+            <!-- Left Sidebar: Topics/Threads -->
+            <div class="col-md-3 sidebar p-0">
+                <div class="p-3 border-bottom">
+                    <h5><i class="fas fa-comments"></i> Discussions</h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="showNewThreadModal()">
+                        <i class="fas fa-plus"></i> New Thread
+                    </button>
+                </div>
+                <div id="threadsList">
+                    <!-- Threads will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Middle Content: Discussion Content -->
+            <div class="col-md-6 content-pane p-0">
+                <div class="p-3 border-bottom bg-light">
+                    <h4 id="contentTitle">Select a thread to begin</h4>
+                    <small class="text-muted" id="contentSubtitle"></small>
+                </div>
+                <div class="p-3" id="contentArea">
+                    <div class="text-center text-muted">
+                        <i class="fas fa-arrow-left fa-2x mb-3"></i>
+                        <p>Choose a discussion thread from the left panel to view content and contribute.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Sidebar: Artifacts -->
+            <div class="col-md-3 artifacts-pane">
+                <div class="p-3 border-bottom">
+                    <h5><i class="fas fa-folder-open"></i> Artifacts</h5>
+                </div>
+                <div class="p-3" id="artifactsArea">
+                    <div class="text-muted">
+                        <i class="fas fa-file-alt mb-2"></i>
+                        <p class="small">Related documents, images, and datasets will appear here.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Thread Modal -->
+    <div class="modal fade" id="newThreadModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New Thread</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Thread Title</label>
+                        <input type="text" class="form-control" id="newThreadTitle" placeholder="Enter thread title">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Tags (comma-separated)</label>
+                        <input type="text" class="form-control" id="newThreadTags" placeholder="archaeology, amazon, patterns">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="createNewThread()">Create Thread</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Hypothesis Modal -->
+    <div class="modal fade" id="newHypothesisModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Propose New Hypothesis</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Hypothesis Statement</label>
+                        <textarea class="form-control" id="newHypothesisStatement" rows="3" placeholder="Describe your hypothesis..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Confidence Score (0-1)</label>
+                        <input type="number" class="form-control" id="newHypothesisConfidence" min="0" max="1" step="0.1" value="0.5">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="createNewHypothesis()">Propose Hypothesis</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/neo4j_api.js"></script>
+    <script src="js/thread_interface.js"></script>
+</body>
+</html>
