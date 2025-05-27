@@ -161,10 +161,11 @@ data/temp/*
 *.h5
 *.hdf5
 
-# GCP credentials (keep the service account key but ignore others)
+# GCP credentials (exclude ALL credential files for security)
 gcp-credentials.json
+sage-striker-294302-bc8908922c70.json
+*-credentials.json
 *.json
-!sage-striker-294302-bc8908922c70.json
 
 # Database files
 *.db
