@@ -1,5 +1,5 @@
 /**
- * Thread interface management for RE-Archaeology MVP1
+ * Thread interface management for RE-Archaeology
  */
 
 let authModal, newThreadModal, newHypothesisModal;
@@ -11,13 +11,17 @@ document.addEventListener('DOMContentLoaded', function() {
     newThreadModal = new bootstrap.Modal(document.getElementById('newThreadModal'));
     newHypothesisModal = new bootstrap.Modal(document.getElementById('newHypothesisModal'));
     
-    // Check if user is already logged in
-    const currentUser = neo4jAPI.getCurrentUser();
-    if (currentUser) {
-        showMainInterface();
-    } else {
-        authModal.show();
-    }
+    // Skip authentication for now - show main interface directly
+    showMainInterface();
+    
+    // Set a default user for testing
+    const defaultUser = { 
+        id: 'test-user-1', 
+        name: 'Test User', 
+        email: 'test@example.com', 
+        role: 'researcher' 
+    };
+    neo4jAPI.setCurrentUser(defaultUser);
 });
 
 // Authentication functions
@@ -131,6 +135,16 @@ async function selectThread(threadId) {
         
         // Load thread content (hypotheses, discussions, etc.)
         await loadThreadContent(thread);
+        
+        // Update chat context
+        if (window.reChat) {
+            window.reChat.setContext({
+                type: 'thread',
+                id: thread.id,
+                title: thread.title,
+                tags: thread.tags
+            });
+        }
         
     } catch (error) {
         console.error('Error selecting thread:', error);
@@ -279,6 +293,16 @@ async function createNewHypothesis() {
         
         // Reload thread content
         loadThreadContent(currentThread);
+        
+        // Notify chat about new hypothesis
+        if (window.reChat) {
+            window.reChat.setContext({
+                type: 'hypothesis',
+                statement: statement,
+                confidence: confidence,
+                thread_id: currentThread.id
+            });
+        }
         
     } catch (error) {
         alert('Error creating hypothesis: ' + error.message);

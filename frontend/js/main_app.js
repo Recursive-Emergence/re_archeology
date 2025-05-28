@@ -1,9 +1,9 @@
 /**
- * RE-Archaeology MVP1 Main Application
+ * RE-Archaeology Main Application
  * Handles the three-pane interface with Neo4j backend
  */
 
-class MVP1App {
+class MainApp {
     constructor() {
         this.map = null;
         this.currentThread = null;
@@ -14,23 +14,27 @@ class MVP1App {
     }
 
     async init() {
-        console.log('Initializing MVP1 App...');
+        console.log('Initializing Main App...');
         
-        // Check for existing user session
-        this.currentUser = neo4jAPI.getCurrentUser();
+        // Set a default test user to skip authentication for now
+        this.currentUser = { 
+            id: 'test-user-1', 
+            name: 'Test User', 
+            email: 'test@example.com', 
+            role: 'researcher' 
+        };
+        neo4jAPI.setCurrentUser(this.currentUser);
         this.updateUserInterface();
         
-        // Initialize data if user is logged in
-        if (this.currentUser) {
-            await this.loadData();
-        }
+        // Initialize data with test user
+        await this.loadData();
         
         // Initialize map when map tab is shown
         document.getElementById('map-tab').addEventListener('click', () => {
             setTimeout(() => this.initializeMap(), 100);
         });
         
-        console.log('MVP1 App initialized');
+        console.log('Main App initialized');
     }
 
     updateUserInterface() {
@@ -544,6 +548,6 @@ function handleCreateSite() {
 // Initialize app when DOM is loaded
 let app;
 document.addEventListener('DOMContentLoaded', () => {
-    app = new MVP1App();
+    app = new MainApp();
     app.init();
 });

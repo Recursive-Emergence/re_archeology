@@ -1,0 +1,337 @@
+/* Chat Interface Styles for RE-Archaeology Agent */
+
+.chat-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 350px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+    border: 1px solid #e1e5e9;
+    z-index: 1050;
+    transition: all 0.3s ease-in-out;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.chat-container.minimized {
+    height: 60px;
+}
+
+.chat-container.maximized {
+    height: 500px;
+}
+
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 12px 12px 0 0;
+    cursor: pointer;
+}
+
+.chat-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.chat-title i {
+    font-size: 16px;
+}
+
+.chat-toggle {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.chat-toggle:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.chat-body {
+    display: flex;
+    flex-direction: column;
+    height: calc(100% - 60px);
+    overflow: hidden;
+}
+
+.chat-messages {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+}
+
+.chat-messages::-webkit-scrollbar {
+    width: 4px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 2px;
+}
+
+.message {
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.message.user {
+    align-items: flex-end;
+}
+
+.message.agent {
+    align-items: flex-start;
+}
+
+.message-content {
+    max-width: 80%;
+    padding: 12px 16px;
+    border-radius: 18px;
+    word-wrap: break-word;
+    position: relative;
+}
+
+.message.user .message-content {
+    background: #007bff;
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+
+.message.agent .message-content {
+    background: #f8f9fa;
+    color: #333;
+    border: 1px solid #e9ecef;
+    border-bottom-left-radius: 4px;
+}
+
+.message-timestamp {
+    font-size: 11px;
+    color: #6c757d;
+    margin-top: 4px;
+    padding: 0 4px;
+}
+
+.message.user .message-timestamp {
+    text-align: right;
+}
+
+.message.agent .message-timestamp {
+    text-align: left;
+}
+
+.chat-input-container {
+    padding: 16px;
+    border-top: 1px solid #e9ecef;
+    background: white;
+    border-radius: 0 0 12px 12px;
+}
+
+.chat-input-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.chat-input {
+    flex: 1;
+    border: 1px solid #ced4da;
+    border-radius: 20px;
+    padding: 10px 16px;
+    resize: none;
+    max-height: 80px;
+    min-height: 40px;
+    font-size: 14px;
+    line-height: 1.4;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.chat-input:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.chat-send-btn {
+    background: #007bff;
+    border: none;
+    color: white;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+    flex-shrink: 0;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+    background: #0056b3;
+}
+
+.chat-send-btn:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+}
+
+.chat-status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #28a745;
+}
+
+.status-indicator.loading {
+    background: #ffc107;
+    animation: pulse 1.5s infinite;
+}
+
+.status-indicator.error {
+    background: #dc3545;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.typing-indicator {
+    display: flex;
+    gap: 4px;
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 18px;
+    border-bottom-left-radius: 4px;
+    margin-bottom: 16px;
+    max-width: 80%;
+}
+
+.typing-dot {
+    width: 6px;
+    height: 6px;
+    background: #6c757d;
+    border-radius: 50%;
+    animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typing {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+    }
+    30% {
+        transform: translateY(-10px);
+        opacity: 1;
+    }
+}
+
+.chat-empty-state {
+    text-align: center;
+    color: #6c757d;
+    padding: 32px 16px;
+}
+
+.chat-empty-state i {
+    font-size: 32px;
+    margin-bottom: 12px;
+    color: #dee2e6;
+}
+
+.suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.suggestion-chip {
+    background: #e9ecef;
+    border: 1px solid #ced4da;
+    border-radius: 16px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.suggestion-chip:hover {
+    background: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .chat-container {
+        width: calc(100vw - 40px);
+        right: 20px;
+        left: 20px;
+        bottom: 20px;
+    }
+    
+    .chat-container.maximized {
+        height: 60vh;
+    }
+}
+
+/* Integration with existing Bootstrap theme */
+.chat-container .btn {
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.message-content .badge {
+    margin: 2px;
+}
+
+/* Context-aware styling */
+.message.agent .message-content.context-site {
+    border-left: 4px solid #28a745;
+}
+
+.message.agent .message-content.context-hypothesis {
+    border-left: 4px solid #007bff;
+}
+
+.message.agent .message-content.context-discovery {
+    border-left: 4px solid #ffc107;
+}

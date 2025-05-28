@@ -1,5 +1,5 @@
 /**
- * Neo4j API client for RE-Archaeology MVP1
+ * Neo4j API client for RE-Archaeology
  */
 
 class Neo4jAPI {

@@ -36,17 +36,20 @@ def health_check():
     return {"status": "healthy", "version": "0.1.0"}
 
 # Import and include routers FIRST
-from backend.api.routers import users, threads, hypotheses, sites
+from backend.api.routers import users, threads, hypotheses, sites, chat
 
 app.include_router(users.router, prefix=settings.API_V1_STR, tags=["users"])
 app.include_router(threads.router, prefix=settings.API_V1_STR, tags=["threads"])
 app.include_router(hypotheses.router, prefix=settings.API_V1_STR, tags=["hypotheses"])
 app.include_router(sites.router, prefix=settings.API_V1_STR, tags=["sites"])
+app.include_router(chat.router, prefix=settings.API_V1_STR, tags=["chat"])
 
-# Mount static files for frontend LAST (catches all remaining routes)
+# Mount static files for frontend
 frontend_path = pathlib.Path(__file__).parent.parent.parent / "frontend"
 if frontend_path.exists():
-    # Mount frontend at root path - this will serve index.html for "/" and all static files
+    # Mount static files at /static/ path for assets
+    app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
+    # Mount frontend at root path for HTML files - this will serve index.html for "/"
     app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 
 # Startup event
