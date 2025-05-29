@@ -38,6 +38,11 @@ app.add_middleware(
 def health_check():
     return {"status": "healthy", "version": "0.1.0"}
 
+# Readiness check endpoint for Cloud Run
+@app.get("/ready")
+def readiness_check():
+    return {"status": "ready", "service": "re-archaeology-api"}
+
 # Import and include routers
 from backend.api.routers import (
     users, hypotheses, sites, websocket,
@@ -70,18 +75,38 @@ if frontend_path.exists():
 async def startup_event():
     logger.info(f"Starting up {settings.PROJECT_NAME} API")
     
-    # Initialize Neo4j connection and schema
+    # Initialize Neo4j connection and schema - don't block startup on failure
     try:
-        neo4j_db.connect()
+        # Set a short timeout for Cloud Run environments
+        import asyncio
+        await asyncio.wait_for(
+            asyncio.to_thread(_initialize_neo4j),
+            timeout=10.0  # 10 second timeout
+        )
         logger.info("Successfully connected to Neo4j database")
         
-        # Initialize schema
-        from backend.models.neo4j_schema import create_schema
-        create_schema()
-        logger.info("Neo4j schema initialized")
-        
+    except asyncio.TimeoutError:
+        logger.warning("Neo4j connection timed out - continuing startup without database")
     except Exception as e:
-        logger.error(f"Neo4j connection/schema failed: {e}")
+        logger.warning(f"Neo4j connection/schema failed: {e} - continuing startup without database")
+
+def _initialize_neo4j():
+    """Helper function to initialize Neo4j connection"""
+    # Import here to ensure settings are loaded after .env
+    from backend.utils.config import print_neo4j_config, settings
+    
+    # Print debug information
+    print_neo4j_config()
+    
+    # Try to establish connection
+    neo4j_db.connect()
+    
+    # Log the URI we're using (after connection)
+    logger.info(f"Connected to Neo4j at URI: {neo4j_db.uri}")
+    
+    # Initialize schema
+    from backend.models.neo4j_schema import create_schema
+    create_schema()
 
 # Shutdown event
 @app.on_event("shutdown")

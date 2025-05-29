@@ -35,18 +35,21 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean
 
 # Copy Python packages from builder stage
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder /root/.local /home/app/.local
 
 # Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
+ENV PATH=/home/app/.local/bin:$PATH
 
 # Copy application code with proper ownership
 COPY --chown=1000:1000 backend/ ./backend/
 COPY --chown=1000:1000 frontend/ ./frontend/
+COPY --chown=1000:1000 start_server.py ./start_server.py
+COPY --chown=1000:1000 .env ./.env
 
 # Create app user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 app \
-    && chown -R app:app /app
+    && chown -R app:app /app \
+    && chown -R app:app /home/app
 
 # Set environment variables for production
 ENV PYTHONPATH=/app \
@@ -63,5 +66,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # Switch to app user
 USER app
 
-# Optimized startup command with performance tuning
-CMD ["sh", "-c", "uvicorn backend.api.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --loop uvloop --http httptools --access-log --log-level info"]
+# Optimized startup command using our custom startup script
+CMD ["python", "start_server.py"]

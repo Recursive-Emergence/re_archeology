@@ -28,29 +28,56 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "RE-Archaeology Agent"
     API_V1_STR: str = "/api/v1"
     
-    # Neo4j Database configuration
-    NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
-    NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "re_archaeology_pass")
+    # Neo4j Database configuration - use model_config to load from env
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "re_archaeology_pass"
     
     # Google OAuth configuration
-    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
-    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
-    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8080/api/v1/auth/google/callback")
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8080/api/v1/auth/google/callback"
     
     # JWT configuration
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
-    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    JWT_EXPIRATION_HOURS: int = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
+    JWT_SECRET_KEY: str = "your-secret-key-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_HOURS: int = 24
     
     # OpenAI configuration
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview")
-    OPENAI_EMBEDDING_MODEL: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4-turbo-preview"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
     # WebSocket and Redis configuration
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    WEBSOCKET_REDIS_URL: str = os.getenv("WEBSOCKET_REDIS_URL", "redis://localhost:6379/1")
+    REDIS_URL: str = "redis://localhost:6379/0"
+    WEBSOCKET_REDIS_URL: str = "redis://localhost:6379/1"
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Override with environment variables
+        # Neo4j settings
+        self.NEO4J_URI = os.environ.get("NEO4J_URI", self.NEO4J_URI)
+        self.NEO4J_USER = os.environ.get("NEO4J_USER", self.NEO4J_USER)
+        self.NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", self.NEO4J_PASSWORD)
+        
+        # Google OAuth settings
+        self.GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", self.GOOGLE_CLIENT_ID)
+        self.GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", self.GOOGLE_CLIENT_SECRET)
+        self.GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", self.GOOGLE_REDIRECT_URI)
+        
+        # JWT settings
+        self.JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", self.JWT_SECRET_KEY)
+        self.JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", self.JWT_ALGORITHM)
+        self.JWT_EXPIRATION_HOURS = int(os.environ.get("JWT_EXPIRATION_HOURS", self.JWT_EXPIRATION_HOURS))
+        
+        # OpenAI settings
+        self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", self.OPENAI_API_KEY)
+        self.OPENAI_MODEL = os.environ.get("OPENAI_MODEL", self.OPENAI_MODEL)
+        self.OPENAI_EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", self.OPENAI_EMBEDDING_MODEL)
+        
+        # Redis settings
+        self.REDIS_URL = os.environ.get("REDIS_URL", self.REDIS_URL)
+        self.WEBSOCKET_REDIS_URL = os.environ.get("WEBSOCKET_REDIS_URL", self.WEBSOCKET_REDIS_URL)
 
     class Config:
         case_sensitive = True
@@ -65,7 +92,8 @@ def print_neo4j_config():
     print("=" * 50)
     print("NEO4J CONFIGURATION DEBUG")
     print("=" * 50)
-    print(f"NEO4J_URI: {settings.NEO4J_URI}")
+    print(f"NEO4J_URI from env: {os.environ.get('NEO4J_URI', 'NOT SET IN ENV')}")
+    print(f"NEO4J_URI from settings: {settings.NEO4J_URI}")
     print(f"NEO4J_USER: {settings.NEO4J_USER}")
     print(f"NEO4J_PASSWORD: {'*' * len(settings.NEO4J_PASSWORD) if settings.NEO4J_PASSWORD else 'NOT SET'}")
     print("=" * 50)

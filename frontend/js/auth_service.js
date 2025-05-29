@@ -89,13 +89,18 @@ class AuthService {
                 this.setAuthToken(data.access_token);
                 this.currentUser = data.user;
                 this.updateUserDisplay(data.user);
-                this.hideAuthModal();
+                
+                // Use setTimeout to ensure proper modal hiding
+                setTimeout(() => {
+                    this.hideAuthModal();
+                }, 100);
                 
                 // Notify the main application about successful authentication
                 if (window.app && typeof window.app.setUser === 'function') {
                     window.app.setUser(data.user);
                 }
                 
+                console.log('Authentication successful:', data.user);
                 return data;
             } else {
                 throw new Error('Google authentication failed');
@@ -229,6 +234,27 @@ class AuthService {
         const authModal = bootstrap.Modal.getInstance(document.getElementById('authModal'));
         if (authModal) {
             authModal.hide();
+        } else {
+            // Force hide the modal if bootstrap instance is not found
+            const modalElement = document.getElementById('authModal');
+            if (modalElement) {
+                modalElement.classList.remove('show');
+                modalElement.style.display = 'none';
+                modalElement.setAttribute('aria-hidden', 'true');
+                modalElement.removeAttribute('aria-modal');
+                modalElement.removeAttribute('role');
+                
+                // Remove backdrop
+                const backdrop = document.querySelector('.modal-backdrop');
+                if (backdrop) {
+                    backdrop.remove();
+                }
+                
+                // Remove modal-open class from body
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = '';
+                document.body.style.paddingRight = '';
+            }
         }
     }
 

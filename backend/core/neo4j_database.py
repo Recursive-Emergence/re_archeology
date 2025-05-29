@@ -12,23 +12,44 @@ logger = logging.getLogger(__name__)
 class Neo4jDatabase:
     def __init__(self):
         self.driver: Driver = None
-        self.uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        self.user = os.getenv("NEO4J_USER", "neo4j")
-        self.password = os.getenv("NEO4J_PASSWORD", "re_archaeology_pass")
+        # Don't initialize connection settings here - they'll be set when connect() is called
+        self.uri = None
+        self.user = None
+        self.password = None
     
     def connect(self):
         """Establish connection to Neo4j database."""
         try:
+            # Import settings here to ensure .env is loaded
+            from backend.utils.config import settings
+            import os
+            
+            # Check raw environment values first
+            env_uri = os.environ.get("NEO4J_URI")
+            if env_uri:
+                logger.info(f"Found NEO4J_URI in environment: {env_uri}")
+            
+            # Get settings from the settings module
+            self.uri = settings.NEO4J_URI
+            self.user = settings.NEO4J_USER
+            self.password = settings.NEO4J_PASSWORD
+            
+            logger.info(f"Attempting to connect to Neo4j at {self.uri}")
+            
             self.driver = GraphDatabase.driver(
                 self.uri, 
                 auth=(self.user, self.password)
             )
+            
             # Test connection
             with self.driver.session() as session:
-                session.run("RETURN 1")
-            logger.info(f"Connected to Neo4j at {self.uri}")
+                result = session.run("RETURN 1 as test").single()
+                logger.info(f"Connection test result: {result['test']}")
+                
+            logger.info(f"Successfully connected to Neo4j at {self.uri}")
         except Exception as e:
             logger.error(f"Failed to connect to Neo4j: {e}")
+            logger.error(f"URI attempted: {self.uri}")
             raise
     
     def close(self):
