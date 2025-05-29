@@ -35,14 +35,24 @@ app.add_middleware(
 def health_check():
     return {"status": "healthy", "version": "0.1.0"}
 
-# Import and include routers FIRST
-from backend.api.routers import users, threads, hypotheses, sites, chat
+# Import and include routers
+from backend.api.routers import (
+    users, hypotheses, sites, websocket,
+    auth, discussion_threads, ai_chat, background_tasks, spatial_analysis
+)
 
+# Core routers
 app.include_router(users.router, prefix=settings.API_V1_STR, tags=["users"])
-app.include_router(threads.router, prefix=settings.API_V1_STR, tags=["threads"])
 app.include_router(hypotheses.router, prefix=settings.API_V1_STR, tags=["hypotheses"])
 app.include_router(sites.router, prefix=settings.API_V1_STR, tags=["sites"])
-app.include_router(chat.router, prefix=settings.API_V1_STR, tags=["chat"])
+
+# Enhanced feature routers
+app.include_router(auth.router, tags=["authentication"])
+app.include_router(discussion_threads.router, tags=["discussion-threads"])
+app.include_router(ai_chat.router, tags=["ai-chat"])
+app.include_router(background_tasks.router, tags=["background-tasks"])
+app.include_router(spatial_analysis.router, tags=["spatial-analysis"])
+app.include_router(websocket.router, tags=["websockets"])
 
 # Mount static files for frontend
 frontend_path = pathlib.Path(__file__).parent.parent.parent / "frontend"
@@ -75,3 +85,22 @@ async def startup_event():
 async def shutdown_event():
     logger.info(f"Shutting down {settings.PROJECT_NAME} API")
     neo4j_db.close()
+
+# Direct startup for development/testing
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8080"))
+    
+    print(f"Starting server directly from main.py on {host}:{port}")
+    
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        reload=False,
+        log_level="info",
+        access_log=True
+    )

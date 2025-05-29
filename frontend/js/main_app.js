@@ -16,6 +16,12 @@ class MainApp {
     async init() {
         console.log('Initializing Main App...');
         
+        // Initialize modals
+        this.authModal = new bootstrap.Modal(document.getElementById('authModal'));
+        this.newThreadModal = new bootstrap.Modal(document.getElementById('newThreadModal'));
+        this.newHypothesisModal = new bootstrap.Modal(document.getElementById('newHypothesisModal'));
+        this.backgroundTasksModal = new bootstrap.Modal(document.getElementById('backgroundTasksModal'));
+        
         // Set a default test user to skip authentication for now
         this.currentUser = { 
             id: 'test-user-1', 
@@ -30,11 +36,22 @@ class MainApp {
         await this.loadData();
         
         // Initialize map when map tab is shown
-        document.getElementById('map-tab').addEventListener('click', () => {
-            setTimeout(() => this.initializeMap(), 100);
-        });
+        if (document.getElementById('map-tab')) {
+            document.getElementById('map-tab').addEventListener('click', () => {
+                setTimeout(() => this.initializeMap(), 100);
+            });
+        }
+        
+        this.showMainInterface();
         
         console.log('Main App initialized');
+    }
+    
+    showMainInterface() {
+        const currentUser = neo4jAPI.getCurrentUser();
+        if (document.getElementById('currentUserName')) {
+            document.getElementById('currentUserName').textContent = currentUser.name;
+        }
     }
 
     updateUserInterface() {
@@ -104,16 +121,32 @@ class MainApp {
 
     async selectThread(threadId) {
         try {
+            // Update active thread styling if event is available
+            if (event) {
+                document.querySelectorAll('.thread-item').forEach(item => item.classList.remove('active'));
+                event.currentTarget.classList.add('active');
+            }
+            
             this.currentThread = await neo4jAPI.getThread(threadId);
             neo4jAPI.setCurrentThread(this.currentThread);
             
             this.renderThreadsList(); // Update active state
-            this.renderThreadContent();
             
-            // Switch to discussion tab
+            // Update content area - use both approaches for backward compatibility
+            if (document.getElementById('contentTitle') && document.getElementById('contentSubtitle')) {
+                document.getElementById('contentTitle').textContent = this.currentThread.title;
+                document.getElementById('contentSubtitle').textContent = `Created: ${this.formatDate(this.currentThread.created_at)}`;
+                await this.loadThreadContent(this.currentThread);
+            } else {
+                this.renderThreadContent();
+            }
+            
+            // Switch to discussion tab if it exists
             const discussionTab = document.getElementById('discussion-tab');
-            const discussionTabTrigger = new bootstrap.Tab(discussionTab);
-            discussionTabTrigger.show();
+            if (discussionTab) {
+                const discussionTabTrigger = new bootstrap.Tab(discussionTab);
+                discussionTabTrigger.show();
+            }
             
         } catch (error) {
             console.error('Error selecting thread:', error);
@@ -493,8 +526,12 @@ class MainApp {
     }
 
     formatDate(dateString) {
-        const date = new Date(dateString);
-        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        } catch (error) {
+            return dateString;
+        }
     }
 
     showError(message) {
@@ -506,6 +543,152 @@ class MainApp {
         // Simple alert for now - could be replaced with toast notifications
         alert('Success: ' + message);
     }
+    
+    // Authentication functions from thread_interface.js
+    async loginUser() {
+        const email = document.getElementById('loginEmail').value.trim();
+        
+        if (!email) {
+            this.showError('Please enter your email');
+            return;
+        }
+        
+        try {
+            const user = await neo4jAPI.getUserByEmail(email);
+            neo4jAPI.setCurrentUser(user);
+            this.currentUser = user;
+            this.authModal.hide();
+            this.updateUserInterface();
+            await this.loadData();
+        } catch (error) {
+            this.showError('User not found. Please register first.');
+            console.error('Login error:', error);
+        }
+    }
+
+    async registerUser() {
+        const name = document.getElementById('registerName').value.trim();
+        const email = document.getElementById('registerEmail').value.trim();
+        const role = document.getElementById('registerRole').value;
+        
+        if (!name || !email) {
+            this.showError('Please fill in all fields');
+            return;
+        }
+        
+        try {
+            const userData = { name, email, role };
+            const user = await neo4jAPI.createUser(userData);
+            neo4jAPI.setCurrentUser(user);
+            this.currentUser = user;
+            this.authModal.hide();
+            this.updateUserInterface();
+            await this.loadData();
+        } catch (error) {
+            this.showError('Registration failed: ' + error.message);
+            console.error('Registration error:', error);
+        }
+    }
+
+    showLogin() {
+        document.getElementById('loginForm').style.display = 'block';
+        document.getElementById('registerForm').style.display = 'none';
+    }
+
+    showRegistration() {
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('registerForm').style.display = 'block';
+    }
+
+    // Thread content loading from thread_interface.js
+    async loadThreadContent(thread) {
+        const contentArea = document.getElementById('contentArea');
+        
+        // Load hypotheses related to this thread
+        try {
+            const allHypotheses = await neo4jAPI.getAllHypotheses();
+            const threadHypotheses = allHypotheses.filter(h => h.emerged_from_thread === thread.id);
+            
+            let contentHTML = `
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5>Thread Discussion</h5>
+                    <button class="btn btn-sm btn-primary" onclick="app.showCreateHypothesisModal()">
+                        <i class="fas fa-lightbulb"></i> Propose Hypothesis
+                    </button>
+                </div>
+            `;
+            
+            if (threadHypotheses.length === 0) {
+                contentHTML += `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-lightbulb fa-2x mb-3"></i>
+                        <p>No hypotheses proposed yet. Be the first to contribute!</p>
+                    </div>
+                `;
+            } else {
+                contentHTML += '<div class="hypotheses-list">';
+                for (const hypothesis of threadHypotheses) {
+                    contentHTML += this.createHypothesisCard(hypothesis);
+                }
+                contentHTML += '</div>';
+            }
+            
+            contentArea.innerHTML = contentHTML;
+            
+            // Update chat context if available
+            if (window.reChat) {
+                window.reChat.setContext({
+                    type: 'thread',
+                    id: thread.id,
+                    title: thread.title,
+                    tags: thread.tags
+                });
+            }
+            
+        } catch (error) {
+            console.error('Error loading thread content:', error);
+            contentArea.innerHTML = '<div class="alert alert-danger">Error loading thread content</div>';
+        }
+    }
+
+    createHypothesisCard(hypothesis) {
+        const confidenceColor = hypothesis.confidence_score >= 0.7 ? 'success' : 
+                              hypothesis.confidence_score >= 0.4 ? 'warning' : 'danger';
+        
+        return `
+            <div class="card hypothesis-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6 class="card-title mb-0">Hypothesis</h6>
+                        <span class="badge bg-${confidenceColor}">
+                            ${Math.round(hypothesis.confidence_score * 100)}% confidence
+                        </span>
+                    </div>
+                    <p class="card-text">${this.escapeHtml(hypothesis.statement)}</p>
+                    <small class="text-muted">
+                        <i class="fas fa-clock"></i> ${this.formatDate(hypothesis.created_at)} | 
+                        <i class="fas fa-tag"></i> ${hypothesis.status}
+                    </small>
+                </div>
+            </div>
+        `;
+    }
+
+    // Background task methods
+    showBackgroundTasks() {
+        this.backgroundTasksModal.show();
+    }
+
+    refreshBackgroundTasks() {
+        // This would be implemented to refresh the background tasks
+        console.log('Refreshing background tasks');
+    }
+
+    filterTasks() {
+        const filter = document.getElementById('taskStatusFilter').value;
+        console.log('Filtering tasks by:', filter);
+        // Implementation would filter tasks based on status
+    }
 }
 
 // Global functions for HTML onclick handlers
@@ -515,6 +698,22 @@ function showLoginModal() {
 
 function handleLogin() {
     app.handleLogin();
+}
+
+function loginUser() {
+    app.loginUser();
+}
+
+function registerUser() {
+    app.registerUser();
+}
+
+function showLogin() {
+    app.showLogin();
+}
+
+function showRegistration() {
+    app.showRegistration();
 }
 
 function logout() {
@@ -529,11 +728,27 @@ function handleCreateThread() {
     app.handleCreateThread();
 }
 
+function showNewThreadModal() {
+    app.showCreateThreadModal();
+}
+
+function createNewThread() {
+    app.handleCreateThread();
+}
+
 function showCreateHypothesisModal() {
     app.showCreateHypothesisModal();
 }
 
 function handleCreateHypothesis() {
+    app.handleCreateHypothesis();
+}
+
+function showNewHypothesisModal() {
+    app.showCreateHypothesisModal();
+}
+
+function createNewHypothesis() {
     app.handleCreateHypothesis();
 }
 
@@ -543,6 +758,27 @@ function showCreateSiteModal() {
 
 function handleCreateSite() {
     app.handleCreateSite();
+}
+
+function selectThread(threadId) {
+    app.selectThread(threadId);
+}
+
+function showBackgroundTasks() {
+    app.showBackgroundTasks();
+}
+
+function refreshBackgroundTasks() {
+    app.refreshBackgroundTasks();
+}
+
+function filterTasks() {
+    app.filterTasks();
+}
+
+function filterThreadsByCategory() {
+    // To be implemented
+    console.log("Filtering threads by category");
 }
 
 // Initialize app when DOM is loaded

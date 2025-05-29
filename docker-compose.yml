@@ -1,23 +1,109 @@
-version: '3.8'
+version: '3.9'
 
 services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.slim
+      target: production
+    depends_on:
+      - redis
     ports:
       - "8080:8080"
     environment:
-      # Use cloud Neo4j Aura instance
+      # Database configuration
       - NEO4J_URI=neo4j+s://9ade235d.databases.neo4j.io
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=f1WMma2rOlQHPLCktIfb0mbXJMGs_6M87_1jMsQF49E
+      
+      # Server configuration
       - PORT=8080
+      - HOST=0.0.0.0
+      - WORKERS=1
+      
+      # Performance optimizations
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      
+      # Application settings (will be overridden by .env if present)
+      - LOG_LEVEL=info
+      - MAX_UPLOAD_SIZE=50MB
+      - CORS_ORIGINS=*
+      
+      # Google OAuth Configuration (placeholder values, override with .env)
+      - GOOGLE_CLIENT_ID=your_google_client_id_here
+      - GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+      - GOOGLE_REDIRECT_URI=http://localhost:8080/api/v1/auth/google/callback
+      
+      # JWT Configuration
+      - JWT_SECRET_KEY=your_jwt_secret_key_here
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRATION_HOURS=24
+      
+      # OpenAI Configuration
+      - OPENAI_API_KEY=your_openai_api_key_here
+      - OPENAI_MODEL=gpt-4-turbo-preview
+      - OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+      
+      # WebSocket Configuration
+      - WEBSOCKET_REDIS_URL=redis://redis:6379/1
+      
     volumes:
-      - ./backend:/app/backend
-      - ./data:/app/data
-      - ./frontend:/app/frontend
-      - ./.env:/app/.env
-    # Override for development: run as root with reload
+      # Mount source code for development
+      - ./backend:/app/backend:delegated
+      - ./frontend:/app/frontend:delegated
+      - ./data:/app/data:cached
+      # Mount environment file if it exists
+      - ./.env:/app/.env:ro
+    
+    # Development overrides
     user: root
-    command: sh -c "uvicorn backend.api.main:app --host 0.0.0.0 --port \${PORT:-8080} --reload"
+    command: >
+      sh -c "
+        export PYTHONPATH=/app &&
+        export HOST=0.0.0.0 &&
+        export PORT=8080 &&
+        echo 'Environment variables:' &&
+        echo 'HOST=' && echo $HOST &&
+        echo 'PORT=' && echo $PORT &&
+        echo 'PYTHONPATH=' && echo $PYTHONPATH &&
+        echo 'Starting uvicorn directly...' &&
+        uvicorn backend.api.main:app --host 0.0.0.0 --port 8080 --reload --log-level info
+      "
+    
+    # Resource limits for better container management
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    
+    # Restart policy
+    restart: unless-stopped
+
+# Redis service for WebSocket support
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+# Networks for better isolation
+networks:
+  default:
+    name: re-archaeology-network
+
+# Volumes
+volumes:
+  redis_data:
+    driver: local

@@ -43,6 +43,18 @@ class ResearchType(str, Enum):
     PEER_REVIEWED = "peer-reviewed"
     GRAY_LITERATURE = "gray literature"
 
+class TaskStatus(str, Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PAUSED = "paused"
+
+class EntityType(str, Enum):
+    THREAD = "thread"
+    SITE = "site"
+    RESEARCH = "research"
+    NARRATIVE = "narrative"
+
 # Base model with common fields
 class BaseNode(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -59,13 +71,45 @@ class Agent(BaseNode):
 class User(BaseNode):
     name: str
     email: str
+    google_id: Optional[str] = None  # For Google OAuth
+    profile_picture: Optional[str] = None
     registered_at: datetime = Field(default_factory=datetime.utcnow)
     role: UserRole = UserRole.READER
 
+class ThreadCategory(BaseNode):
+    name: str
+    description: str
+    icon: Optional[str] = None
+    order_index: int
+    
 class Thread(BaseNode):
     title: str
+    content: Optional[str] = None
     starter_user_id: str
+    category_id: str
     tags: List[str] = Field(default_factory=list)
+
+class ThreadComment(BaseNode):
+    content: str
+    author_id: str
+    thread_id: str
+    parent_comment_id: Optional[str] = None  # For replies
+    updated_at: Optional[datetime] = None
+
+class BackgroundTask(BaseNode):
+    name: str
+    description: str
+    progress: float = Field(ge=0.0, le=100.0, default=0.0)
+    status: TaskStatus = TaskStatus.RUNNING
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    estimated_completion: Optional[datetime] = None
+    agent_id: str
+
+class SearchEmbedding(BaseNode):
+    content: str
+    embedding_vector: List[float]
+    entity_type: EntityType
+    entity_id: str
 
 class Hypothesis(BaseNode):
     statement: str

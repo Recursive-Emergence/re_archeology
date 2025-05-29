@@ -14,6 +14,10 @@ SCHEMA_QUERIES = [
     "CREATE CONSTRAINT agent_id_unique IF NOT EXISTS FOR (a:Agent) REQUIRE a.id IS UNIQUE",
     "CREATE CONSTRAINT user_id_unique IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE", 
     "CREATE CONSTRAINT thread_id_unique IF NOT EXISTS FOR (t:Thread) REQUIRE t.id IS UNIQUE",
+    "CREATE CONSTRAINT thread_category_id_unique IF NOT EXISTS FOR (tc:ThreadCategory) REQUIRE tc.id IS UNIQUE",
+    "CREATE CONSTRAINT thread_comment_id_unique IF NOT EXISTS FOR (tc:ThreadComment) REQUIRE tc.id IS UNIQUE",
+    "CREATE CONSTRAINT background_task_id_unique IF NOT EXISTS FOR (bt:BackgroundTask) REQUIRE bt.id IS UNIQUE",
+    "CREATE CONSTRAINT search_embedding_id_unique IF NOT EXISTS FOR (se:SearchEmbedding) REQUIRE se.id IS UNIQUE",
     "CREATE CONSTRAINT hypothesis_id_unique IF NOT EXISTS FOR (h:Hypothesis) REQUIRE h.id IS UNIQUE",
     "CREATE CONSTRAINT site_id_unique IF NOT EXISTS FOR (s:Site) REQUIRE s.id IS UNIQUE",
     "CREATE CONSTRAINT geo_tile_id_unique IF NOT EXISTS FOR (g:GeoTile) REQUIRE g.id IS UNIQUE",
@@ -25,7 +29,11 @@ SCHEMA_QUERIES = [
     
     # Indexes for common queries
     "CREATE INDEX user_email_index IF NOT EXISTS FOR (u:User) ON (u.email)",
+    "CREATE INDEX user_google_id_index IF NOT EXISTS FOR (u:User) ON (u.google_id)",
     "CREATE INDEX thread_created_index IF NOT EXISTS FOR (t:Thread) ON (t.created_at)",
+    "CREATE INDEX thread_category_order_index IF NOT EXISTS FOR (tc:ThreadCategory) ON (tc.order_index)",
+    "CREATE INDEX thread_comment_created_index IF NOT EXISTS FOR (tc:ThreadComment) ON (tc.created_at)",
+    "CREATE INDEX background_task_status_index IF NOT EXISTS FOR (bt:BackgroundTask) ON (bt.status)",
     "CREATE INDEX site_status_index IF NOT EXISTS FOR (s:Site) ON (s.status)",
     "CREATE INDEX hypothesis_status_index IF NOT EXISTS FOR (h:Hypothesis) ON (h.status)",
     "CREATE INDEX pattern_score_index IF NOT EXISTS FOR (p:Pattern) ON (p.score)",

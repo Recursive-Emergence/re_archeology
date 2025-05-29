@@ -8,6 +8,10 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="css/chat.css" />
+    <link rel="stylesheet" href="css/earth_engine.css" />
+    <link rel="stylesheet" href="css/enhanced_features.css" />
+    <!-- Google OAuth -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -67,6 +71,72 @@
             justify-content: center;
             font-size: 0.8rem;
         }
+        .category-badge {
+            font-size: 0.7rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .task-indicator {
+            background-color: #007bff;
+            color: white;
+            border-radius: 50px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .task-indicator:hover {
+            background-color: #0056b3;
+        }
+        .chat-container {
+            height: 400px;
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+        }
+        .chat-messages {
+            height: 320px;
+            overflow-y: auto;
+            padding: 1rem;
+            background-color: #f8f9fa;
+        }
+        .chat-input {
+            border-top: 1px solid #dee2e6;
+            padding: 1rem;
+        }
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+        }
+        .message.user {
+            background-color: #007bff;
+            color: white;
+            margin-left: 2rem;
+        }
+        .message.assistant {
+            background-color: white;
+            border: 1px solid #dee2e6;
+            margin-right: 2rem;
+        }
+        .thread-category {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-bottom: 0.25rem;
+        }
+        .maps-section {
+            border-top: 1px solid #dee2e6;
+            margin-top: 1rem;
+            padding-top: 1rem;
+        }
+        .map-thumbnail {
+            width: 100%;
+            height: 150px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            margin-bottom: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -80,6 +150,16 @@
                 <div class="modal-body">
                     <div id="loginForm">
                         <h6>Login</h6>
+                        <div class="mb-3">
+                            <div id="g_id_onload"
+                                 data-client_id="YOUR_GOOGLE_CLIENT_ID"
+                                 data-callback="handleGoogleLogin"
+                                 data-auto_prompt="false">
+                            </div>
+                            <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="sign_in_with" data-shape="rectangular" data-logo_alignment="left"></div>
+                        </div>
+                        <hr>
+                        <h6>Or use email:</h6>
                         <div class="mb-3">
                             <input type="email" class="form-control" id="loginEmail" placeholder="Email">
                         </div>
@@ -114,11 +194,18 @@
     <!-- User Info Display -->
     <div class="user-info">
         <div class="dropdown">
+            <div class="task-indicator me-2" onclick="showBackgroundTasks()" title="Click to view background tasks">
+                <i class="fas fa-tasks"></i> <span id="activeTasksCount">0</span>
+            </div>
             <button class="btn btn-outline-primary dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown">
-                <i class="fas fa-user"></i> <span id="currentUserName">Loading...</span>
+                <img id="userAvatar" src="" alt="" class="rounded-circle me-1" style="width: 24px; height: 24px; display: none;">
+                <i class="fas fa-user" id="userIcon"></i> <span id="currentUserName">Loading...</span>
             </button>
             <ul class="dropdown-menu">
-                <li><a class="dropdown-item" href="#" onclick="logout()">Logout</a></li>
+                <li><a class="dropdown-item" href="#" onclick="showProfile()"><i class="fas fa-user-cog"></i> Profile</a></li>
+                <li><a class="dropdown-item" href="#" onclick="showBackgroundTasks()"><i class="fas fa-tasks"></i> Background Tasks</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="#" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
             </ul>
         </div>
     </div>
@@ -129,6 +216,15 @@
             <div class="col-md-3 sidebar p-0">
                 <div class="p-3 border-bottom">
                     <h5><i class="fas fa-comments"></i> Discussions</h5>
+                    <div class="mb-2">
+                        <select class="form-select form-select-sm" id="categoryFilter" onchange="filterThreadsByCategory()">
+                            <option value="">All Categories</option>
+                            <option value="Maps">Maps</option>
+                            <option value="Researches">Researches</option>
+                            <option value="Sites">Sites</option>
+                            <option value="RE Theory">RE Theory</option>
+                        </select>
+                    </div>
                     <button class="btn btn-sm btn-outline-light" onclick="showNewThreadModal()">
                         <i class="fas fa-plus"></i> New Thread
                     </button>
@@ -152,15 +248,54 @@
                 </div>
             </div>
 
-            <!-- Right Sidebar: Artifacts -->
+            <!-- Right Sidebar: Artifacts & AI Chat -->
             <div class="col-md-3 artifacts-pane">
-                <div class="p-3 border-bottom">
-                    <h5><i class="fas fa-folder-open"></i> Artifacts</h5>
-                </div>
-                <div class="p-3" id="artifactsArea">
-                    <div class="text-muted">
-                        <i class="fas fa-file-alt mb-2"></i>
-                        <p class="small">Related documents, images, and datasets will appear here.</p>
+                <ul class="nav nav-tabs" id="rightPanelTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="artifacts-tab" data-bs-toggle="tab" data-bs-target="#artifacts" type="button" role="tab">
+                            <i class="fas fa-folder-open"></i> Artifacts
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="ai-chat-tab" data-bs-toggle="tab" data-bs-target="#ai-chat" type="button" role="tab">
+                            <i class="fas fa-robot"></i> AI Chat
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="rightPanelTabContent">
+                    <div class="tab-pane fade show active" id="artifacts" role="tabpanel">
+                        <div class="p-3" id="artifactsArea">
+                            <div class="text-muted">
+                                <i class="fas fa-file-alt mb-2"></i>
+                                <p class="small">Related documents, images, and datasets will appear here.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="ai-chat" role="tabpanel">
+                        <div class="p-3">
+                            <div class="chat-container">
+                                <div class="chat-messages" id="chatMessages">
+                                    <div class="message assistant">
+                                        <small class="text-muted">AI Assistant</small>
+                                        <div>Hello! I'm your AI research assistant. I can help you with archaeological questions, analyze data, and provide insights. How can I assist you today?</div>
+                                    </div>
+                                </div>
+                                <div class="chat-input">
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="chatInput" placeholder="Ask about archaeology, sites, or theories..." onkeypress="handleChatKeyPress(event)">
+                                        <button class="btn btn-primary" type="button" onclick="sendChatMessage()">
+                                            <i class="fas fa-paper-plane"></i>
+                                        </button>
+                                    </div>
+                                    <div class="form-check form-check-sm mt-2">
+                                        <input class="form-check-input" type="checkbox" id="enableSemanticSearch" checked>
+                                        <label class="form-check-label small" for="enableSemanticSearch">
+                                            Enable semantic search
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -181,8 +316,29 @@
                         <input type="text" class="form-control" id="newThreadTitle" placeholder="Enter thread title">
                     </div>
                     <div class="mb-3">
+                        <label class="form-label">Category</label>
+                        <select class="form-select" id="newThreadCategory">
+                            <option value="Maps">Maps</option>
+                            <option value="Researches">Researches</option>
+                            <option value="Sites">Sites</option>
+                            <option value="RE Theory">RE Theory</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" id="newThreadDescription" rows="3" placeholder="Describe the topic of discussion..."></textarea>
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label">Tags (comma-separated)</label>
                         <input type="text" class="form-control" id="newThreadTags" placeholder="archaeology, amazon, patterns">
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="requireAuth">
+                            <label class="form-check-label" for="requireAuth">
+                                Require authentication to participate
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -219,10 +375,87 @@
         </div>
     </div>
 
+    <!-- Background Tasks Modal -->
+    <div class="modal fade" id="backgroundTasksModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-tasks"></i> Background Tasks</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <button class="btn btn-sm btn-outline-primary" onclick="refreshBackgroundTasks()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                        <div>
+                            <select class="form-select form-select-sm" id="taskStatusFilter" onchange="filterTasks()">
+                                <option value="">All Status</option>
+                                <option value="PENDING">Pending</option>
+                                <option value="RUNNING">Running</option>
+                                <option value="COMPLETED">Completed</option>
+                                <option value="FAILED">Failed</option>
+                                <option value="CANCELLED">Cancelled</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="backgroundTasksList">
+                        <!-- Tasks will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Map Modal -->
+    <div class="modal fade" id="addMapModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-map"></i> Add Map to Thread</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Analysis Type</label>
+                        <select class="form-select" id="analysisType" onchange="updateAnalysisParameters()">
+                            <option value="satellite_imagery">Satellite Imagery</option>
+                            <option value="archaeological_potential">Archaeological Potential</option>
+                            <option value="change_detection">Change Detection</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Area of Interest</label>
+                        <div id="mapSelector" style="height: 300px; border: 1px solid #dee2e6; border-radius: 0.375rem;">
+                            <!-- Leaflet map for area selection -->
+                        </div>
+                        <small class="form-text text-muted">Draw a rectangle on the map to select the area of interest</small>
+                    </div>
+                    
+                    <div id="analysisParameters">
+                        <!-- Parameters will be loaded based on analysis type -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="generateMap()">Generate Map</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="js/neo4j_api.js"></script>
-    <script src="js/thread_interface.js"></script>
-    <script src="js/chat_interface.js"></script>
     <script src="js/main_app.js"></script>
+    <!-- Enhanced feature services -->
+    <script src="js/auth_service.js"></script>
+    <script src="js/ai_chat_service.js"></script>
+    <script src="js/background_tasks_service.js"></script>
+    <script src="js/earth_engine_service.js"></script>
+    <script src="js/thread_websocket_service.js"></script>
 </body>
 </html>
