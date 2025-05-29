@@ -2,8 +2,26 @@ import os
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from .env file
+# Check multiple possible locations for .env file
+env_paths = [
+    "/app/.env",  # Docker container path
+    ".env",       # Local development path
+    "../.env",    # If running from backend directory
+    "../../.env"  # If running from nested directory
+]
+
+env_loaded = False
+for env_path in env_paths:
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+        env_loaded = True
+        print(f"Loaded environment from: {env_path}")
+        break
+
+if not env_loaded:
+    print("Warning: No .env file found, using default values")
+    load_dotenv()  # Try default behavior
 
 class Settings(BaseSettings):
     # Base configuration
@@ -18,7 +36,7 @@ class Settings(BaseSettings):
     # Google OAuth configuration
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
-    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/v1/auth/google/callback")
+    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8080/api/v1/auth/google/callback")
     
     # JWT configuration
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
@@ -41,3 +59,13 @@ settings = Settings()
 
 def get_settings() -> Settings:
     return settings
+
+def print_neo4j_config():
+    """Debug function to print current Neo4j configuration"""
+    print("=" * 50)
+    print("NEO4J CONFIGURATION DEBUG")
+    print("=" * 50)
+    print(f"NEO4J_URI: {settings.NEO4J_URI}")
+    print(f"NEO4J_USER: {settings.NEO4J_USER}")
+    print(f"NEO4J_PASSWORD: {'*' * len(settings.NEO4J_PASSWORD) if settings.NEO4J_PASSWORD else 'NOT SET'}")
+    print("=" * 50)

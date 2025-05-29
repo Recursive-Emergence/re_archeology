@@ -5,19 +5,73 @@
 
 class AuthService {
     constructor() {
-        this.baseUrl = '/api/auth';
+        this.baseUrl = '/auth';
         this.currentUser = null;
         this.token = localStorage.getItem('auth_token');
+        this.googleClientId = null;
         
         // Initialize Google OAuth
         this.initializeGoogleAuth();
     }
 
-    initializeGoogleAuth() {
+    async initializeGoogleAuth() {
+        try {
+            // Fetch Google Client ID from backend
+            const configResponse = await fetch(`${this.baseUrl}/config`);
+            if (configResponse.ok) {
+                const config = await configResponse.json();
+                this.googleClientId = config.google_client_id;
+                
+                // Update the Google OAuth button with the correct client ID
+                this.updateGoogleAuthButton();
+            } else {
+                console.error('Failed to fetch auth configuration');
+            }
+        } catch (error) {
+            console.error('Error fetching auth configuration:', error);
+        }
+
         // Google OAuth callback
         window.handleGoogleLogin = (response) => {
             this.loginWithGoogle(response.credential);
         };
+    }
+
+    updateGoogleAuthButton() {
+        const googleOnLoad = document.getElementById('g_id_onload');
+        if (googleOnLoad && this.googleClientId) {
+            googleOnLoad.setAttribute('data-client_id', this.googleClientId);
+            
+            // Reinitialize Google OAuth with the correct client ID
+            if (window.google && window.google.accounts) {
+                window.google.accounts.id.initialize({
+                    client_id: this.googleClientId,
+                    callback: window.handleGoogleLogin,
+                    auto_prompt: false
+                });
+                window.google.accounts.id.renderButton(
+                    document.querySelector('.g_id_signin'),
+                    { 
+                        type: 'standard', 
+                        size: 'large', 
+                        theme: 'outline', 
+                        text: 'sign_in_with', 
+                        shape: 'rectangular', 
+                        logo_alignment: 'left' 
+                    }
+                );
+            }
+        }
+    }
+
+    signInWithGoogle() {
+        // Programmatically trigger Google Sign-In
+        if (window.google && window.google.accounts) {
+            window.google.accounts.id.prompt();
+        } else {
+            console.error('Google accounts library not loaded');
+            this.showError('Google Sign-In is not available. Please refresh the page and try again.');
+        }
     }
 
     async loginWithGoogle(credential) {
@@ -36,6 +90,12 @@ class AuthService {
                 this.currentUser = data.user;
                 this.updateUserDisplay(data.user);
                 this.hideAuthModal();
+                
+                // Notify the main application about successful authentication
+                if (window.app && typeof window.app.setUser === 'function') {
+                    window.app.setUser(data.user);
+                }
+                
                 return data;
             } else {
                 throw new Error('Google authentication failed');
@@ -220,35 +280,13 @@ class AuthService {
 const authService = new AuthService();
 
 // Authentication-related functions for the UI
-function loginUser() {
-    const email = document.getElementById('loginEmail').value;
-    if (email) {
-        authService.loginWithEmail(email);
-    }
-}
-
-function registerUser() {
-    const name = document.getElementById('registerName').value;
-    const email = document.getElementById('registerEmail').value;
-    const role = document.getElementById('registerRole').value;
-
-    if (name && email) {
-        authService.register({ name, email, role });
-    }
+function signInWithGoogle() {
+    // This function will be called by the Google Sign-In button
+    authService.signInWithGoogle();
 }
 
 function logout() {
     authService.logout();
-}
-
-function showRegistration() {
-    document.getElementById('loginForm').style.display = 'none';
-    document.getElementById('registerForm').style.display = 'block';
-}
-
-function showLogin() {
-    document.getElementById('loginForm').style.display = 'block';
-    document.getElementById('registerForm').style.display = 'none';
 }
 
 function showProfile() {
@@ -256,12 +294,5 @@ function showProfile() {
     console.log('Profile view not yet implemented');
 }
 
-// Initialize authentication on page load
-document.addEventListener('DOMContentLoaded', async () => {
-    const user = await authService.getCurrentUser();
-    if (!user) {
-        authService.showAuthModal();
-    } else {
-        authService.updateUserDisplay(user);
-    }
-});
+// Note: Authentication initialization is now handled by the main applications
+// (MainDashboardApp and MVP2App) to avoid conflicts with the auth modal

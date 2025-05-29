@@ -24,6 +24,7 @@ settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["authentication"])
 security = HTTPBearer()
 
+# Request and response models
 class GoogleTokenRequest(BaseModel):
     token: str
 
@@ -39,6 +40,23 @@ class UserProfile(BaseModel):
     email: str
     profile_picture: Optional[str] = None
     role: str
+
+class TestLoginRequest(BaseModel):
+    email: str
+    name: Optional[str] = "Test User"
+
+# Additional request models
+class EmailLoginRequest(BaseModel):
+    email: str
+
+class UserRegistrationRequest(BaseModel):
+    email: str
+    name: str
+    role: UserRole = UserRole.READER
+
+# Configuration response model
+class AuthConfigResponse(BaseModel):
+    google_client_id: str
 
 def create_access_token(data: dict) -> str:
     """Create JWT access token."""
@@ -136,17 +154,17 @@ async def google_auth(request: GoogleTokenRequest):
     MATCH (u:User {google_id: $google_id})
     RETURN u
     """
-    result = await neo4j_db.execute_query(query, google_id=google_id)
+    result = neo4j_db.execute_query(query, parameters={"google_id": google_id})
     
-    if result.records:
+    if result:
         # User exists, update last login
-        user_data = dict(result.records[0]['u'])
+        user_data = dict(result[0]['u'])
         update_query = """
         MATCH (u:User {google_id: $google_id})
         SET u.last_login = datetime()
         RETURN u
         """
-        await neo4j_db.execute_query(update_query, google_id=google_id)
+        neo4j_db.execute_query(update_query, parameters={"google_id": google_id})
     else:
         # Create new user
         new_user = User(
@@ -173,22 +191,158 @@ async def google_auth(request: GoogleTokenRequest):
         """
         
         try:
-            result = await neo4j_db.execute_query(
+            result = neo4j_db.execute_query(
                 create_query,
-                id=new_user.id,
-                name=new_user.name,
-                email=new_user.email,
-                google_id=new_user.google_id,
-                profile_picture=new_user.profile_picture,
-                role=new_user.role.value
+                parameters={
+                    "id": new_user.id,
+                    "name": new_user.name,
+                    "email": new_user.email,
+                    "google_id": new_user.google_id,
+                    "profile_picture": new_user.profile_picture,
+                    "role": new_user.role.value
+                }
             )
-            user_data = dict(result.records[0]['u'])
+            user_data = dict(result[0]['u'])
         except Exception as e:
             logger.error(f"Error creating new user in DB: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Internal server error"
             )
+    
+    # Create JWT token
+    token_data = {
+        "sub": user_data['id'],
+        "email": user_data['email'],
+        "name": user_data['name']
+    }
+    access_token = create_access_token(token_data)
+    
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.JWT_EXPIRATION_HOURS * 3600,
+        user={
+            "id": user_data['id'],
+            "name": user_data['name'],
+            "email": user_data['email'],
+            "profile_picture": user_data.get('profile_picture'),
+            "role": user_data['role']
+        }
+    )
+
+@router.post("/login", response_model=TokenResponse)
+async def login_with_email(request: EmailLoginRequest):
+    """Login with email only (simplified for MVP)."""
+    email = request.email
+    
+    # Check if user exists
+    query = """
+    MATCH (u:User {email: $email})
+    RETURN u
+    """
+    result = neo4j_db.execute_query(query, parameters={"email": email})
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found. Please register first or use Google login."
+        )
+    
+    # User exists, update last login
+    user_data = dict(result[0]['u'])
+    update_query = """
+    MATCH (u:User {email: $email})
+    SET u.last_login = datetime()
+    RETURN u
+    """
+    neo4j_db.execute_query(update_query, parameters={"email": email})
+    
+    # Create JWT token
+    token_data = {
+        "sub": user_data['id'],
+        "email": user_data['email'],
+        "name": user_data['name']
+    }
+    access_token = create_access_token(token_data)
+    
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.JWT_EXPIRATION_HOURS * 3600,
+        user={
+            "id": user_data['id'],
+            "name": user_data['name'],
+            "email": user_data['email'],
+            "profile_picture": user_data.get('profile_picture'),
+            "role": user_data['role']
+        }
+    )
+
+@router.post("/register", response_model=TokenResponse)
+async def register_user(request: UserRegistrationRequest):
+    """Register new user with email and name (simplified for MVP)."""
+    email = request.email
+    name = request.name
+    role = request.role
+    
+    # Check if user already exists
+    query = """
+    MATCH (u:User {email: $email})
+    RETURN u
+    """
+    result = neo4j_db.execute_query(query, parameters={"email": email})
+    
+    if result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with this email already exists. Please login instead."
+        )
+    
+    # Create new user
+    import uuid
+    new_user = User(
+        name=name,
+        email=email,
+        google_id=f"email_{uuid.uuid4().hex[:8]}",  # Generate fake google_id for email users
+        profile_picture=None,
+        role=role
+    )
+    
+    create_query = """
+    CREATE (u:User {
+        id: $id,
+        name: $name,
+        email: $email,
+        google_id: $google_id,
+        profile_picture: $profile_picture,
+        role: $role,
+        created_at: datetime(),
+        registered_at: datetime(),
+        last_login: datetime()
+    })
+    RETURN u
+    """
+    
+    try:
+        result = neo4j_db.execute_query(
+            create_query,
+            parameters={
+                "id": new_user.id,
+                "name": new_user.name,
+                "email": new_user.email,
+                "google_id": new_user.google_id,
+                "profile_picture": new_user.profile_picture,
+                "role": new_user.role.value
+            }
+        )
+        user_data = dict(result[0]['u'])
+    except Exception as e:
+        logger.error(f"Error creating new user in DB: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
     
     # Create JWT token
     token_data = {
@@ -218,15 +372,39 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
     MATCH (u:User {id: $user_id})
     RETURN u
     """
-    result = await neo4j_db.execute_query(query, user_id=current_user['user_id'])
+    result = neo4j_db.execute_query(query, parameters={"user_id": current_user['user_id']})
     
-    if not result.records:
+    if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
-    user_data = dict(result.records[0]['u'])
+    user_data = dict(result[0]['u'])
+    return UserProfile(
+        id=user_data['id'],
+        name=user_data['name'],
+        email=user_data['email'],
+        profile_picture=user_data.get('profile_picture'),
+        role=user_data['role']
+    )
+
+@router.get("/me", response_model=UserProfile)
+async def get_current_user_profile(current_user: dict = Depends(get_current_user)):
+    """Get current user profile (alias for /profile endpoint expected by frontend)."""
+    query = """
+    MATCH (u:User {id: $user_id})
+    RETURN u
+    """
+    result = neo4j_db.execute_query(query, parameters={"user_id": current_user['user_id']})
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    user_data = dict(result[0]['u'])
     return UserProfile(
         id=user_data['id'],
         name=user_data['name'],
@@ -254,3 +432,101 @@ async def refresh_token(current_user: dict = Depends(get_current_user)):
         "token_type": "bearer",
         "expires_in": settings.JWT_EXPIRATION_HOURS * 3600
     }
+
+@router.post("/test-login", response_model=TokenResponse)
+async def test_login(request: TestLoginRequest):
+    """Test login endpoint for development - bypasses Google OAuth."""
+    email = request.email
+    name = request.name or "Test User"
+    
+    # Check if user exists
+    query = """
+    MATCH (u:User {email: $email})
+    RETURN u
+    """
+    result = neo4j_db.execute_query(query, parameters={"email": email})
+    
+    if result:
+        # User exists, update last login
+        user_data = dict(result[0]['u'])
+        update_query = """
+        MATCH (u:User {email: $email})
+        SET u.last_login = datetime()
+        RETURN u
+        """
+        neo4j_db.execute_query(update_query, parameters={"email": email})
+    else:
+        # Create new test user
+        from backend.models.ontology_models import User, UserRole
+        import uuid
+        
+        new_user = User(
+            name=name,
+            email=email,
+            google_id=f"test_{uuid.uuid4().hex[:8]}",  # Generate fake google_id for test
+            profile_picture=None,
+            role=UserRole.CONTRIBUTOR
+        )
+        
+        create_query = """
+        CREATE (u:User {
+            id: $id,
+            name: $name,
+            email: $email,
+            google_id: $google_id,
+            profile_picture: $profile_picture,
+            role: $role,
+            created_at: datetime(),
+            registered_at: datetime(),
+            last_login: datetime()
+        })
+        RETURN u
+        """
+        
+        try:
+            result = neo4j_db.execute_query(
+                create_query,
+                parameters={
+                    "id": new_user.id,
+                    "name": new_user.name,
+                    "email": new_user.email,
+                    "google_id": new_user.google_id,
+                    "profile_picture": new_user.profile_picture,
+                    "role": new_user.role.value
+                }
+            )
+            user_data = dict(result[0]['u'])
+        except Exception as e:
+            logger.error(f"Error creating new test user in DB: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Internal server error"
+            )
+    
+    # Create JWT token
+    token_data = {
+        "sub": user_data['id'],
+        "email": user_data['email'],
+        "name": user_data['name']
+    }
+    access_token = create_access_token(token_data)
+    
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.JWT_EXPIRATION_HOURS * 3600,
+        user={
+            "id": user_data['id'],
+            "name": user_data['name'],
+            "email": user_data['email'],
+            "profile_picture": user_data.get('profile_picture'),
+            "role": user_data['role']
+        }
+    )
+
+@router.get("/config", response_model=AuthConfigResponse)
+async def get_auth_config():
+    """Get authentication configuration for frontend"""
+    return AuthConfigResponse(
+        google_client_id=settings.GOOGLE_CLIENT_ID
+    )

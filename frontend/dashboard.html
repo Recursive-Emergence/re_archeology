@@ -137,6 +137,41 @@
             cursor: pointer;
             margin-bottom: 0.5rem;
         }
+        /* Enhanced Auth Modal Styles */
+        .auth-modal-content {
+            border: none;
+            border-radius: 1rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        .auth-modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 1rem 1rem 0 0;
+            text-align: center;
+            padding: 2rem 1.5rem 1.5rem;
+            border-bottom: none;
+        }
+        .auth-modal-body {
+            padding: 2rem;
+            background: linear-gradient(to bottom, #f8f9fa 0%, #ffffff 100%);
+            border-radius: 0 0 1rem 1rem;
+        }
+        .auth-welcome-text {
+            color: #495057;
+            font-size: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .google-signin-container {
+            display: flex;
+            justify-content: center;
+            margin: 2rem 0;
+        }
+        .auth-terms {
+            font-size: 0.85rem;
+            color: #6c757d;
+            line-height: 1.5;
+            margin-top: 1.5rem;
+        }
     </style>
 </head>
 <body>
@@ -148,43 +183,24 @@
                     <h5 class="modal-title">Welcome to RE-Archaeology Agent</h5>
                 </div>
                 <div class="modal-body">
-                    <div id="loginForm">
-                        <h6>Login</h6>
+                    <div class="text-center">
+                        <div class="mb-4">
+                            <h6>Sign in to access all features</h6>
+                            <p class="text-muted">Use your Google account to get started</p>
+                        </div>
                         <div class="mb-3">
                             <div id="g_id_onload"
-                                 data-client_id="YOUR_GOOGLE_CLIENT_ID"
                                  data-callback="handleGoogleLogin"
                                  data-auto_prompt="false">
                             </div>
                             <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="sign_in_with" data-shape="rectangular" data-logo_alignment="left"></div>
                         </div>
-                        <hr>
-                        <h6>Or use email:</h6>
-                        <div class="mb-3">
-                            <input type="email" class="form-control" id="loginEmail" placeholder="Email">
+                        <div class="mt-4">
+                            <small class="text-muted">
+                                By signing in, you agree to our terms of service and can create threads, 
+                                participate in discussions, and access AI-powered research tools.
+                            </small>
                         </div>
-                        <button class="btn btn-primary w-100" onclick="loginUser()">Login</button>
-                        <hr>
-                        <button class="btn btn-outline-secondary w-100" onclick="showRegistration()">New User? Register</button>
-                    </div>
-                    <div id="registerForm" style="display: none;">
-                        <h6>Register</h6>
-                        <div class="mb-3">
-                            <input type="text" class="form-control" id="registerName" placeholder="Full Name">
-                        </div>
-                        <div class="mb-3">
-                            <input type="email" class="form-control" id="registerEmail" placeholder="Email">
-                        </div>
-                        <div class="mb-3">
-                            <select class="form-control" id="registerRole">
-                                <option value="reader">Reader</option>
-                                <option value="contributor">Contributor</option>
-                                <option value="researcher">Researcher</option>
-                            </select>
-                        </div>
-                        <button class="btn btn-success w-100" onclick="registerUser()">Register</button>
-                        <hr>
-                        <button class="btn btn-outline-secondary w-100" onclick="showLogin()">Back to Login</button>
                     </div>
                 </div>
             </div>
@@ -450,12 +466,13 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="js/neo4j_api.js"></script>
-    <script src="js/main_app.js"></script>
     <!-- Enhanced feature services -->
     <script src="js/auth_service.js"></script>
+    <script src="js/thread_service.js"></script>
     <script src="js/ai_chat_service.js"></script>
     <script src="js/background_tasks_service.js"></script>
     <script src="js/earth_engine_service.js"></script>
     <script src="js/thread_websocket_service.js"></script>
+    <script src="js/main_dashboard.js"></script>
 </body>
 </html>
