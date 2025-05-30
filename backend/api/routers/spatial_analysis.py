@@ -1,6 +1,6 @@
 """
-Enhanced Earth Engine Integration Router for RE-Archaeology Framework MVP2
-Provides thread-specific map generation and background task integration
+Spatial Analysis Router for RE-Archaeology Framework
+Provides spatial analysis functionality for archaeological research
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -18,7 +18,7 @@ from ...utils.config import get_settings
 from .auth import get_current_user
 from .background_tasks import task_registry, manager
 
-router = APIRouter(prefix="/api/earth-engine", tags=["earth-engine"])
+router = APIRouter(prefix="/api/v1/spatial-analysis", tags=["spatial-analysis"])
 
 # Mock Earth Engine analysis functions (replace with actual EE integration)
 class EarthEngineService:

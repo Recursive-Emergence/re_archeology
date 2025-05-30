@@ -46,7 +46,7 @@ def readiness_check():
 # Import and include routers
 from backend.api.routers import (
     users, hypotheses, sites, websocket,
-    auth, discussion_threads, ai_chat, background_tasks, spatial_analysis
+    auth, discussion_threads, ai_chat, background_tasks, spatial_analysis, earth_engine_service
 )
 
 # Core routers
@@ -56,10 +56,11 @@ app.include_router(sites.router, prefix=settings.API_V1_STR, tags=["sites"])
 
 # Enhanced feature routers
 app.include_router(auth.router, tags=["authentication"])
-app.include_router(discussion_threads.router, tags=["discussion-threads"])
-app.include_router(ai_chat.router, tags=["ai-chat"])
-app.include_router(background_tasks.router, tags=["background-tasks"])
+app.include_router(discussion_threads.router, prefix=settings.API_V1_STR, tags=["discussion-threads"])
+app.include_router(ai_chat.router, prefix=settings.API_V1_STR, tags=["ai-chat"])
+app.include_router(background_tasks.router, prefix=settings.API_V1_STR, tags=["background-tasks"])
 app.include_router(spatial_analysis.router, tags=["spatial-analysis"])
+app.include_router(earth_engine_service.router, prefix=settings.API_V1_STR, tags=["earth-engine"])
 app.include_router(websocket.router, tags=["websockets"])
 
 # Mount static files for frontend

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug JavaScript</title>
+</head>
+<body>
+    <h1>JavaScript Debug</h1>
+    <div id="status">Checking...</div>
+    
+    <script>
+        window.addEventListener('error', function(e) {
+            console.error('JavaScript Error:', e.error);
+            document.getElementById('status').innerHTML += '<br>Error: ' + e.message + ' at ' + e.filename + ':' + e.lineno;
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('status').innerHTML = 'DOM loaded';
+            
+            // Check if service classes exist
+            const checks = [
+                'AuthService',
+                'ThreadService', 
+                'AIChatService',
+                'BackgroundTasksService',
+                'EarthEngineService'
+            ];
+            
+            checks.forEach(className => {
+                try {
+                    if (typeof window[className] === 'function') {
+                        document.getElementById('status').innerHTML += '<br>' + className + ': OK';
+                    } else {
+                        document.getElementById('status').innerHTML += '<br>' + className + ': NOT FOUND';
+                    }
+                } catch (e) {
+                    document.getElementById('status').innerHTML += '<br>' + className + ': ERROR - ' + e.message;
+                }
+            });
+            
+            // Try to create ChatApp
+            try {
+                const app = new ChatApp();
+                document.getElementById('status').innerHTML += '<br>ChatApp: Created successfully';
+            } catch (e) {
+                document.getElementById('status').innerHTML += '<br>ChatApp: ERROR - ' + e.message;
+            }
+        });
+    </script>
+    
+    <script src="js/auth_service.js"></script>
+    <script src="js/thread_service.js"></script>
+    <script src="js/ai_chat_service.js"></script>
+    <script src="js/background_tasks_service.js"></script>
+    <script src="js/earth_engine_service.js"></script>
+    <script src="js/chat_app.js"></script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 Neo4j CRUD operations for ontology entities.
 """
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 from backend.core.neo4j_database import neo4j_db
 from backend.models.ontology_models import *
 import json
@@ -211,3 +212,29 @@ class SiteCRUD(Neo4jCRUD):
             "lat": lat, "lon": lon, "delta": delta
         })
         return [Site(**dict(record["s"])) for record in results]
+
+class BackgroundTaskCRUD(Neo4jCRUD):
+    @staticmethod
+    def create_task(task_data: CreateBackgroundTaskRequest) -> BackgroundTask:
+        """Create a new background task."""
+        task = BackgroundTask(**task_data.dict())
+        result = Neo4jCRUD.create_node("BackgroundTask", task.dict())
+        return BackgroundTask(**result)
+
+    @staticmethod
+    def get_task_by_id(task_id: str) -> Optional[BackgroundTask]:
+        """Get a background task by its ID."""
+        return Neo4jCRUD.get_node_by_id("BackgroundTask", task_id)
+
+    @staticmethod
+    def update_task_status(task_id: str, status: TaskStatus, result: Optional[Dict[str, Any]] = None) -> Optional[BackgroundTask]:
+        """Update the status and result of a background task."""
+        properties = {"status": status.value, "updated_at": datetime.utcnow()}
+        if result:
+            properties["result"] = json.dumps(result)
+        return Neo4jCRUD.update_node("BackgroundTask", task_id, properties)
+
+    @staticmethod
+    def get_all_tasks(limit: int = 100) -> List[BackgroundTask]:
+        """Get all background tasks."""
+        return Neo4jCRUD.get_all_nodes("BackgroundTask", limit=limit)

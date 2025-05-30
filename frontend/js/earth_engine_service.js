@@ -1,5 +1,5 @@
 /**
- * Earth Engine Service for RE-Archaeology Framework MVP2
+ * Earth Engine Service for RE-Archaeology Framework
  * Handles map operations, layer management, and Earth Engine integration
  */
 
@@ -27,6 +27,17 @@ class EarthEngineService {
     setDependencies(backgroundTaskService, authService) {
         this.backgroundTaskService = backgroundTaskService;
         this.authService = authService;
+    }
+    
+    /**
+     * Initialize the Earth Engine service
+     * This method is called during application startup
+     */
+    async initialize() {
+        console.log('Initializing Earth Engine Service');
+        // This method will be called by the ChatApp during initialization
+        // Add actual initialization logic here when we have a real API
+        return true;
     }
 
     /**
@@ -405,6 +416,215 @@ class EarthEngineService {
         
         if (state.center) {
             this.map.setView(state.center, state.zoom || this.map.getZoom());
+        }
+    }
+
+    /**
+     * Get maps for a thread
+     */
+    async getMaps(threadId) {
+        try {
+            // Try to fetch from API
+            try {
+                const response = await fetch(`/api/v1/maps/thread/${threadId}`, {
+                    headers: this.authService ? this.authService.getAuthHeaders() : {}
+                });
+
+                if (response.ok) {
+                    return await response.json();
+                }
+            } catch (error) {
+                console.warn('API not available, using mock map data');
+            }
+            
+            // Return mock data for thread 1
+            if (threadId === 'thread-1') {
+                return [
+                    {
+                        id: 'map-1',
+                        title: 'Archaeological Potential Analysis',
+                        type: 'archaeological_potential',
+                        thread_id: threadId,
+                        center: [25.135, 35.342],
+                        zoom: 13,
+                        layers: [
+                            {
+                                id: 'base',
+                                name: 'Base Layer',
+                                type: 'satellite'
+                            },
+                            {
+                                id: 'potential',
+                                name: 'Archaeological Potential',
+                                type: 'heatmap'
+                            }
+                        ]
+                    }
+                ];
+            }
+            
+            return [];
+        } catch (error) {
+            console.error('Error fetching maps for thread:', error);
+            return [];
+        }
+    }
+    
+    /**
+     * Render a map in the specified container
+     */
+    renderMap(mapData, containerId) {
+        try {
+            console.log(`Rendering map in container: ${containerId}`);
+            const container = document.getElementById(containerId);
+            
+            if (!container) {
+                console.error(`Map container ${containerId} not found`);
+                return;
+            }
+            
+            // For this mock implementation, we'll just display a simple static map image
+            container.innerHTML = `
+                <div class="mock-map" style="width: 100%; height: 300px; background-color: #c2d4e2; display: flex; align-items: center; justify-content: center;">
+                    <div style="text-align: center;">
+                        <h4>${mapData.title}</h4>
+                        <p>Mock Map: ${mapData.type}</p>
+                        <p>Coordinates: ${mapData.center[0]}, ${mapData.center[1]}</p>
+                    </div>
+                </div>
+            `;
+            
+            console.log(`Map rendered in container ${containerId}`);
+        } catch (error) {
+            console.error('Error rendering map:', error);
+        }
+    }
+    
+    /**
+     * Initialize map selector for the "Add Map" form
+     */
+    initializeMapSelector() {
+        try {
+            console.log('Initializing map selector');
+            const mapSelectorContainer = document.getElementById('map-selector');
+            
+            if (!mapSelectorContainer) {
+                console.error('Map selector container not found');
+                return;
+            }
+            
+            // Create a simple mock map selector
+            mapSelectorContainer.innerHTML = `
+                <div class="mock-map-selector" style="width: 100%; height: 300px; background-color: #d4e2c2; display: flex; align-items: center; justify-content: center;">
+                    <div style="text-align: center;">
+                        <h4>Select Area of Interest</h4>
+                        <p>Click on the map to select an area</p>
+                        <button id="select-area-btn" class="btn btn-primary">Select This Area</button>
+                    </div>
+                </div>
+            `;
+            
+            // Add event listener to the select button
+            const selectBtn = document.getElementById('select-area-btn');
+            if (selectBtn) {
+                selectBtn.addEventListener('click', () => {
+                    // Mock selected area
+                    this.selectedArea = {
+                        type: 'Polygon',
+                        coordinates: [
+                            [25.13, 35.34],
+                            [25.14, 35.34],
+                            [25.14, 35.35],
+                            [25.13, 35.35],
+                            [25.13, 35.34]
+                        ]
+                    };
+                    
+                    selectBtn.textContent = 'Area Selected';
+                    selectBtn.disabled = true;
+                });
+            }
+            
+            console.log('Map selector initialized');
+        } catch (error) {
+            console.error('Error initializing map selector:', error);
+        }
+    }
+    
+    /**
+     * Get the selected area from the map selector
+     */
+    getSelectedArea() {
+        return this.selectedArea;
+    }
+    
+    /**
+     * Get analysis parameters based on analysis type
+     */
+    getAnalysisParameters(analysisType) {
+        // Return default parameters based on analysis type
+        switch (analysisType) {
+            case 'satellite_imagery':
+                return { 
+                    startDate: '2020-01-01', 
+                    endDate: '2023-01-01',
+                    collection: 'LANDSAT/LC08/C02/T1_TOA'
+                };
+            case 'archaeological_potential':
+                return {
+                    variables: ['elevation', 'slope', 'distance_to_water'],
+                    model: 'random_forest'
+                };
+            case 'change_detection':
+                return {
+                    baselineDate: '2018-01-01',
+                    comparisonDate: '2023-01-01'
+                };
+            default:
+                return {};
+        }
+    }
+    
+    /**
+     * Create map analysis task
+     */
+    async createMapAnalysis(threadId, analysisType, areaOfInterest, parameters) {
+        try {
+            // Try to post to API
+            try {
+                const response = await fetch('/api/v1/maps/analysis', {
+                    method: 'POST',
+                    headers: this.authService ? this.authService.getAuthHeaders() : {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        thread_id: threadId,
+                        type: analysisType,
+                        area_of_interest: areaOfInterest,
+                        parameters: parameters
+                    })
+                });
+
+                if (response.ok) {
+                    return await response.json();
+                }
+            } catch (error) {
+                console.warn('API not available, using mock map analysis task');
+            }
+            
+            // Return a mock task
+            return {
+                id: 'task-' + Date.now(),
+                title: `${analysisType.replace('_', ' ')} Analysis`,
+                status: 'PENDING',
+                progress: 0,
+                thread_id: threadId,
+                type: 'MAP_ANALYSIS',
+                created_at: new Date().toISOString()
+            };
+        } catch (error) {
+            console.error('Error creating map analysis task:', error);
+            throw error;
         }
     }
 }

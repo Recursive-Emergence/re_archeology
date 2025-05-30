@@ -1,6 +1,6 @@
-# RE-Archaeology Framework MVP2 - User Guide
+# RE-Archaeology Framework - User Guide
 
-Welcome to the enhanced RE-Archaeology Framework! This guide covers all the new features and capabilities introduced in MVP2.
+Welcome to the RE-Archaeology Framework! This guide covers all the features and capabilities of the platform.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Welcome to the enhanced RE-Archaeology Framework! This guide covers all the new 
 
 1. Navigate to the RE-Archaeology dashboard
 2. Sign in with your Google account
-3. Explore the enhanced interface with new MVP2 features
+3. Explore the interface with new features
 
 ## Google Authentication
 
@@ -53,7 +53,7 @@ Welcome to the enhanced RE-Archaeology Framework! This guide covers all the new 
 
 ### Thread Categories
 
-MVP2 introduces organized thread categories:
+The platform introduces organized thread categories:
 
 #### 📍 Maps
 - Geographical visualizations and satellite imagery
@@ -240,7 +240,7 @@ MVP2 introduces organized thread categories:
 
 ### WebSocket Connections
 
-MVP2 includes real-time capabilities:
+The platform includes real-time capabilities:
 
 #### Live Thread Updates
 - New comments appear instantly
@@ -345,7 +345,7 @@ For developers and advanced users:
 
 ## What's Next?
 
-MVP2 represents a major enhancement to the RE-Archaeology Framework. Future updates will include:
+The future updates will include:
 
 - Enhanced 3D visualization capabilities
 - Expanded AI analysis tools
@@ -364,4 +364,4 @@ We value your feedback and suggestions for improving the platform. Please use th
 ---
 
 *Last updated: [Current Date]*
-*Version: MVP2*
+*Version: 1.0*

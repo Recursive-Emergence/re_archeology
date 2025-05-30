@@ -175,7 +175,12 @@ class AIChatService {
     }
 
     addMessageToDisplay(message) {
-        const messagesContainer = document.getElementById('chatMessages');
+        const messagesContainer = document.getElementById('chat-messages'); // Fix element ID
+        if (!messagesContainer) {
+            console.warn('Chat messages container not found');
+            return;
+        }
+        
         const messageElement = this.createMessageElement(message);
         messagesContainer.appendChild(messageElement);
         
@@ -241,7 +246,12 @@ class AIChatService {
     }
 
     displayChatHistory() {
-        const messagesContainer = document.getElementById('chatMessages');
+        const messagesContainer = document.getElementById('chat-messages'); // Fix element ID
+        if (!messagesContainer) {
+            console.warn('Chat messages container not found');
+            return;
+        }
+        
         messagesContainer.innerHTML = '';
         
         // Add welcome message if no history
@@ -262,7 +272,11 @@ class AIChatService {
     }
 
     clearChatDisplay() {
-        const messagesContainer = document.getElementById('chatMessages');
+        const messagesContainer = document.getElementById('chat-messages');
+        if (!messagesContainer) {
+            console.warn('Chat messages container not found');
+            return;
+        }
         messagesContainer.innerHTML = '';
         this.displayChatHistory(); // Show welcome message
     }
@@ -352,6 +366,12 @@ function toggleSemanticSearch() {
 
 // Initialize chat on page load
 document.addEventListener('DOMContentLoaded', () => {
+    // Only initialize chat if we're on a page with chat functionality
+    if (!document.getElementById('chat-messages')) {
+        console.log('Chat messages container not found, skipping chat initialization');
+        return;
+    }
+    
     // Load chat history when the AI chat tab is shown
     const aiChatTab = document.getElementById('ai-chat-tab');
     if (aiChatTab) {

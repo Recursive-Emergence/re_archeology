@@ -70,14 +70,34 @@ class Neo4jDatabase:
         finally:
             session.close()
     
-    def execute_query(self, query: str, parameters: dict = None):
+    async def execute_query(self, query: str, parameters: dict = None, **kwargs):
         """Execute a single query and return results."""
+        # Merge kwargs into parameters dict for compatibility
+        if kwargs:
+            if parameters is None:
+                parameters = {}
+            parameters.update(kwargs)
+            
         with self.get_session() as session:
             result = session.run(query, parameters or {})
-            return [record for record in result]
+            # Return a result object with records attribute for compatibility
+            records = [record for record in result]
+            
+            # Create a simple result object that mimics neo4j Result
+            class SimpleResult:
+                def __init__(self, records):
+                    self.records = records
+            
+            return SimpleResult(records)
     
-    def execute_write_query(self, query: str, parameters: dict = None):
+    async def execute_write_query(self, query: str, parameters: dict = None, **kwargs):
         """Execute a write query in a transaction."""
+        # Merge kwargs into parameters dict for compatibility
+        if kwargs:
+            if parameters is None:
+                parameters = {}
+            parameters.update(kwargs)
+            
         with self.get_session() as session:
             return session.execute_write(
                 lambda tx: tx.run(query, parameters or {}).single()

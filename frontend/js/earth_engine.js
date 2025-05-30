@@ -34,7 +34,7 @@ window.EarthEngine = {
  * @returns {Promise} Promise that resolves with status info
  */
 function checkEarthEngineStatus() {
-    return fetch(`${API_URL}/earth-engine/status`)
+    return fetch(`/api/v1/earth-engine/status`)
         .then(response => response.json())
         .catch(error => {
             console.error('Error checking Earth Engine status:', error);
@@ -47,7 +47,7 @@ function checkEarthEngineStatus() {
  * @returns {Promise} Promise that resolves with dataset info
  */
 function getEarthEngineDatasets() {
-    return fetch(`${API_URL}/earth-engine/datasets`)
+    return fetch(`/api/v1/earth-engine/datasets`)
         .then(response => response.json())
         .catch(error => {
             console.error('Error getting Earth Engine datasets:', error);
@@ -78,7 +78,7 @@ function processCurrentRegion() {
         max_cells: 50  // Limit the number of cells to process for performance
     };
 
-    return fetch(`${API_URL}/earth-engine/process-region`, {
+    return fetch(`${API_URL}/api/v1/earth-engine/process-region`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -115,7 +115,7 @@ function processCells(cellIds) {
         ]
     };
 
-    return fetch(`${API_URL}/earth-engine/process-cells`, {
+    return fetch(`${API_URL}/api/v1/earth-engine/process-cells`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -142,7 +142,7 @@ function processCells(cellIds) {
  * @returns {Promise} Promise that resolves with cell results
  */
 function processSingleCell(cellId) {
-    return fetch(`${API_URL}/earth-engine/process-cell/${cellId}`)
+    return fetch(`${API_URL}/api/v1/earth-engine/process-cell/${cellId}`)
         .then(response => response.json())
         .catch(error => {
             console.error(`Error processing cell ${cellId}:`, error);
@@ -254,7 +254,7 @@ function startTaskTracking() {
  * @param {Number} taskId Task ID to check
  */
 function checkTaskStatus(taskId) {
-    fetch(`${API_URL}/earth-engine/task/${taskId}`)
+    fetch(`${API_URL}/api/v1/earth-engine/task/${taskId}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`Server returned ${response.status}: ${response.statusText}`);
@@ -920,7 +920,7 @@ function loadEarthEngineRasterLayer(layerType) {
         .join('&');
     
     // Fetch tile URL from backend
-    fetch(`${API_URL}/earth-engine/raster/${layerType}?${queryString}`)
+    fetch(`${API_URL}/api/v1/earth-engine/raster/${layerType}?${queryString}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error ${response.status}`);

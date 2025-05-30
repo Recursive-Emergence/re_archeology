@@ -395,6 +395,72 @@ class BackgroundTasksService {
             });
         }
     }
+
+    /**
+     * Check if we're running in development mode without backend
+     */
+    isDevMode() {
+        return window.location.hostname === 'localhost' && 
+               !window.RE_ARCHAEOLOGY_CONFIG?.enableBackend;
+    }
+
+    /**
+     * Get active background tasks
+     */
+    async getActiveTasks() {
+        try {
+            // Skip API call if we're in development mode
+            if (this.isDevMode()) {
+                console.log('Development mode: Returning mock task data');
+                return this.getMockTasks();
+            }
+            
+            // Try to fetch from API
+            try {
+                const response = await fetch(`${this.baseUrl}/active`, {
+                    headers: authService && authService.isAuthenticated() ? 
+                        authService.getAuthHeaders() : {}
+                });
+
+                if (response.ok) {
+                    const tasks = await response.json();
+                    this.tasks = tasks;
+                    return tasks;
+                }
+            } catch (error) {
+                console.warn('API not available, using mock task data');
+            }
+            
+            return this.getMockTasks();
+        } catch (error) {
+            console.error('Error fetching active tasks:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get mock tasks for development
+     */
+    getMockTasks() {
+        return [
+            {
+                id: 'task-1',
+                title: 'Spatial Analysis - Site A',
+                status: 'RUNNING',
+                progress: 45,
+                type: 'SPATIAL_ANALYSIS',
+                created_at: new Date().toISOString()
+            },
+            {
+                id: 'task-2',
+                title: 'Satellite Imagery Processing',
+                status: 'PENDING',
+                progress: 0,
+                type: 'IMAGE_PROCESSING',
+                created_at: new Date().toISOString()
+            }
+        ];
+    }
 }
 
 // Global background tasks service instance

@@ -1,5 +1,5 @@
 """
-Enhanced error handling and validation utilities for MVP2.
+Enhanced error handling and validation utilities.
 Provides comprehensive error management, input validation, and API response handling.
 """
 

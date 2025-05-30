@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Test</title>
+</head>
+<body>
+    <h1>Simple JavaScript Test</h1>
+    <div id="test">Initial content</div>
+    
+    <script>
+        console.log('JavaScript is running');
+        document.getElementById('test').textContent = 'JavaScript is working!';
+        
+        // Test the categories API
+        fetch('/api/v1/threads/categories')
+            .then(response => {
+                console.log('API response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('API data:', data);
+                document.getElementById('test').innerHTML = 
+                    'JavaScript is working!<br>Categories loaded: ' + data.length;
+            })
+            .catch(error => {
+                console.error('API error:', error);
+                document.getElementById('test').innerHTML = 
+                    'JavaScript is working!<br>API error: ' + error.message;
+            });
+    </script>
+</body>
+</html>

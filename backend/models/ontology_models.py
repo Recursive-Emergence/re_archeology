@@ -196,3 +196,9 @@ class CreateSiteRequest(BaseModel):
     longitude: float
     status: SiteStatus = SiteStatus.CANDIDATE
     created_from_hypothesis: Optional[str] = None
+
+class CreateBackgroundTaskRequest(BaseModel):
+    name: str
+    description: str
+    agent_id: str
+    estimated_completion: Optional[datetime] = None

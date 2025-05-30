@@ -369,6 +369,17 @@ python tools/ee_processor.py process-cells --cell-ids=cell-123,cell-456 --source
 
 This tool is useful for initial data loading, testing, and manual processing tasks.
 
+### Development Conventions
+
+#### Semantic Naming
+
+The RE-Archaeology Framework follows semantic naming conventions where file and component names represent their function rather than version numbers. For example:
+
+- Use `chat.html` instead of `mvp2.html` for the chat interface
+- Use `earth_engine_service.py` instead of `earth_engine_mvp2.py` for Earth Engine services
+
+This approach enhances code maintainability and makes the codebase more intuitive for new developers. See `/docs/semantic_naming_update.md` for details on the recent naming convention updates.
+
 ## License
 
 [License information]

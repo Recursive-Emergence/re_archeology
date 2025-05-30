@@ -305,5 +305,5 @@ async def websocket_heartbeat():
         for websocket in disconnected:
             await thread_ws_manager.disconnect_from_thread(websocket)
 
-# Start heartbeat task
-asyncio.create_task(websocket_heartbeat())
+# Note: Heartbeat task should be started when the application starts, not at import time
+# asyncio.create_task(websocket_heartbeat())

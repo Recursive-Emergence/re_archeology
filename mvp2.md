@@ -1,33 +1,92 @@
-# MVP2: RE-Archaeology Framework - Enhanced Thread Discussion & AI Integration
+# MVP2: RE-Archaeology Framework - Three-Pane UI with Bella AI Assistant
 
-## Goals
+## Refined Goals
 
-1. **Advanced Thread Discussion Model**:
-   - Implement hierarchical thread categories in Neo4j: "Maps", "Researches", "Sites", "RE Theory", etc.
-   - Enable user-generated threads and comment/reply functionality within each category.
-   - Support nested discussions and topic branching.
+**Primary Focus**: Create a clean, intuitive three-pane user interface that provides seamless access to content categories, dynamic content viewing, and persistent AI assistance.
 
-2. **OpenAI Integration**:
-   - Integrate OpenAI API for chat functionality and embedding-based search.
-   - Combine search results with conversational AI for enhanced user experience.
-   - Implement semantic search across threads, sites, researches, and narratives.
+### Core UI Architecture:
+1. **Left Pane - Category Navigation**:
+   - Hierarchical content categories: "Maps", "Researches", "Sites", "RE Theory"
+   - Clean, expandable tree navigation
+   - Visual indicators for content availability and user access levels
 
-3. **Google Authentication & User Management**:
-   - Implement Google OAuth 2.0 for user registration and login.
-   - Require user authentication for thread creation, commenting, and chat functionality.
-   - Maintain user sessions and profile management.
+2. **Middle Pane - Dynamic Content Display**:
+   - Context-sensitive content rendering based on left pane selection
+   - Thread discussions, map visualizations, research documents
+   - Responsive design that adapts to content type
 
-4. **Earth Engine Enhanced Maps**:
-   - Support Earth Engine integration for map threads and sub-threads.
-   - Enable region-specific LIDAR visualization (e.g., "Netherlands Windmills").
-   - Implement interactive overlays and spatial analysis tools.
+3. **Right Pane - Bella AI Assistant**:
+   - Persistent chat interface with Bella, the RE-Archaeology AI assistant
+   - Context-aware responses based on current content selection
+   - Background task status updates and progress indicators
+   - Real-time assistance and data processing notifications
 
-5. **RE Agent Background Tasks Panel**:
-   - Right pane displays RE agent's ongoing background processes.
-   - Real-time progress indicators for data processing tasks.
-   - Status updates for analysis workflows (e.g., "Processing Amazonian Basin data (52%)").
+### Authentication & Access Control:
+- **Google OAuth 2.0**: Full access for authenticated users
+- **Read-Only Mode**: Anonymous users can browse public content
+- **Progressive Enhancement**: Authentication unlocks advanced features like content creation, AI chat, and personalized recommendations
 
-## Architecture Enhancements
+## Technical Implementation
+
+### Frontend Architecture:
+- **Semantic Component Naming**: Replaced version-specific naming (mvp2.html) with functional naming (chat.html)
+- **Modular CSS**: Organized styles with `main_chat.css` and `enhanced-ui.css`
+- **Responsive Design**: Three-pane layout that adapts to screen sizes and content requirements
+
+### Backend Services:
+- **FastAPI Framework**: RESTful API with `/api/v1/` routing
+- **Neo4j Database**: Graph-based content organization and relationship mapping
+- **Earth Engine Integration**: Spatial analysis and map visualization through `earth_engine_service.py`
+- **OpenAI Integration**: Bella AI assistant with context-aware responses
+
+### Key Features:
+1. **Bella AI Assistant Status Updates**:
+   - Real-time background task monitoring
+   - Progress indicators for data processing
+   - Context-aware assistance based on current content
+
+2. **Content Category System**:
+   - Maps: Earth Engine visualizations and spatial data
+   - Researches: Academic papers and analysis threads
+   - Sites: Archaeological site documentation
+   - RE Theory: Reverse engineering methodology discussions
+
+3. **Progressive Authentication**:
+   - Anonymous users: Read-only access to public content
+   - Authenticated users: Full access including content creation and AI chat
+
+## Deployment Strategy
+
+### Local Development:
+- Python virtual environment with requirements.txt
+- Environment variables for API keys and database connections
+- Hot reload for frontend development
+
+### Cloud Run Production:
+- Containerized deployment with Docker
+- Secure credential management through Google Secret Manager
+- Auto-scaling based on demand
+
+## Success Metrics
+
+- **User Experience**: Intuitive navigation between content categories
+- **AI Integration**: Responsive Bella assistant with helpful background task updates
+- **Performance**: Fast content loading and smooth pane transitions
+- **Security**: Proper authentication flow and data protection
+
+## Current Implementation Status
+
+### Completed:
+1. **Semantic File Naming**: All core components renamed for clarity
+2. **Three-Pane UI Foundation**: Basic layout structure in place
+3. **Backend Router Organization**: Earth Engine and spatial analysis services properly organized
+4. **CSS Modernization**: Clean, semantic styling system
+
+### Next Steps:
+1. **Local Testing Setup**: Create virtual environment and test current implementation
+2. **Google Auth Integration**: Implement OAuth flow for authenticated vs anonymous access
+3. **Bella AI Integration**: Add OpenAI service for persistent chat assistant
+4. **Enhanced UI Polish**: Finalize three-pane responsive design
 
 ### Neo4j Schema Extensions
 

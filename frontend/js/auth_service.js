@@ -30,11 +30,28 @@ class AuthService {
         } catch (error) {
             console.error('Error fetching auth configuration:', error);
         }
-
-        // Google OAuth callback
-        window.handleGoogleLogin = (response) => {
-            this.loginWithGoogle(response.credential);
-        };
+    }
+    
+    /**
+     * Register a callback to handle authentication state changes
+     * @param {Function} callback - Function to call when auth state changes
+     */
+    onAuthStateChanged(callback) {
+        // Store the callback to invoke when auth state changes
+        this.authStateCallback = callback;
+        
+        // Immediately invoke with current state
+        if (callback && typeof callback === 'function') {
+            // For testing purposes, generate a mock user if we have a token
+            const mockUser = this.token ? {
+                id: 'user-123',
+                name: 'Demo User',
+                email: 'demo@example.com',
+                picture: 'https://via.placeholder.com/150'
+            } : null;
+            
+            callback(mockUser);
+        }
     }
 
     updateGoogleAuthButton() {
@@ -320,5 +337,5 @@ function showProfile() {
     console.log('Profile view not yet implemented');
 }
 
-// Note: Authentication initialization is now handled by the main applications
-// (MainDashboardApp and MVP2App) to avoid conflicts with the auth modal
+// Note: Authentication initialization is now handled by the main application (ChatApp) 
+// to avoid conflicts with the auth modal
