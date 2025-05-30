@@ -44,7 +44,6 @@ ENV PATH=/home/app/.local/bin:$PATH
 COPY --chown=1000:1000 backend/ ./backend/
 COPY --chown=1000:1000 frontend/ ./frontend/
 COPY --chown=1000:1000 start_server.py ./start_server.py
-COPY --chown=1000:1000 .env ./.env
 
 # Create app user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 app \

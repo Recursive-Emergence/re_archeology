@@ -20,7 +20,9 @@ for env_path in env_paths:
         break
 
 if not env_loaded:
-    print("Warning: No .env file found, using default values")
+    print("No .env file found, using environment variables from system")
+    # For Cloud Run and other environments where .env file is not available
+    # Environment variables are set directly via the deployment configuration
     load_dotenv()  # Try default behavior
 
 class Settings(BaseSettings):
