@@ -45,6 +45,7 @@ COPY --chown=1000:1000 backend/ ./backend/
 COPY --chown=1000:1000 frontend/ ./frontend/
 COPY --chown=1000:1000 start_server.py ./start_server.py
 COPY --chown=1000:1000 .env ./.env
+COPY --chown=1000:1000 sage-striker-294302-cbcab4a5e094.json ./sage-striker-294302-cbcab4a5e094.json
 
 # Create app user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 app \
