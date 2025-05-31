@@ -15,6 +15,8 @@
     --sidebar-width: 280px;
     --chat-width: 320px;
     --header-height: 70px;
+    --primary-color: #007bff;
+    --border-radius: 8px;
 }
 
 /* Global Styles */
@@ -267,6 +269,7 @@ body {
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    padding: 0.5rem 0;
 }
 
 .user-avatar {
@@ -274,10 +277,12 @@ body {
     height: 40px;
     border-radius: 50%;
     object-fit: cover;
+    border: 2px solid var(--border-color);
 }
 
 .user-details {
     flex: 1;
+    min-width: 0; /* Allow text to truncate */
 }
 
 .user-name {
@@ -285,11 +290,17 @@ body {
     color: var(--text-primary);
     font-size: 0.875rem;
     margin-bottom: 0.125rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .user-email {
     color: var(--text-secondary);
     font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .auth-buttons {
@@ -324,6 +335,39 @@ body {
     background-color: #c82333;
 }
 
+/* Login Section */
+.login-section {
+    text-align: center;
+}
+
+.login-prompt {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+}
+
+/* Chat Input Section */
+.chat-input-section {
+    border-top: 1px solid var(--border-color);
+    padding: 1rem;
+    background-color: var(--bg-secondary);
+}
+
+.chat-input-container {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+}
+
+.chat-input-container input {
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-input-container button {
+    flex-shrink: 0;
+}
+
 /* Chat Messages */
 .chat-messages {
     flex: 1;
@@ -335,38 +379,48 @@ body {
 }
 
 .message {
-    max-width: 85%;
+    margin-bottom: 1rem;
     padding: 0.75rem;
-    border-radius: 12px;
-    font-size: 0.875rem;
-    line-height: 1.4;
+    border-radius: var(--border-radius);
+    max-width: 85%;
 }
 
 .message.user {
-    align-self: flex-end;
-    background-color: var(--accent-color);
+    background-color: var(--primary-color);
     color: white;
-    border-bottom-right-radius: 4px;
+    margin-left: auto;
+    text-align: right;
 }
 
-.message.assistant {
-    align-self: flex-start;
+.message.ai {
     background-color: var(--bg-tertiary);
     color: var(--text-primary);
-    border-bottom-left-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+.message-content {
+    margin-bottom: 0.25rem;
+    line-height: 1.4;
 }
 
 .message-time {
     font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-top: 0.25rem;
+    opacity: 0.7;
+}
+
+.message.user .message-time {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.message.ai .message-time {
+    color: var(--text-secondary);
 }
 
 /* Chat Input */
 .chat-input-section {
     border-top: 1px solid var(--border-color);
     padding: 1rem;
-    background-color: var(--bg-primary);
+    background-color: var(--bg-secondary);
 }
 
 .chat-input-container {
@@ -377,18 +431,11 @@ body {
 
 .chat-input-container input {
     flex: 1;
+    min-width: 0;
 }
 
-.chat-input-container {
-    padding: 1rem;
-    border-top: 1px solid var(--border-color);
-    background-color: var(--bg-secondary);
-}
-
-.chat-input-form {
-    display: flex;
-    gap: 0.5rem;
-    align-items: flex-end;
+.chat-input-container button {
+    flex-shrink: 0;
 }
 
 .chat-input {
@@ -439,6 +486,67 @@ body {
     background-color: var(--border-color);
     cursor: not-allowed;
     transform: none;
+}
+
+/* User Profile Section - Bottom */
+.user-profile-section {
+    border-top: 1px solid var(--border-color);
+    padding: 0.75rem;
+    background-color: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+.user-profile-bottom {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.user-profile-bottom .user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--border-color);
+}
+
+.user-profile-bottom .user-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.user-profile-bottom .user-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    margin-bottom: 0.125rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-profile-bottom .user-email {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-profile-bottom .btn {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* OAuth Configuration Notice */
+.oauth-notice {
+    margin-top: 0.5rem;
+    padding: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    opacity: 0.7;
 }
 
 /* Responsive Design */

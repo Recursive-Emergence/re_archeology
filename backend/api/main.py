@@ -7,14 +7,11 @@ import pathlib
 from typing import Dict, List, Any
 
 from backend.core.neo4j_database import neo4j_db
-from backend.utils.config import settings, print_neo4j_config
+from backend.utils.config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Print Neo4j configuration for debugging
-print_neo4j_config()
 
 # Create FastAPI app
 app = FastAPI(

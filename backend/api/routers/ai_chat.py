@@ -61,6 +61,13 @@ class EmbeddingRequest(BaseModel):
     entity_type: str
     entity_id: str
 
+class SimpleChatRequest(BaseModel):
+    message: str
+    context: Optional[Dict[str, Any]] = None
+
+class SimpleChatResponse(BaseModel):
+    response: str
+
 async def get_openai_embedding(text: str) -> List[float]:
     """Generate embedding using OpenAI API."""
     try:
@@ -348,3 +355,23 @@ async def batch_generate_embeddings(
             continue
     
     return {"message": f"Generated embeddings for {count} items"}
+
+@router.post("/message", response_model=SimpleChatResponse)
+async def simple_chat(
+    request: SimpleChatRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Simple chat endpoint with basic AI response."""
+    try:
+        # For now, return a simple response to test the endpoint
+        response_text = f"Hello {current_user.get('name', 'User')}! I received your message: '{request.message}'. This is a test response from Bella, your RE-Archaeology AI assistant."
+        
+        # TODO: Add real OpenAI integration once we confirm the endpoint works
+        return SimpleChatResponse(response=response_text)
+        
+    except Exception as e:
+        print(f"Error in simple_chat: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )

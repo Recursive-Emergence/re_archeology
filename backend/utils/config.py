@@ -94,14 +94,3 @@ settings = Settings()
 
 def get_settings() -> Settings:
     return settings
-
-def print_neo4j_config():
-    """Debug function to print current Neo4j configuration"""
-    print("=" * 50)
-    print("NEO4J CONFIGURATION DEBUG")
-    print("=" * 50)
-    print(f"NEO4J_URI from env: {os.environ.get('NEO4J_URI', 'NOT SET IN ENV')}")
-    print(f"NEO4J_URI from settings: {settings.NEO4J_URI}")
-    print(f"NEO4J_USER: {settings.NEO4J_USER}")
-    print(f"NEO4J_PASSWORD: {'*' * len(settings.NEO4J_PASSWORD) if settings.NEO4J_PASSWORD else 'NOT SET'}")
-    print("=" * 50)

@@ -60,33 +60,29 @@
                 <small>AI Assistant</small>
             </header>
             
-            <!-- Authentication -->
-            <section class="auth-section">
-                <div id="user-profile" class="user-profile" style="display: none;">
-                    <img id="user-avatar" class="user-avatar" src="" alt="">
-                    <div class="user-details">
-                        <div id="user-name" class="user-name"></div>
-                        <div id="user-email" class="user-email"></div>
-                    </div>
-                </div>
-                
-                <div id="login-section" class="auth-buttons">
-                    <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">Sign in to chat with Bella</p>
-                    
-                    <!-- Google OAuth -->
+            <!-- Authentication - Login Only -->
+            <section class="auth-section" id="login-section">
+                <p class="login-prompt">Sign in to chat with Bella</p>                    <!-- Google OAuth -->
                     <div id="g_id_onload"
                          data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
                          data-callback="handleGoogleLogin"
-                         data-auto_prompt="false">
+                         data-error_callback="handleGoogleError"
+                         data-auto_prompt="false"
+                         data-cancel_on_tap_outside="false"
+                         data-use_fedcm_for_prompt="false">
                     </div>
-                    <div class="g_id_signin" 
-                         data-type="standard" 
-                         data-size="medium" 
-                         data-theme="outline" 
-                         data-text="sign_in_with">
-                    </div>
-                    
-                    <button id="logout-btn" class="auth-button sign-out" style="display: none;">Logout</button>
+                <div class="g_id_signin" 
+                     data-type="standard" 
+                     data-size="medium" 
+                     data-theme="outline" 
+                     data-text="sign_in_with">
+                </div>
+        
+                <!-- OAuth Configuration Notice -->
+                <div id="oauth-config-notice" class="oauth-notice" style="display: none;">
+                    <small class="text-muted">
+                        <i>⚠️ OAuth configuration needed for production use</i>
+                    </small>
                 </div>
             </section>
             
@@ -99,17 +95,29 @@
             </section>
             
             <!-- Chat Input -->
-            <section class="chat-input-container" id="chat-input-container" style="display: none;">
-                <div id="chat-input-form" class="chat-input-form">
-                    <textarea id="chat-input" 
-                              class="chat-input" 
-                              placeholder="Ask Bella anything..." 
-                              disabled
-                              rows="1"></textarea>
-                    <button id="send-btn" class="send-button" disabled>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                        </svg>
+            <section class="chat-input-section">
+                <form id="chat-input-form" class="chat-input-container" style="display: none;">
+                    <input type="text" 
+                           id="chat-input" 
+                           class="form-control" 
+                           placeholder="Ask Bella anything..." 
+                           disabled>
+                    <button type="submit" id="send-btn" class="btn btn-primary" disabled>
+                        Send
+                    </button>
+                </form>
+            </section>
+            
+            <!-- User Profile - Bottom -->
+            <section class="user-profile-section" id="user-profile" style="display: none;">
+                <div class="user-profile-bottom">
+                    <img id="user-avatar" class="user-avatar" src="" alt="">
+                    <div class="user-details">
+                        <div id="user-name" class="user-name"></div>
+                        <div id="user-email" class="user-email text-muted small"></div>
+                    </div>
+                    <button id="logout-btn" class="btn btn-sm btn-outline-secondary" style="display: none;">
+                        Logout
                     </button>
                 </div>
             </section>
