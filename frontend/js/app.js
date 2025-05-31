@@ -181,12 +181,8 @@ class REArchaeologyApp {
         this.currentCategory = category;
         this.updateContentHeader(category.name, category.description);
         
-        // Show map for Sites category, threads for others
-        if (category.name === 'Sites') {
-            await this.loadNetherlandsMap();
-        } else {
-            await this.loadThreadsForCategory(category);
-        }
+        // Load threads for all categories (removed special Sites map handling)
+        await this.loadThreadsForCategory(category);
     }
     
     async loadThreadsForCategory(category) {
@@ -211,8 +207,18 @@ class REArchaeologyApp {
         // Add padding class for thread view
         contentDisplay.className = 'has-threads';
         
+        // Add "Add new topic" button
+        const addTopicButton = `
+            <div class="add-topic-section">
+                <button class="btn btn-primary add-topic-btn" onclick="window.app.showNewTopicForm()">
+                    <i class="fas fa-plus"></i> Add a new topic
+                </button>
+            </div>
+        `;
+        
         if (threads.length === 0) {
             contentDisplay.innerHTML = `
+                ${addTopicButton}
                 <div class="empty-state">
                     <p>No discussions found in this category.</p>
                     <p class="text-muted">Be the first to start a conversation!</p>
@@ -223,15 +229,25 @@ class REArchaeologyApp {
         
         const threadsHtml = threads.map(thread => `
             <div class="thread-item" data-thread-id="${thread.id}">
-                <div class="thread-title">${thread.title}</div>
-                <div class="thread-meta">
-                    <span class="thread-author">by ${thread.author || 'Unknown'}</span>
-                    <span class="thread-time">${this.formatDate(thread.created_at)}</span>
+                <div class="thread-header">
+                    <div class="thread-title">${thread.title}</div>
+                    <div class="thread-meta">
+                        <span class="thread-author">by ${thread.author || 'Anonymous'}</span>
+                        <span class="thread-date">${this.formatDate(thread.created_at)}</span>
+                    </div>
+                </div>
+                <div class="thread-preview">
+                    ${thread.content ? thread.content.substring(0, 150) + '...' : 'No content preview'}
+                </div>
+                <div class="thread-stats">
+                    <span class="replies-count">${thread.reply_count || 0} replies</span>
+                    <span class="last-activity">Last activity: ${this.formatDate(thread.updated_at || thread.created_at)}</span>
                 </div>
             </div>
         `).join('');
         
         contentDisplay.innerHTML = `
+            ${addTopicButton}
             <div class="threads-container">
                 ${threadsHtml}
             </div>
@@ -277,19 +293,31 @@ class REArchaeologyApp {
     renderThreadDiscussion(thread, messages) {
         const contentDisplay = document.getElementById('content-display');
         
-        const messagesHtml = messages.map(msg => `
-            <div class="thread-message ${msg.is_user ? 'user-message' : ''}">
-                <div class="message-header">
-                    <span class="message-author">${msg.author}</span>
-                    <span class="message-time">${this.formatDate(msg.created_at)}</span>
+        const messagesHtml = messages.map(msg => {
+            // Fix undefined author issue
+            let authorName = msg.author || 'Anonymous';
+            if (msg.is_user && this.currentUser) {
+                authorName = this.currentUser.name;
+            }
+            
+            return `
+                <div class="thread-message ${msg.is_user ? 'user-message' : ''}">
+                    <div class="message-header">
+                        <span class="message-author">${authorName}</span>
+                        <span class="message-time">${this.formatDate(msg.created_at)}</span>
+                    </div>
+                    <div class="message-content">${msg.content}</div>
                 </div>
-                <div class="message-content">${msg.content}</div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
         
         contentDisplay.innerHTML = `
             <div class="thread-discussion">
                 <div class="discussion-header">
+                    <button class="btn btn-outline-secondary back-to-threads" 
+                            onclick="window.app.loadThreadsForCategory(window.app.currentCategory)">
+                        ← Back to ${this.currentCategory?.name || 'Discussions'}
+                    </button>
                     <h4>${thread.title}</h4>
                     <p class="text-muted">${messages.length} messages</p>
                 </div>
@@ -353,11 +381,106 @@ class REArchaeologyApp {
         }
     }
     
+    showNewTopicForm() {
+        if (!this.isAuthenticated) {
+            this.showError('Please sign in to create a new topic.');
+            return;
+        }
+        
+        const contentDisplay = document.getElementById('content-display');
+        contentDisplay.innerHTML = `
+            <div class="new-topic-form">
+                <div class="form-header">
+                    <h4>Create New Topic in ${this.currentCategory?.name || 'Category'}</h4>
+                    <button class="btn btn-secondary" onclick="window.app.loadThreadsForCategory(window.app.currentCategory)">
+                        Cancel
+                    </button>
+                </div>
+                <form id="new-topic-form">
+                    <div class="form-group">
+                        <label for="topic-title">Topic Title *</label>
+                        <input type="text" id="topic-title" class="form-control" 
+                               placeholder="Enter a descriptive title..." required>
+                    </div>
+                    <div class="form-group">
+                        <label for="topic-content">Initial Post *</label>
+                        <textarea id="topic-content" class="form-control" rows="6" 
+                                  placeholder="Start the discussion..." required></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Create Topic</button>
+                        <button type="button" class="btn btn-secondary" 
+                                onclick="window.app.loadThreadsForCategory(window.app.currentCategory)">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        `;
+        
+        // Add form submission handler
+        document.getElementById('new-topic-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.createNewTopic();
+        });
+    }
+    
+    async createNewTopic() {
+        const title = document.getElementById('topic-title').value.trim();
+        const content = document.getElementById('topic-content').value.trim();
+        
+        if (!title || !content) {
+            this.showError('Please fill in both title and content.');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${this.apiBase}/threads`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                },
+                body: JSON.stringify({
+                    title: title,
+                    content: content,
+                    category_id: this.currentCategory.id
+                })
+            });
+            
+            if (response.ok) {
+                const newThread = await response.json();
+                // Refresh the category view to show the new thread
+                await this.loadThreadsForCategory(this.currentCategory);
+                // Optionally, automatically open the new thread
+                // await this.loadThread(newThread.id);
+            } else {
+                throw new Error(`Failed to create topic: ${response.status}`);
+            }
+        } catch (error) {
+            console.error('Failed to create topic:', error);
+            this.showError('Failed to create new topic. Please try again.');
+        }
+    }
+    
     updateContentHeader(title, subtitle) {
         const contentHeader = document.querySelector('.content-header h2');
         if (contentHeader) {
             contentHeader.textContent = title;
         }
+    }
+    
+    goToHomepage() {
+        // Clear any active category selection
+        document.querySelectorAll('.category-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        
+        this.currentCategory = null;
+        this.currentThread = null;
+        
+        // Load the homepage map
+        this.loadNetherlandsMap();
     }
     
     // Authentication
