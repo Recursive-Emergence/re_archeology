@@ -1,0 +1,96 @@
+/* Map Labels - Simplified */
+
+/* No custom region labels - using standard map features */
+
+/* Map Controls */
+.map-controls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 1000;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 8px;
+    border-radius: 4px;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-width: 220px;
+}
+
+.map-controls button {
+    padding: 6px 10px;
+    font-size: 13px;
+    background-color: rgba(255, 255, 255, 0.9);
+    border: 1px solid #333;
+    border-radius: 3px;
+    cursor: pointer;
+    display: inline-block;
+    width: 100%;
+    margin-bottom: 4px;
+    text-align: left;
+    color: #222;
+    font-weight: normal;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.map-controls button:hover {
+    background-color: #ffffff;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.5);
+}
+
+/* Map Legend */
+.map-legend {
+    position: absolute;
+    bottom: 25px;
+    right: 10px;
+    z-index: 1000;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 12px;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+    max-width: 250px;
+    font-size: 12px;
+}
+
+.map-legend strong {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 14px;
+    color: #ffffff;
+}
+
+.map-legend small {
+    color: #cccccc;
+}
+
+.legend-item {
+    margin-top: 5px;
+    display: flex;
+    align-items: center;
+}
+
+.legend-color {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    border: 1px solid #ccc;
+}
+
+/* Added legend item styling */
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.legend-color {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border-radius: 2px;
+    box-shadow: 0 0 2px rgba(255, 255, 255, 0.5);
+}

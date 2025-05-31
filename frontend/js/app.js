@@ -25,9 +25,9 @@ class REArchaeologyApp {
             await this.loadCategories();
             this.checkAuthState();
             
-            // Load Netherlands map as homepage default
+            // Load Amazon Basin map as homepage default
             console.log('Initializing homepage map...');
-            await this.loadNetherlandsMap();
+            await this.loadAmazonBasinMap();
             
         } catch (error) {
             console.error('App initialization error:', error);
@@ -181,6 +181,16 @@ class REArchaeologyApp {
         this.currentCategory = category;
         this.updateContentHeader(category.name, category.description);
         
+        // Restore the content header when navigating to a category (in case we were in map view)
+        const contentHeader = document.querySelector('.content-header');
+        if (contentHeader) {
+            contentHeader.style.opacity = '1';
+            contentHeader.style.height = 'auto';
+            contentHeader.style.overflow = 'visible';
+            contentHeader.style.padding = '1rem 1.5rem';
+            contentHeader.style.borderBottom = '1px solid var(--border-color)';
+        }
+        
         // Load threads for all categories (removed special Sites map handling)
         await this.loadThreadsForCategory(category);
     }
@@ -232,7 +242,7 @@ class REArchaeologyApp {
                 <div class="thread-header">
                     <div class="thread-title">${thread.title}</div>
                     <div class="thread-meta">
-                        <span class="thread-author">by ${thread.author || 'Anonymous'}</span>
+                        <span class="thread-author">by ${thread.starter_user_name || thread.author || 'Anonymous'}</span>
                         <span class="thread-date">${this.formatDate(thread.created_at)}</span>
                     </div>
                 </div>
@@ -272,6 +282,16 @@ class REArchaeologyApp {
         this.currentThread = thread;
         this.updateContentHeader(thread.title, `${this.currentCategory.name} Discussion`);
         
+        // Ensure the content header is visible when viewing thread discussions
+        const contentHeader = document.querySelector('.content-header');
+        if (contentHeader) {
+            contentHeader.style.opacity = '1';
+            contentHeader.style.height = 'auto';
+            contentHeader.style.overflow = 'visible';
+            contentHeader.style.padding = '1rem 1.5rem';
+            contentHeader.style.borderBottom = '1px solid var(--border-color)';
+        }
+        
         await this.loadThreadDiscussion(thread);
     }
     
@@ -294,8 +314,8 @@ class REArchaeologyApp {
         const contentDisplay = document.getElementById('content-display');
         
         const messagesHtml = messages.map(msg => {
-            // Fix undefined author issue
-            let authorName = msg.author || 'Anonymous';
+            // Use author_name from backend or fall back to current user name
+            let authorName = msg.author_name || msg.author || 'Anonymous';
             if (msg.is_user && this.currentUser) {
                 authorName = this.currentUser.name;
             }
@@ -480,7 +500,7 @@ class REArchaeologyApp {
         this.currentThread = null;
         
         // Load the homepage map
-        this.loadNetherlandsMap();
+        this.loadAmazonBasinMap();
     }
     
     // Authentication
@@ -714,7 +734,7 @@ class REArchaeologyApp {
         `;
     }
     
-    async loadNetherlandsMap() {
+    async loadAmazonBasinMap() {
         try {
             // Ensure Leaflet is available before proceeding
             if (!window.L) {
@@ -722,8 +742,8 @@ class REArchaeologyApp {
                 await this.waitForLeaflet();
             }
             
-            // Update header
-            this.updateContentHeader('Global Archaeological Map', 'Worldwide Site Discovery & Analysis - Netherlands Showcase');
+            // Update the main content header, but we'll also add an in-map title that doesn't move
+            this.updateContentHeader('Global Archaeological Map', 'Worldwide Site Discovery & Analysis - Amazon Basin Showcase');
             
             // Get content display and map container
             const contentDisplay = document.getElementById('content-display');
@@ -734,14 +754,14 @@ class REArchaeologyApp {
             }
             
             // Clean up existing map instance if it exists
-            if (this.netherlandsMap) {
+            if (this.amazonBasinMap) {
                 try {
-                    this.netherlandsMap.remove();
+                    this.amazonBasinMap.remove();
                     console.log('Existing map removed');
                 } catch (e) {
                     console.warn('Error removing existing map:', e);
                 }
-                this.netherlandsMap = null;
+                this.amazonBasinMap = null;
             }
             
             // Clear any global Leaflet state
@@ -774,7 +794,7 @@ class REArchaeologyApp {
             });
             
             // Additional cleanup - remove any existing map containers
-            const existingMaps = contentDisplay.querySelectorAll('[id^="netherlands-map"]');
+            const existingMaps = contentDisplay.querySelectorAll('[id^="amazon-basin-map"], [id^="netherlands-map"]');
             existingMaps.forEach(mapEl => {
                 if (mapEl._leaflet_id) {
                     // Force cleanup of Leaflet internals
@@ -785,8 +805,19 @@ class REArchaeologyApp {
             // Remove thread padding class for map view
             contentDisplay.className = '';
             
+            // Hide the standard content header for map view to avoid redundancy with our in-map title
+            const contentHeader = document.querySelector('.content-header');
+            if (contentHeader) {
+                contentHeader.style.opacity = '0'; // Make it invisible
+                contentHeader.style.height = '0';  // Remove its height completely
+                contentHeader.style.overflow = 'hidden';
+                contentHeader.style.padding = '0';
+                contentHeader.style.borderBottom = 'none';
+                contentHeader.style.position = 'absolute'; // Take it out of the flow
+            }
+            
             // Use a consistent map ID instead of unique timestamp
-            const mapId = 'netherlands-map';
+            const mapId = 'amazon-basin-map';
             
             // Completely clear and recreate the content using DOM methods for better reliability
             contentDisplay.innerHTML = '';  // Clear first
@@ -794,30 +825,48 @@ class REArchaeologyApp {
             // Create map container using DOM methods
             const mapContainer = document.createElement('div');
             mapContainer.className = 'map-container';
-            mapContainer.style.cssText = 'display: block; width: 100%; height: 100%;';
+            mapContainer.style.cssText = 'display: flex; flex-direction: column; width: 100%; height: 100%; flex: 1;';
             
-            // Create controls
+            // Create a fixed map title that won't move when dragging the map
+            const mapTitle = document.createElement('div');
+            mapTitle.className = 'map-title';
+            mapTitle.innerHTML = `
+                <h3>Global Archaeological Map</h3>
+                <p>Amazon Basin Analysis</p>
+            `;
+            
+            // Create controls - simplified to only show relevant toggles
             const mapControls = document.createElement('div');
             mapControls.className = 'map-controls';
             mapControls.innerHTML = `
-                <button onclick="window.reApp.toggleLayer('samplesites')">Toggle Sites</button>
-                <button onclick="window.reApp.toggleLayer('ahn')">Toggle AHN LiDAR</button>
+                <button id="btn-sites" onclick="window.reApp.toggleLayer('potentialareasarchaeological')">🏛️ Toggle Archaeological Sites</button>
+                <button id="btn-vegetation" onclick="window.reApp.toggleLayer('ndvi')">🌿 Toggle Vegetation Analysis</button>
             `;
             
-            // Create legend
+            // Create a simplified legend - only showing toggleable items
             const mapLegend = document.createElement('div');
             mapLegend.className = 'map-legend';
             mapLegend.innerHTML = `
-                <strong>Global Archaeological Map</strong><br>
-                <small>Netherlands AHN LiDAR Showcase</small>
+                <strong>Amazon Basin Map</strong><br>
+                <small>Archaeological Analysis</small>
+                <hr style="margin: 5px 0; border-color: rgba(255,255,255,0.3);">
+                <div class="legend-item">
+                    <span class="legend-color" style="background-color: orange; opacity: 0.8"></span>
+                    <span>Archaeological Sites</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: linear-gradient(to right, red, yellow, green);"></span>
+                    <span>Vegetation Analysis</span>
+                </div>
             `;
             
-            // Create map element
+            // Create map element - ensuring it fills the available space
             const mapElement = document.createElement('div');
             mapElement.id = mapId;
-            mapElement.style.cssText = 'width: 100%; height: 100%; min-height: 500px;';
+            mapElement.style.cssText = 'width: 100%; height: 100%; flex: 1; min-height: calc(100vh - 120px);';
             
             // Assemble the structure
+            mapContainer.appendChild(mapTitle); // Add the fixed title
             mapContainer.appendChild(mapControls);
             mapContainer.appendChild(mapLegend);
             mapContainer.appendChild(mapElement);
@@ -842,7 +891,7 @@ class REArchaeologyApp {
             
             // Fetch map data from Earth Engine API
             console.log('Fetching map data from API...');
-            const response = await fetch(`${this.apiBase}/earth-engine/netherlands-ahn-map`);
+            const response = await fetch(`${this.apiBase}/earth-engine/amazon-basin-map`);
             if (!response.ok) {
                 throw new Error(`API request failed: ${response.status} ${response.statusText}`);
             }
@@ -852,7 +901,7 @@ class REArchaeologyApp {
             
             // Initialize Leaflet map with the final map element
             try {
-                this.netherlandsMap = L.map(finalMapElement, {
+                this.amazonBasinMap = L.map(finalMapElement, {
                     center: mapData.center,
                     zoom: mapData.zoom,
                     zoomControl: true,
@@ -864,11 +913,38 @@ class REArchaeologyApp {
                 throw new Error(`Failed to initialize map: ${mapError.message}`);
             }
             
-            // Add base tile layer
-            L.tileLayer(mapData.tile_url, {
+            // Add base tile layer (satellite imagery) with reduced opacity to better see features
+            const satelliteLayer = L.tileLayer(mapData.tile_url, {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                maxZoom: 18
-            }).addTo(this.netherlandsMap);
+                maxZoom: 18,
+                opacity: 0.85  // Slightly transparent to better see labels
+            }).addTo(this.amazonBasinMap);
+            
+            // Add standard map features
+            if (mapData.show_labels) {
+                // Add OpenStreetMap layer with all standard map features (rivers, borders, names)
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                    maxZoom: 19,
+                    opacity: 0.7  // Transparent enough to see satellite imagery underneath
+                }).addTo(this.amazonBasinMap);
+                
+                // Add Stamen Terrain layer for better topography - this shows rivers prominently
+                L.tileLayer('https://stamen-tiles-{s}.a.ssl.fastly.net/terrain-background/{z}/{x}/{y}{r}.png', {
+                    attribution: 'Map tiles by <a href="http://stamen.com">Stamen Design</a>, <a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a> &mdash; Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                    subdomains: 'abcd',
+                    minZoom: 0,
+                    maxZoom: 18,
+                    opacity: 0.4
+                }).addTo(this.amazonBasinMap);
+                
+                // Add ESRI World Transportation to emphasize rivers
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri &mdash; Source: Esri',
+                    maxZoom: 19,
+                    opacity: 0.7
+                }).addTo(this.amazonBasinMap);
+            }
             
             // Add overlays if they exist
             if (mapData.overlays && mapData.overlays.length > 0) {
@@ -891,14 +967,14 @@ class REArchaeologyApp {
                                     if (feature.properties.type) {
                                         popupContent += `Type: ${feature.properties.type}<br>`;
                                     }
-                                    if (feature.properties.height) {
-                                        popupContent += `Height: ${feature.properties.height}<br>`;
+                                    if (feature.properties.elevation) {
+                                        popupContent += `Elevation: ${feature.properties.elevation}<br>`;
                                     }
                                     layer.bindPopup(popupContent);
                                 }
                             }
                         });
-                        geoJsonLayer.addTo(this.netherlandsMap);
+                        geoJsonLayer.addTo(this.amazonBasinMap);
                         
                         // Store reference for layer toggling
                         if (!this.mapLayers) this.mapLayers = {};
@@ -913,16 +989,27 @@ class REArchaeologyApp {
                     [mapData.bounds[1], mapData.bounds[0]], // SW
                     [mapData.bounds[3], mapData.bounds[2]]  // NE
                 );
-                this.netherlandsMap.fitBounds(bounds);
+                this.amazonBasinMap.fitBounds(bounds);
             }
             
             // Store reference globally for layer controls
             window.reApp = this;
             
-            console.log('Netherlands map loaded successfully');
+            // Add resize handler to ensure map fills available space
+            const handleResize = () => {
+                if (this.amazonBasinMap) {
+                    this.amazonBasinMap.invalidateSize();
+                }
+            };
+            
+            window.addEventListener('resize', handleResize);
+            // Initial invalidate size after a brief delay to ensure proper rendering
+            setTimeout(() => handleResize(), 100);
+            
+            console.log('Amazon Basin map loaded successfully');
             
         } catch (error) {
-            console.error('Failed to load Netherlands map:', error);
+            console.error('Failed to load Amazon Basin map:', error);
             
             // Show specific error message
             const contentDisplay = document.getElementById('content-display');
@@ -943,7 +1030,7 @@ class REArchaeologyApp {
                     <div class="error-state">
                         <h4>Map Loading Error</h4>
                         <p>${errorMessage}</p>
-                        <button class="btn btn-primary" onclick="window.app.loadNetherlandsMap()">
+                        <button class="btn btn-primary" onclick="window.app.loadAmazonBasinMap()">
                             Try Again
                         </button>
                     </div>
@@ -955,15 +1042,112 @@ class REArchaeologyApp {
     }
     
     toggleLayer(layerName) {
-        if (!this.mapLayers) return;
+        if (!this.mapLayers) this.mapLayers = {};
         
         const layer = this.mapLayers[layerName];
         if (layer) {
-            if (this.netherlandsMap.hasLayer(layer)) {
-                this.netherlandsMap.removeLayer(layer);
+            if (this.amazonBasinMap.hasLayer(layer)) {
+                this.amazonBasinMap.removeLayer(layer);
+                
+                // Visual feedback for toggle button - find the button that toggled this layer
+                const buttons = document.querySelectorAll('.map-controls button');
+                buttons.forEach(button => {
+                    if (button.textContent.toLowerCase().includes(layerName.toLowerCase()) || 
+                        button.onclick.toString().includes(layerName)) {
+                        button.style.opacity = '0.7';
+                        button.style.backgroundColor = '#f1f1f1';
+                    }
+                });
             } else {
-                this.netherlandsMap.addLayer(layer);
+                this.amazonBasinMap.addLayer(layer);
+                
+                // Visual feedback for toggle button
+                const buttons = document.querySelectorAll('.map-controls button');
+                buttons.forEach(button => {
+                    if (button.textContent.toLowerCase().includes(layerName.toLowerCase()) || 
+                        button.onclick.toString().includes(layerName)) {
+                        button.style.opacity = '1';
+                        button.style.backgroundColor = '#fff';
+                    }
+                });
             }
+        }
+    }
+    
+    toggleBorders() {
+        if (this.bordersLayer) {
+            if (this.amazonBasinMap.hasLayer(this.bordersLayer)) {
+                this.amazonBasinMap.removeLayer(this.bordersLayer);
+                if (this.customBordersLayer) {
+                    this.amazonBasinMap.removeLayer(this.customBordersLayer);
+                }
+            } else {
+                this.amazonBasinMap.addLayer(this.bordersLayer);
+                if (this.customBordersLayer) {
+                    this.amazonBasinMap.addLayer(this.customBordersLayer);
+                }
+            }
+        } else {
+            this.bordersLayer = L.tileLayer('https://maps.heigit.org/openmapsurfer/tiles/borders/webmercator/{z}/{x}/{y}.png', {
+                attribution: 'Borders &copy; <a href="https://heigit.org">HeiGIT</a>',
+                maxZoom: 19,
+                opacity: 0.8
+            }).addTo(this.amazonBasinMap);
+        }
+    }
+    
+    toggleLabels() {
+        if (this.labelsLayer) {
+            if (this.amazonBasinMap.hasLayer(this.labelsLayer)) {
+                this.amazonBasinMap.removeLayer(this.labelsLayer);
+            } else {
+                this.amazonBasinMap.addLayer(this.labelsLayer);
+            }
+        } else {
+            this.labelsLayer = L.tileLayer('https://stamen-tiles-{s}.a.ssl.fastly.net/toner-labels/{z}/{x}/{y}{r}.{ext}', {
+                attribution: 'Map labels by <a href="http://stamen.com">Stamen Design</a>',
+                subdomains: 'abcd',
+                minZoom: 0,
+                maxZoom: 20,
+                ext: 'png',
+                opacity: 0.7
+            }).addTo(this.amazonBasinMap);
+        }
+    }
+    
+    toggleRivers() {
+        if (this.riverNamesLayer) {
+            if (this.amazonBasinMap.hasLayer(this.riverNamesLayer)) {
+                this.amazonBasinMap.removeLayer(this.riverNamesLayer);
+            } else {
+                this.amazonBasinMap.addLayer(this.riverNamesLayer);
+            }
+        }
+    }
+    
+    toggleCountryNames() {
+        if (this.countryNamesLayer) {
+            if (this.amazonBasinMap.hasLayer(this.countryNamesLayer)) {
+                this.amazonBasinMap.removeLayer(this.countryNamesLayer);
+            } else {
+                this.amazonBasinMap.addLayer(this.countryNamesLayer);
+            }
+        }
+    }
+    
+    toggleWaterways() {
+        if (this.waterwaysLayer) {
+            if (this.amazonBasinMap.hasLayer(this.waterwaysLayer)) {
+                this.amazonBasinMap.removeLayer(this.waterwaysLayer);
+            } else {
+                this.amazonBasinMap.addLayer(this.waterwaysLayer);
+            }
+        } else {
+            this.waterwaysLayer = L.tileLayer('https://tileserver.memomaps.de/tilegen/{z}/{x}/{y}.png', {
+                attribution: 'Waterways &copy; <a href="https://memomaps.de/">MeMoMaps</a>',
+                maxZoom: 18,
+                opacity: 0.4
+            }).addTo(this.amazonBasinMap);
         }
     }
 }

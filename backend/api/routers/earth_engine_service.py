@@ -275,23 +275,24 @@ async def process_analysis_task(task_id: str):
             "error": str(e)
         })
 
-@router.get("/netherlands-ahn-map")
-async def get_netherlands_ahn_map():
+@router.get("/amazon-basin-map")
+async def get_amazon_basin_map():
     """
     Get Global Archaeological Map data for the landing page.
-    Features Netherlands AHN LiDAR data as a showcase of worldwide capabilities.
+    Features Amazon Basin deforestation and site detection as a showcase of worldwide capabilities.
     """
     try:
         if not EE_AVAILABLE:
             # Return mock map data for development
             return {
-                "map_id": "global-archaeological-mock",
-                "title": "Global Archaeological Map (Netherlands Showcase)",
+                "map_id": "global-archaeological-amazon",
+                "title": "Global Archaeological Map (Amazon Basin Showcase)",
                 "type": "tile_layer",
-                "tile_url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-                "bounds": [3.3, 50.7, 7.3, 53.6],  # Netherlands bounds
-                "center": [52.1326, 5.2913],  # Utrecht area
-                "zoom": 8,
+                "tile_url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                "bounds": [-73.2, -9.8, -44.2, 5.3],  # Amazon Basin bounds
+                "center": [-60.0, -3.2],  # Amazon Basin center
+                "zoom": 6,
+                "show_labels": True,  # Always show labels for geographic features
                 "overlays": [
                     {
                         "name": "Sample Sites",
@@ -302,25 +303,25 @@ async def get_netherlands_ahn_map():
                                 {
                                     "type": "Feature",
                                     "properties": {
-                                        "name": "Historic Windmill Site",
-                                        "height": "25m",
-                                        "type": "windmill"
+                                        "name": "Geoglyph Site",
+                                        "elevation": "180m",
+                                        "type": "geoglyph"
                                     },
                                     "geometry": {
                                         "type": "Point",
-                                        "coordinates": [5.2913, 52.1326]
+                                        "coordinates": [-67.8, -8.1]
                                     }
                                 },
                                 {
                                     "type": "Feature", 
                                     "properties": {
-                                        "name": "Archaeological Mound",
-                                        "height": "8m",
-                                        "type": "structure"
+                                        "name": "Pre-Columbian Settlement",
+                                        "elevation": "220m",
+                                        "type": "settlement"
                                     },
                                     "geometry": {
                                         "type": "Point",
-                                        "coordinates": [5.3913, 52.2326]
+                                        "coordinates": [-63.2, -5.8]
                                     }
                                 }
                             ]
@@ -364,97 +365,99 @@ async def get_netherlands_ahn_map():
                 # Try to initialize without credentials (if user authenticated locally)
                 ee.Initialize()
         
-        # Define Netherlands region of interest (Utrecht area)
-        netherlands_location = {"lat": 52.4751495, "lon": 4.8155928}  # Utrecht area
-        buffer_meters_nl = 5000  # 5km buffer
-        point_geom_nl = ee.Geometry.Point([netherlands_location['lon'], netherlands_location['lat']])
-        buffered_region_nl = point_geom_nl.buffer(buffer_meters_nl)
+        # Define Amazon Basin region of interest (Central Amazon)
+        amazon_location = {"lat": -3.2, "lon": -60.0}  # Central Amazon Basin
+        buffer_meters_amazon = 50000  # 50km buffer
+        point_geom_amazon = ee.Geometry.Point([amazon_location['lon'], amazon_location['lat']])
+        buffered_region_amazon = point_geom_amazon.buffer(buffer_meters_amazon)
         
-        # Load and filter AHN4 LiDAR data
-        ahn4_collection = ee.ImageCollection("AHN/AHN4")
-        ahn4_filtered = ahn4_collection.filterBounds(buffered_region_nl)
+        # Load and analyze Amazon Basin Landsat data for deforestation and site detection
+        landsat_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+        landsat_filtered = landsat_collection.filterBounds(buffered_region_amazon).filterDate('2020-01-01', '2023-12-31')
         
-        if ahn4_filtered.size().getInfo() > 0:
-            ahn4_mosaic = ahn4_filtered.mosaic()
-            ahn4_dsm = ahn4_mosaic.select('dsm').clip(buffered_region_nl)
+        if landsat_filtered.size().getInfo() > 0:
+            landsat_mosaic = landsat_filtered.median()
+            # Create NDVI for vegetation analysis
+            ndvi = landsat_mosaic.normalizedDifference(['SR_B5', 'SR_B4']).clip(buffered_region_amazon)
             
-            # Create visualization parameters for AHN4 DSM
-            ahn4_vis_params = {
-                'bands': ['dsm'],
-                'min': 0,
-                'max': 50,
-                'palette': ['006633', 'E5FFCC', '662A00', 'D8D8D8', 'F5F5F5']
+            # Create visualization parameters for NDVI
+            ndvi_vis_params = {
+                'min': -0.5,
+                'max': 0.8,
+                'palette': ['red', 'yellow', 'green']
             }
             
-            # Get map ID for the AHN4 layer
-            map_id_dict = ahn4_dsm.getMapId(ahn4_vis_params)
+            # Get map ID for the NDVI layer
+            map_id_dict = ndvi.getMapId(ndvi_vis_params)
             
-            # Detect potential archaeological structures
-            elevation_threshold = 5  # meters
-            ahn4_elevated = ahn4_dsm.gt(elevation_threshold)
+            # Detect potential archaeological areas using NDVI and edge detection
+            ndvi_threshold = 0.3  # Areas with lower vegetation might indicate sites
+            potential_sites = ndvi.lt(ndvi_threshold)
             
-            # Apply connected components to group elevated pixels
-            kernel = ee.Kernel.square(radius=1)
-            connected_components = ahn4_elevated.connectedComponents(kernel, maxSize=128)
+            # Apply connected components to group potential site pixels
+            kernel = ee.Kernel.circle(radius=2)
+            connected_components = potential_sites.connectedComponents(kernel, maxSize=256)
             labeled_components = connected_components.select('label')
             
             # Convert to vectors and filter by area
             potential_structures = labeled_components.reduceToVectors(
-                geometry=buffered_region_nl,
-                scale=0.5,
+                geometry=buffered_region_amazon,
+                scale=30,
                 maxPixels=1e9,
                 bestEffort=True
             )
             
-            min_area_sq_meters = 50
+            min_area_sq_meters = 1000  # Larger minimum area for Amazon sites
             filtered_structures = potential_structures.filter(ee.Filter.gte('area', min_area_sq_meters))
             
             # Get structure data for frontend
             structure_data = filtered_structures.limit(20).getInfo()  # Limit for performance
             
             return {
-                "map_id": "global-archaeological-netherlands",
-                "title": "Global Archaeological Map - Netherlands AHN4 LiDAR Showcase",
+                "map_id": "global-archaeological-amazon",
+                "title": "Global Archaeological Map - Amazon Basin NDVI Analysis",
                 "type": "ee_tile_layer",
                 "tile_url": map_id_dict['tile_fetcher'].url_format,
-                "bounds": [3.3, 50.7, 7.3, 53.6],  # Netherlands bounds
-                "center": [netherlands_location['lat'], netherlands_location['lon']],
-                "zoom": 12,
+                "bounds": [-73.2, -9.8, -44.2, 5.3],  # Amazon Basin bounds
+                "center": [amazon_location['lat'], amazon_location['lon']],
+                "zoom": 8,
+                "show_labels": True,
                 "overlays": [
                     {
-                        "name": "Potential Archaeological Structures",
+                        "name": "Potential Archaeological Areas",
                         "type": "geojson", 
                         "data": structure_data,
                         "style": {
-                            "color": "red",
-                            "fillColor": "red", 
+                            "color": "orange",
+                            "fillColor": "orange", 
                             "fillOpacity": 0.6,
                             "weight": 2
                         }
                     }
                 ],
                 "legend": {
-                    "title": "AHN4 Elevation (meters)",
-                    "colors": ["#006633", "#E5FFCC", "#662A00", "#D8D8D8", "#F5F5F5"],
-                    "labels": ["0-10m", "10-20m", "20-30m", "30-40m", "40-50m"]
+                    "title": "NDVI Vegetation Index",
+                    "colors": ["red", "yellow", "green"],
+                    "labels": ["Low Vegetation", "Medium Vegetation", "High Vegetation"]
                 }
             }
         else:
             raise HTTPException(
                 status_code=404,
-                detail="No AHN4 data found for the specified region"
+                detail="No Landsat data found for the specified Amazon Basin region"
             )
             
     except Exception as e:
-        logging.error(f"Error generating Netherlands AHN map: {e}")
+        logging.error(f"Error generating Amazon Basin map: {e}")
         # Return fallback map on error
         return {
             "map_id": "global-archaeological-fallback",
             "title": "Global Archaeological Map (Fallback)",
             "type": "tile_layer",
-            "tile_url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-            "bounds": [3.3, 50.7, 7.3, 53.6],
-            "center": [52.1326, 5.2913],
-            "zoom": 8,
+            "tile_url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            "bounds": [-73.2, -9.8, -44.2, 5.3],
+            "center": [-3.2, -60.0],
+            "zoom": 6,
+            "show_labels": True,
             "error": str(e)
         }

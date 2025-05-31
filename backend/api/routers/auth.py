@@ -105,7 +105,11 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials"
             )
-        return {"user_id": user_id, "email": payload.get("email")}
+        return {
+            "user_id": user_id, 
+            "email": payload.get("email"),
+            "name": payload.get("name")
+        }
     except jwt.PyJWTError:
         logger.warning("JWT token verification failed")
         raise HTTPException(
@@ -133,7 +137,11 @@ async def get_current_user_optional(token: Optional[str] = None) -> Optional[dic
         user_id: str = payload.get("sub")
         if user_id is None:
             return None
-        return {"user_id": user_id, "email": payload.get("email"), "name": payload.get("name")}
+        return {
+            "user_id": user_id, 
+            "email": payload.get("email"), 
+            "name": payload.get("name")
+        }
     except (jwt.PyJWTError, Exception) as e:
         logger.debug(f"Optional token verification failed: {str(e)}")
         return None

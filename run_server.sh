@@ -31,4 +31,5 @@ for path in sys.path:
 "
 
 # Start uvicorn with the FastAPI app
-uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+source venv/bin/activate
+cd /media/im2/plus/lab4/RE/re_archaeology && python3 -m uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8080
