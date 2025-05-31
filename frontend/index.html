@@ -4,267 +4,161 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RE-Archaeology Framework</title>
-    <link rel="stylesheet" href="css/main_chat.css">
-    <link rel="stylesheet" href="css/three-pane-layout.css">
-    <link rel="stylesheet" href="css/earth_engine.css">
-    <link rel="stylesheet" href="css/chat.css">
-    <link rel="stylesheet" href="css/enhanced-ui.css">
+    
     <!-- Google OAuth -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- Leaflet for maps -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/main_chat.css">
 </head>
 <body>
     <div id="app">
         <!-- Header -->
-        <header class="app-header">
+        <div class="app-header">
             <div class="header-content">
                 <h1>RE-Archaeology Framework</h1>
                 <div class="header-actions">
-                    <div id="auth-section">
-                        <!-- Authentication UI will be inserted here -->
-                    </div>
-                    <div id="task-indicator" class="task-indicator">
-                        <span id="active-tasks-count">0</span>
-                        <span>Active Tasks</span>
+                    <div class="task-indicator">
+                        <span>Active Tasks: 0</span>
                     </div>
                 </div>
             </div>
-        </header>
-
+        </div>
+        
         <!-- Main Content -->
-        <main class="main-content">
-            <!-- Left Pane: Sidebar -->
+        <div class="main-content">
+            <!-- Left Sidebar - Categories -->
             <aside class="sidebar">
-                <nav class="thread-navigation">
-                    <h2>Thread Categories</h2>
-                    <div id="category-list" class="category-list">
-                        <!-- Categories will be loaded dynamically -->
+                <div class="sidebar-header">
+                    <h3>Categories</h3>
+                </div>
+                <div class="categories-list" id="categories-nav">
+                    <!-- Categories will be loaded here -->
+                </div>
+            </aside>
+            
+            <!-- Main Content Area -->
+            <main class="content-area">
+                <div class="content-header">
+                    <h2>Welcome to RE-Archaeology Framework</h2>
+                </div>
+                <div class="content-body" id="content-display">
+                    <div class="welcome-message">
+                        <p>Explore archaeological discussions, maps, and research.</p>
+                        <p>Select a category to begin or chat with Bella for assistance.</p>
                     </div>
-                </nav>
+                </div>
+            </main>
+            
+            <!-- Chat Panel - Right Side -->
+            <aside class="chat-panel">
+            <header class="chat-header">
+                <h5 class="mb-0">🤖 Bella</h5>
+                <small>AI Assistant</small>
+            </header>
+            
+            <!-- Authentication -->
+            <section class="auth-section">
+                <div id="user-profile" class="user-profile" style="display: none;">
+                    <img id="user-avatar" class="user-avatar" src="" alt="">
+                    <div class="user-details">
+                        <div id="user-name" class="user-name"></div>
+                        <div id="user-email" class="user-email"></div>
+                    </div>
+                </div>
                 
-                <div class="user-panel">
-                    <h3>Quick Actions</h3>
-                    <button id="view-tasks-btn" class="btn btn-secondary">View Tasks</button>
+                <div id="login-section" class="auth-buttons">
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">Sign in to chat with Bella</p>
+                    
+                    <!-- Google OAuth -->
+                    <div id="g_id_onload"
+                         data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
+                         data-callback="handleGoogleLogin"
+                         data-auto_prompt="false">
+                    </div>
+                    <div class="g_id_signin" 
+                         data-type="standard" 
+                         data-size="medium" 
+                         data-theme="outline" 
+                         data-text="sign_in_with">
+                    </div>
+                    
+                    <button id="logout-btn" class="auth-button sign-out" style="display: none;">Logout</button>
                 </div>
-            </aside>
-
-            <!-- Middle Pane: Content Area -->
-            <div class="content-area">
-                <!-- Thread List -->
-                <section id="thread-list-section" class="content-section active">
-                    <div class="section-header">
-                        <h2>Discussion Threads</h2>
-                        <div class="section-actions">
-                            <button id="create-thread-btn" class="btn btn-primary">Create Thread</button>
-                            <select id="category-filter" class="form-select">
-                                <option value="">All Categories</option>
-                            </select>
-                            <input type="search" id="thread-search" placeholder="Search threads..." class="form-input">
-                        </div>
-                    </div>
-                    <div id="thread-list" class="thread-list">
-                        <!-- Threads will be loaded dynamically -->
-                    </div>
-                </section>
-
-                <!-- Thread Detail -->
-                <section id="thread-detail-section" class="content-section">
-                    <div class="section-header">
-                        <button id="back-to-list" class="btn btn-ghost">← Back to Threads</button>
-                        <h2 id="thread-title">Thread Title</h2>
-                        <div class="thread-actions">
-                            <button id="add-map-btn" class="btn btn-primary">Add Map</button>
-                            <button id="share-thread-btn" class="btn btn-secondary">Share</button>
-                        </div>
-                    </div>
-                    
-                    <div class="thread-content">
-                        <div id="thread-description" class="thread-description"></div>
-                        
-                        <!-- Thread Maps -->
-                        <div id="thread-maps" class="thread-maps">
-                            <h3>Maps</h3>
-                            <div id="maps-container" class="maps-container">
-                                <!-- Maps will be loaded dynamically -->
-                            </div>
-                        </div>
-                        
-                        <!-- Thread Comments -->
-                        <div id="thread-comments" class="thread-comments">
-                            <h3>Discussion</h3>
-                            <div id="comments-container" class="comments-container">
-                                <!-- Comments will be loaded dynamically -->
-                            </div>
-                            <div id="comment-form" class="comment-form">
-                                <!-- Comment form will be inserted here -->
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            </div>
-
-            <!-- Right Pane: Bella AI Assistant -->
-            <aside class="right-pane">
-                <div class="chat-container" id="main-chat-container">
-                    <div class="chat-header">
-                        <div class="chat-title">
-                            <div class="ai-avatar">B</div>
-                            <div class="ai-info">
-                                <span class="ai-name">Bella</span>
-                                <span class="ai-status">AI Assistant</span>
-                            </div>
-                        </div>
-                        <div class="chat-actions">
-                            <button id="clear-chat-btn" class="btn-icon" title="Clear Chat">
-                                <span>🗑️</span>
-                            </button>
-                            <button id="toggle-semantic-search" class="btn-icon" title="Toggle Semantic Search">
-                                <span>🔍</span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div id="chat-messages" class="chat-messages">
-                        <!-- Chat messages will be loaded dynamically -->
-                    </div>
-                    
-                    <div id="chat-input-container" class="chat-input-container">
-                        <div class="chat-input-wrapper">
-                            <input type="text" 
-                                   id="chat-input" 
-                                   placeholder="Please login to chat with Bella..." 
-                                   class="chat-input"
-                                   disabled>
-                            <button id="send-chat-btn" class="chat-send-btn" disabled>
-                                <span>➤</span>
-                            </button>
-                        </div>
-                        <div id="chat-auth-section" class="chat-auth-section">
-                            <!-- User info or login section will be inserted here -->
-                        </div>
-                    </div>
-                    
-                    <!-- Background Tasks Monitor -->
-                    <div class="tasks-monitor">
-                        <div class="tasks-header">
-                            <h4>Background Tasks</h4>
-                            <span id="active-tasks-badge" class="tasks-badge">0</span>
-                        </div>
-                        <div id="tasks-mini-container" class="tasks-mini-container">
-                            <!-- Mini task status will be shown here -->
-                        </div>
-                    </div>
+            </section>
+            
+            <!-- Chat Messages -->
+            <section class="chat-messages" id="chat-messages">
+                <div class="chat-welcome" id="chat-welcome">
+                    <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
+                    <p class="small">Sign in to start our conversation!</p>
                 </div>
-            </aside>
-        </main>
-    </div>
-
-    <!-- Modals -->
-    
-    <!-- Create Thread Modal -->
-    <div id="create-thread-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Create New Thread</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form id="create-thread-form">
-                    <div class="form-group">
-                        <label for="thread-title-input">Title</label>
-                        <input type="text" id="thread-title-input" class="form-input" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="thread-category-input">Category</label>
-                        <select id="thread-category-input" class="form-select" required>
-                            <!-- Categories will be loaded dynamically -->
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="thread-description-input">Description</label>
-                        <textarea id="thread-description-input" class="form-textarea" rows="4" required></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="thread-requires-auth">
-                            Require authentication to participate
-                        </label>
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('create-thread-modal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Create Thread</button>
-                    </div>
-                </form>
-            </div>
+            </section>
+            
+            <!-- Chat Input -->
+            <section class="chat-input-container" id="chat-input-container" style="display: none;">
+                <div id="chat-input-form" class="chat-input-form">
+                    <textarea id="chat-input" 
+                              class="chat-input" 
+                              placeholder="Ask Bella anything..." 
+                              disabled
+                              rows="1"></textarea>
+                    <button id="send-btn" class="send-button" disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
+                    </button>
+                </div>
+            </section>
+        </aside>
         </div>
     </div>
 
-    <!-- Add Map Modal -->
-    <div id="add-map-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Map to Thread</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form id="add-map-form">
-                    <div class="form-group">
-                        <label for="analysis-type-select">Analysis Type</label>
-                        <select id="analysis-type-select" class="form-select" required>
-                            <option value="satellite_imagery">Satellite Imagery</option>
-                            <option value="archaeological_potential">Archaeological Potential</option>
-                            <option value="change_detection">Change Detection</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Area of Interest</label>
-                        <div id="map-selector" class="map-selector">
-                            <!-- Leaflet map for area selection -->
-                        </div>
-                        <small>Draw a rectangle on the map to select the area of interest</small>
-                    </div>
-                    
-                    <div id="analysis-parameters" class="analysis-parameters">
-                        <!-- Parameters will be loaded based on analysis type -->
-                    </div>
-                    
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('add-map-modal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Generate Map</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Loading overlay -->
-    <div id="loading-overlay" class="loading-overlay">
-        <div class="loading-spinner"></div>
-        <div class="loading-text">Loading...</div>
-    </div>
-
-    <!-- Scripts -->
-    <script src="js/auth_service.js"></script>
-    <script src="js/thread_service.js"></script>
-    <script src="js/ai_chat_service.js"></script>
-    <script src="js/background_tasks_service.js"></script>
-    <script src="js/earth_engine_service.js"></script>
-    <script src="js/chat_app.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
-    <!-- Initialize the app - no need for extra initialization as chat_app.js already has it -->
+    <!-- Application Configuration -->
+    <script src="js/config.js"></script>
+    
+    <!-- Application JS -->
+    <script src="js/app.js"></script>
+    
     <script>
-        // Global configuration for the application
-        window.RE_ARCHAEOLOGY_CONFIG = {
-            // Set to true to use real API endpoints, false for mock data
-            enableBackend: false,
-            // API base URL (only used when enableBackend is true)
-            apiUrl: '/api/v1',
-            // Development flag
-            isDevelopment: true
+        // Google OAuth callback
+        window.handleGoogleLogin = function(response) {
+            if (window.app) {
+                window.app.handleGoogleLogin(response);
+            }
         };
+        
+        // Google OAuth error callback
+        window.handleGoogleError = function(error) {
+            if (window.app) {
+                window.app.handleGoogleError(error);
+            } else {
+                console.error('Google Sign-In Error:', error);
+            }
+        };
+        
+        // Initialize app when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Log configuration
+            if (window.AppConfig) {
+                window.AppConfig.log();
+            }
+            
+            // Update Google OAuth with dynamic client ID
+            const googleOnload = document.getElementById('g_id_onload');
+            if (googleOnload && window.AppConfig) {
+                googleOnload.setAttribute('data-client_id', window.AppConfig.googleClientId);
+                googleOnload.setAttribute('data-error_callback', 'handleGoogleError');
+            }
+            
+            window.app = new REArchaeologyApp();
+        });
     </script>
 </body>
 </html>

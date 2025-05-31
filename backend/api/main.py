@@ -24,9 +24,10 @@ app = FastAPI(
 )
 
 # Set up CORS middleware - ensuring frontend can access all endpoints
+frontend_origins = settings.FRONTEND_ORIGINS.split(',') if settings.FRONTEND_ORIGINS else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development only - restrict in production
+    allow_origins=frontend_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],

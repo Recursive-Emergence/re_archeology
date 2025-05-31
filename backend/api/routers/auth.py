@@ -154,17 +154,17 @@ async def google_auth(request: GoogleTokenRequest):
     MATCH (u:User {google_id: $google_id})
     RETURN u
     """
-    result = neo4j_db.execute_query(query, parameters={"google_id": google_id})
+    result = await neo4j_db.execute_query(query, parameters={"google_id": google_id})
     
-    if result:
+    if result.records:
         # User exists, update last login
-        user_data = dict(result[0]['u'])
+        user_data = dict(result.records[0]['u'])
         update_query = """
         MATCH (u:User {google_id: $google_id})
         SET u.last_login = datetime()
         RETURN u
         """
-        neo4j_db.execute_query(update_query, parameters={"google_id": google_id})
+        await neo4j_db.execute_query(update_query, parameters={"google_id": google_id})
     else:
         # Create new user
         new_user = User(
@@ -191,7 +191,7 @@ async def google_auth(request: GoogleTokenRequest):
         """
         
         try:
-            result = neo4j_db.execute_query(
+            result = await neo4j_db.execute_query(
                 create_query,
                 parameters={
                     "id": new_user.id,
@@ -202,7 +202,7 @@ async def google_auth(request: GoogleTokenRequest):
                     "role": new_user.role.value
                 }
             )
-            user_data = dict(result[0]['u'])
+            user_data = dict(result.records[0]['u'])
         except Exception as e:
             logger.error(f"Error creating new user in DB: {str(e)}", exc_info=True)
             raise HTTPException(
@@ -241,7 +241,7 @@ async def login_with_email(request: EmailLoginRequest):
     MATCH (u:User {email: $email})
     RETURN u
     """
-    result = neo4j_db.execute_query(query, parameters={"email": email})
+    result = await neo4j_db.execute_query(query, parameters={"email": email})
     
     if not result:
         raise HTTPException(
@@ -256,7 +256,7 @@ async def login_with_email(request: EmailLoginRequest):
     SET u.last_login = datetime()
     RETURN u
     """
-    neo4j_db.execute_query(update_query, parameters={"email": email})
+    await neo4j_db.execute_query(update_query, parameters={"email": email})
     
     # Create JWT token
     token_data = {
@@ -291,7 +291,7 @@ async def register_user(request: UserRegistrationRequest):
     MATCH (u:User {email: $email})
     RETURN u
     """
-    result = neo4j_db.execute_query(query, parameters={"email": email})
+    result = await neo4j_db.execute_query(query, parameters={"email": email})
     
     if result:
         raise HTTPException(
@@ -325,7 +325,7 @@ async def register_user(request: UserRegistrationRequest):
     """
     
     try:
-        result = neo4j_db.execute_query(
+        result = await neo4j_db.execute_query(
             create_query,
             parameters={
                 "id": new_user.id,
@@ -336,7 +336,7 @@ async def register_user(request: UserRegistrationRequest):
                 "role": new_user.role.value
             }
         )
-        user_data = dict(result[0]['u'])
+        user_data = dict(result.records[0]['u'])
     except Exception as e:
         logger.error(f"Error creating new user in DB: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -372,7 +372,7 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
     MATCH (u:User {id: $user_id})
     RETURN u
     """
-    result = neo4j_db.execute_query(query, parameters={"user_id": current_user['user_id']})
+    result = await neo4j_db.execute_query(query, parameters={"user_id": current_user['user_id']})
     
     if not result:
         raise HTTPException(
@@ -380,7 +380,7 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
             detail="User not found"
         )
     
-    user_data = dict(result[0]['u'])
+    user_data = dict(result.records[0]['u'])
     return UserProfile(
         id=user_data['id'],
         name=user_data['name'],
@@ -396,7 +396,7 @@ async def get_current_user_profile(current_user: dict = Depends(get_current_user
     MATCH (u:User {id: $user_id})
     RETURN u
     """
-    result = neo4j_db.execute_query(query, parameters={"user_id": current_user['user_id']})
+    result = await neo4j_db.execute_query(query, parameters={"user_id": current_user['user_id']})
     
     if not result:
         raise HTTPException(
@@ -404,7 +404,7 @@ async def get_current_user_profile(current_user: dict = Depends(get_current_user
             detail="User not found"
         )
     
-    user_data = dict(result[0]['u'])
+    user_data = dict(result.records[0]['u'])
     return UserProfile(
         id=user_data['id'],
         name=user_data['name'],
@@ -444,17 +444,17 @@ async def test_login(request: TestLoginRequest):
     MATCH (u:User {email: $email})
     RETURN u
     """
-    result = neo4j_db.execute_query(query, parameters={"email": email})
+    result = await neo4j_db.execute_query(query, parameters={"email": email})
     
     if result:
         # User exists, update last login
-        user_data = dict(result[0]['u'])
+        user_data = dict(result.records[0]['u'])
         update_query = """
         MATCH (u:User {email: $email})
         SET u.last_login = datetime()
         RETURN u
         """
-        neo4j_db.execute_query(update_query, parameters={"email": email})
+        await neo4j_db.execute_query(update_query, parameters={"email": email})
     else:
         # Create new test user
         from backend.models.ontology_models import User, UserRole
@@ -484,7 +484,7 @@ async def test_login(request: TestLoginRequest):
         """
         
         try:
-            result = neo4j_db.execute_query(
+            result = await neo4j_db.execute_query(
                 create_query,
                 parameters={
                     "id": new_user.id,
@@ -495,7 +495,7 @@ async def test_login(request: TestLoginRequest):
                     "role": new_user.role.value
                 }
             )
-            user_data = dict(result[0]['u'])
+            user_data = dict(result.records[0]['u'])
         except Exception as e:
             logger.error(f"Error creating new test user in DB: {str(e)}", exc_info=True)
             raise HTTPException(

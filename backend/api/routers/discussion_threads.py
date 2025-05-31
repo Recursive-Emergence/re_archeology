@@ -5,12 +5,19 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from datetime import datetime
+import neo4j.time
 
 from backend.core.neo4j_database import neo4j_db
 from backend.models.ontology_models import Thread, ThreadCategory, ThreadComment
 from backend.api.routers.auth import get_current_user
 
 router = APIRouter(prefix="/threads", tags=["threads"])
+
+def convert_neo4j_datetime(dt):
+    """Convert Neo4j DateTime to Python datetime."""
+    if isinstance(dt, neo4j.time.DateTime):
+        return dt.to_native()
+    return dt
 
 class CreateThreadRequest(BaseModel):
     title: str
@@ -184,7 +191,7 @@ async def create_thread(
         starter_user_id=thread_data['starter_user_id'],
         starter_user_name=starter_name,
         tags=thread_data['tags'],
-        created_at=thread_data['created_at'],
+        created_at=convert_neo4j_datetime(thread_data['created_at']),
         comment_count=0
     )
 
@@ -210,6 +217,7 @@ async def get_threads_by_category(category_id: str, skip: int = 0, limit: int = 
     threads = []
     for record in result.records:
         t_data = dict(record['t'])
+        
         threads.append(ThreadResponse(
             id=t_data['id'],
             title=t_data['title'],
@@ -218,7 +226,7 @@ async def get_threads_by_category(category_id: str, skip: int = 0, limit: int = 
             starter_user_id=t_data['starter_user_id'],
             starter_user_name=record['starter_name'],
             tags=t_data['tags'],
-            created_at=t_data['created_at'],
+            created_at=convert_neo4j_datetime(t_data['created_at']),
             comment_count=record['comment_count']
         ))
     
@@ -284,7 +292,7 @@ async def add_comment(
         author_name=author_name,
         thread_id=comment_data['thread_id'],
         parent_comment_id=comment_data.get('parent_comment_id'),
-        created_at=comment_data['created_at']
+        created_at=convert_neo4j_datetime(comment_data['created_at'])
     )
 
 @router.get("/{thread_id}/comments", response_model=List[CommentResponse])
@@ -302,6 +310,7 @@ async def get_thread_comments(thread_id: str):
     comments = []
     for record in result.records:
         c_data = dict(record['c'])
+            
         comments.append(CommentResponse(
             id=c_data['id'],
             content=c_data['content'],
@@ -309,7 +318,7 @@ async def get_thread_comments(thread_id: str):
             author_name=record['author_name'],
             thread_id=c_data['thread_id'],
             parent_comment_id=c_data.get('parent_comment_id'),
-            created_at=c_data['created_at']
+            created_at=convert_neo4j_datetime(c_data['created_at'])
         ))
     
     return comments

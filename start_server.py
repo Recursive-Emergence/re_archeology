@@ -6,7 +6,14 @@ import os
 import sys
 
 # Add the current directory to Python path
-sys.path.insert(0, '/app')
+# Handle both local development and Docker container environments
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if '/app' in current_dir:
+    # Running in Docker container
+    sys.path.insert(0, '/app')
+else:
+    # Running locally
+    sys.path.insert(0, current_dir)
 
 try:
     import uvicorn
