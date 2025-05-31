@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
+    # Google Earth Engine configuration
+    GOOGLE_EE_SERVICE_ACCOUNT_KEY: str = ""  # Path to JSON key file or JSON string
+    GOOGLE_EE_PROJECT_ID: str = ""  # Google Cloud Project ID for Earth Engine
+    
     # CORS and Frontend configuration
     FRONTEND_ORIGINS: str = "http://localhost:8080"
     
@@ -79,6 +83,10 @@ class Settings(BaseSettings):
         self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", self.OPENAI_API_KEY)
         self.OPENAI_MODEL = os.environ.get("OPENAI_MODEL", self.OPENAI_MODEL)
         self.OPENAI_EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", self.OPENAI_EMBEDDING_MODEL)
+        
+        # Google Earth Engine settings
+        self.GOOGLE_EE_SERVICE_ACCOUNT_KEY = os.environ.get("GOOGLE_EE_SERVICE_ACCOUNT_KEY", self.GOOGLE_EE_SERVICE_ACCOUNT_KEY)
+        self.GOOGLE_EE_PROJECT_ID = os.environ.get("GOOGLE_EE_PROJECT_ID", self.GOOGLE_EE_PROJECT_ID)
         
         # Frontend CORS settings
         self.FRONTEND_ORIGINS = os.environ.get("FRONTEND_ORIGINS", self.FRONTEND_ORIGINS)

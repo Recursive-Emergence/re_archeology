@@ -1,6 +1,7 @@
 """
 Enhanced Earth Engine Integration Router for RE-Archaeology Framework
 Provides thread-specific map generation and background task integration
+Includes Netherlands AHN LiDAR data visualization
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -16,11 +17,17 @@ from backend.utils.error_handling import validate_request_data
 from backend.models.neo4j_crud import BackgroundTaskCRUD, ThreadCRUD
 from backend.api.routers.auth import get_current_user
 
-# Import placeholder for Earth Engine (would typically be ee as conventional)
-# import ee  # Commented out if not installed
+# Try to import Earth Engine - fallback to mock if not available
+try:
+    import ee
+    EE_AVAILABLE = True
+    print("Earth Engine available for AHN LiDAR data")
+except ImportError:
+    EE_AVAILABLE = False
+    print("Earth Engine not available - using mock data")
 
 router = APIRouter(
-    prefix="/api/v1/earth-engine",
+    prefix="/earth-engine",
     tags=["Earth Engine"],
 )
 
@@ -267,3 +274,187 @@ async def process_analysis_task(task_id: str):
             "status": "FAILED",
             "error": str(e)
         })
+
+@router.get("/netherlands-ahn-map")
+async def get_netherlands_ahn_map():
+    """
+    Get Global Archaeological Map data for the landing page.
+    Features Netherlands AHN LiDAR data as a showcase of worldwide capabilities.
+    """
+    try:
+        if not EE_AVAILABLE:
+            # Return mock map data for development
+            return {
+                "map_id": "global-archaeological-mock",
+                "title": "Global Archaeological Map (Netherlands Showcase)",
+                "type": "tile_layer",
+                "tile_url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+                "bounds": [3.3, 50.7, 7.3, 53.6],  # Netherlands bounds
+                "center": [52.1326, 5.2913],  # Utrecht area
+                "zoom": 8,
+                "overlays": [
+                    {
+                        "name": "Sample Sites",
+                        "type": "geojson",
+                        "data": {
+                            "type": "FeatureCollection",
+                            "features": [
+                                {
+                                    "type": "Feature",
+                                    "properties": {
+                                        "name": "Historic Windmill Site",
+                                        "height": "25m",
+                                        "type": "windmill"
+                                    },
+                                    "geometry": {
+                                        "type": "Point",
+                                        "coordinates": [5.2913, 52.1326]
+                                    }
+                                },
+                                {
+                                    "type": "Feature", 
+                                    "properties": {
+                                        "name": "Archaeological Mound",
+                                        "height": "8m",
+                                        "type": "structure"
+                                    },
+                                    "geometry": {
+                                        "type": "Point",
+                                        "coordinates": [5.3913, 52.2326]
+                                    }
+                                }
+                            ]
+                        },
+                        "style": {
+                            "color": "red",
+                            "fillColor": "red",
+                            "fillOpacity": 0.7,
+                            "radius": 8
+                        }
+                    }
+                ]
+            }
+        
+        # Initialize Earth Engine with service account if available
+        if not ee.data._credentials:
+            from backend.utils.config import get_settings
+            settings = get_settings()
+            
+            if settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY and settings.GOOGLE_EE_PROJECT_ID:
+                # Initialize with service account
+                import json
+                import os
+                
+                # Check if it's a file path or JSON string
+                if os.path.isfile(settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY):
+                    credentials = ee.ServiceAccountCredentials(
+                        email=None,  # Will be read from JSON file
+                        key_file=settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY
+                    )
+                else:
+                    # Assume it's a JSON string
+                    key_data = json.loads(settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY)
+                    credentials = ee.ServiceAccountCredentials(
+                        email=key_data['client_email'],
+                        key_data=key_data
+                    )
+                
+                ee.Initialize(credentials, project=settings.GOOGLE_EE_PROJECT_ID)
+            else:
+                # Try to initialize without credentials (if user authenticated locally)
+                ee.Initialize()
+        
+        # Define Netherlands region of interest (Utrecht area)
+        netherlands_location = {"lat": 52.4751495, "lon": 4.8155928}  # Utrecht area
+        buffer_meters_nl = 5000  # 5km buffer
+        point_geom_nl = ee.Geometry.Point([netherlands_location['lon'], netherlands_location['lat']])
+        buffered_region_nl = point_geom_nl.buffer(buffer_meters_nl)
+        
+        # Load and filter AHN4 LiDAR data
+        ahn4_collection = ee.ImageCollection("AHN/AHN4")
+        ahn4_filtered = ahn4_collection.filterBounds(buffered_region_nl)
+        
+        if ahn4_filtered.size().getInfo() > 0:
+            ahn4_mosaic = ahn4_filtered.mosaic()
+            ahn4_dsm = ahn4_mosaic.select('dsm').clip(buffered_region_nl)
+            
+            # Create visualization parameters for AHN4 DSM
+            ahn4_vis_params = {
+                'bands': ['dsm'],
+                'min': 0,
+                'max': 50,
+                'palette': ['006633', 'E5FFCC', '662A00', 'D8D8D8', 'F5F5F5']
+            }
+            
+            # Get map ID for the AHN4 layer
+            map_id_dict = ahn4_dsm.getMapId(ahn4_vis_params)
+            
+            # Detect potential archaeological structures
+            elevation_threshold = 5  # meters
+            ahn4_elevated = ahn4_dsm.gt(elevation_threshold)
+            
+            # Apply connected components to group elevated pixels
+            kernel = ee.Kernel.square(radius=1)
+            connected_components = ahn4_elevated.connectedComponents(kernel, maxSize=128)
+            labeled_components = connected_components.select('label')
+            
+            # Convert to vectors and filter by area
+            potential_structures = labeled_components.reduceToVectors(
+                geometry=buffered_region_nl,
+                scale=0.5,
+                maxPixels=1e9,
+                bestEffort=True
+            )
+            
+            min_area_sq_meters = 50
+            filtered_structures = potential_structures.filter(ee.Filter.gte('area', min_area_sq_meters))
+            
+            # Get structure data for frontend
+            structure_data = filtered_structures.limit(20).getInfo()  # Limit for performance
+            
+            return {
+                "map_id": "global-archaeological-netherlands",
+                "title": "Global Archaeological Map - Netherlands AHN4 LiDAR Showcase",
+                "type": "ee_tile_layer",
+                "tile_url": map_id_dict['tile_fetcher'].url_format,
+                "bounds": [3.3, 50.7, 7.3, 53.6],  # Netherlands bounds
+                "center": [netherlands_location['lat'], netherlands_location['lon']],
+                "zoom": 12,
+                "overlays": [
+                    {
+                        "name": "Potential Archaeological Structures",
+                        "type": "geojson", 
+                        "data": structure_data,
+                        "style": {
+                            "color": "red",
+                            "fillColor": "red", 
+                            "fillOpacity": 0.6,
+                            "weight": 2
+                        }
+                    }
+                ],
+                "legend": {
+                    "title": "AHN4 Elevation (meters)",
+                    "colors": ["#006633", "#E5FFCC", "#662A00", "#D8D8D8", "#F5F5F5"],
+                    "labels": ["0-10m", "10-20m", "20-30m", "30-40m", "40-50m"]
+                }
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="No AHN4 data found for the specified region"
+            )
+            
+    except Exception as e:
+        logging.error(f"Error generating Netherlands AHN map: {e}")
+        # Return fallback map on error
+        return {
+            "map_id": "global-archaeological-fallback",
+            "title": "Global Archaeological Map (Fallback)",
+            "type": "tile_layer",
+            "tile_url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+            "bounds": [3.3, 50.7, 7.3, 53.6],
+            "center": [52.1326, 5.2913],
+            "zoom": 8,
+            "error": str(e)
+        }

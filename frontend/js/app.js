@@ -17,12 +17,58 @@ class REArchaeologyApp {
     }
     
     async init() {
-        // Log OAuth configuration status for development
-        this.logOAuthStatus();
+        try {
+            // Log OAuth configuration status for development
+            this.logOAuthStatus();
+            
+            this.setupEventListeners();
+            await this.loadCategories();
+            this.checkAuthState();
+            
+            // Load Netherlands map as homepage default
+            console.log('Initializing homepage map...');
+            await this.loadNetherlandsMap();
+            
+        } catch (error) {
+            console.error('App initialization error:', error);
+            
+            // Show fallback content if map loading fails
+            const contentDisplay = document.getElementById('content-display');
+            if (contentDisplay) {
+                contentDisplay.innerHTML = `
+                    <div class="welcome-state">
+                        <h2>Welcome to RE-Archaeology Framework</h2>
+                        <p>Archaeological AI Assistant and Discussion Platform</p>
+                        <p class="text-muted">Select a category from the sidebar to begin.</p>
+                        ${error.message.includes('Leaflet') || error.message.includes('map') ? 
+                            '<p><small>Note: Map features may be temporarily unavailable.</small></p>' : ''}
+                    </div>
+                `;
+            }
+        }
+    }
+    
+    async waitForLeaflet() {
+        // Wait for Leaflet to be available
+        const maxWait = 10000; // 10 seconds max (increased from 5)
+        const start = Date.now();
         
-        this.setupEventListeners();
-        await this.loadCategories();
-        this.checkAuthState();
+        while (!window.L && (Date.now() - start) < maxWait) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        if (!window.L) {
+            console.error('Leaflet not loaded after 10 seconds');
+            throw new Error('Leaflet library not available');
+        }
+        
+        // Additional check to ensure Leaflet is fully initialized
+        if (typeof window.L.map !== 'function') {
+            console.error('Leaflet loaded but not fully functional');
+            throw new Error('Leaflet library not fully initialized');
+        }
+        
+        console.log('Leaflet loaded and ready');
     }
     
     logOAuthStatus() {
@@ -135,7 +181,12 @@ class REArchaeologyApp {
         this.currentCategory = category;
         this.updateContentHeader(category.name, category.description);
         
-        await this.loadThreadsForCategory(category);
+        // Show map for Sites category, threads for others
+        if (category.name === 'Sites') {
+            await this.loadNetherlandsMap();
+        } else {
+            await this.loadThreadsForCategory(category);
+        }
     }
     
     async loadThreadsForCategory(category) {
@@ -156,6 +207,9 @@ class REArchaeologyApp {
     
     renderThreads(threads) {
         const contentDisplay = document.getElementById('content-display');
+        
+        // Add padding class for thread view
+        contentDisplay.className = 'has-threads';
         
         if (threads.length === 0) {
             contentDisplay.innerHTML = `
@@ -535,6 +589,259 @@ class REArchaeologyApp {
                 <button class="btn btn-secondary" onclick="location.reload()">Refresh Page</button>
             </div>
         `;
+    }
+    
+    async loadNetherlandsMap() {
+        try {
+            // Ensure Leaflet is available before proceeding
+            if (!window.L) {
+                console.log('Leaflet not available, waiting...');
+                await this.waitForLeaflet();
+            }
+            
+            // Update header
+            this.updateContentHeader('Global Archaeological Map', 'Worldwide Site Discovery & Analysis - Netherlands Showcase');
+            
+            // Get content display and map container
+            const contentDisplay = document.getElementById('content-display');
+            
+            if (!contentDisplay) {
+                console.error('Content display not found');
+                throw new Error('Map container not found in DOM');
+            }
+            
+            // Clean up existing map instance if it exists
+            if (this.netherlandsMap) {
+                try {
+                    this.netherlandsMap.remove();
+                    console.log('Existing map removed');
+                } catch (e) {
+                    console.warn('Error removing existing map:', e);
+                }
+                this.netherlandsMap = null;
+            }
+            
+            // Clear any global Leaflet state
+            if (window.L && window.L._container) {
+                delete window.L._container;
+            }
+            
+            // Force complete cleanup of any existing map containers
+            const existingMapContainers = contentDisplay.querySelectorAll('[id*="map"]');
+            existingMapContainers.forEach(container => {
+                // Remove all Leaflet-specific properties
+                if (container._leaflet_id) {
+                    delete container._leaflet_id;
+                }
+                if (container._leaflet) {
+                    delete container._leaflet;
+                }
+                // Clear all attributes that might interfere
+                const attrs = container.attributes;
+                for (let i = attrs.length - 1; i >= 0; i--) {
+                    if (attrs[i].name.startsWith('_leaflet')) {
+                        container.removeAttribute(attrs[i].name);
+                    }
+                }
+                // Remove any event listeners by cloning
+                const newContainer = container.cloneNode(false);
+                if (container.parentNode) {
+                    container.parentNode.replaceChild(newContainer, container);
+                }
+            });
+            
+            // Additional cleanup - remove any existing map containers
+            const existingMaps = contentDisplay.querySelectorAll('[id^="netherlands-map"]');
+            existingMaps.forEach(mapEl => {
+                if (mapEl._leaflet_id) {
+                    // Force cleanup of Leaflet internals
+                    delete mapEl._leaflet_id;
+                }
+            });
+            
+            // Remove thread padding class for map view
+            contentDisplay.className = '';
+            
+            // Use a consistent map ID instead of unique timestamp
+            const mapId = 'netherlands-map';
+            
+            // Completely clear and recreate the content using DOM methods for better reliability
+            contentDisplay.innerHTML = '';  // Clear first
+            
+            // Create map container using DOM methods
+            const mapContainer = document.createElement('div');
+            mapContainer.className = 'map-container';
+            mapContainer.style.cssText = 'display: block; width: 100%; height: 100%;';
+            
+            // Create controls
+            const mapControls = document.createElement('div');
+            mapControls.className = 'map-controls';
+            mapControls.innerHTML = `
+                <button onclick="window.reApp.toggleLayer('samplesites')">Toggle Sites</button>
+                <button onclick="window.reApp.toggleLayer('ahn')">Toggle AHN LiDAR</button>
+            `;
+            
+            // Create legend
+            const mapLegend = document.createElement('div');
+            mapLegend.className = 'map-legend';
+            mapLegend.innerHTML = `
+                <strong>Global Archaeological Map</strong><br>
+                <small>Netherlands AHN LiDAR Showcase</small>
+            `;
+            
+            // Create map element
+            const mapElement = document.createElement('div');
+            mapElement.id = mapId;
+            mapElement.style.cssText = 'width: 100%; height: 100%; min-height: 500px;';
+            
+            // Assemble the structure
+            mapContainer.appendChild(mapControls);
+            mapContainer.appendChild(mapLegend);
+            mapContainer.appendChild(mapElement);
+            contentDisplay.appendChild(mapContainer);
+            
+            // Force DOM update
+            await new Promise(resolve => {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(resolve);
+                });
+            });
+            
+            // Verify map container exists
+            const finalMapElement = document.getElementById(mapId);
+            if (!finalMapElement) {
+                console.error('Map element still not found after DOM creation');
+                console.error('Content display HTML:', contentDisplay.innerHTML);
+                throw new Error(`Map element '${mapId}' not found after DOM creation`);
+            }
+            
+            console.log('Map element successfully created:', finalMapElement);
+            
+            // Fetch map data from Earth Engine API
+            console.log('Fetching map data from API...');
+            const response = await fetch(`${this.apiBase}/earth-engine/netherlands-ahn-map`);
+            if (!response.ok) {
+                throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+            }
+            
+            const mapData = await response.json();
+            console.log('Map data received:', mapData);
+            
+            // Initialize Leaflet map with the final map element
+            try {
+                this.netherlandsMap = L.map(finalMapElement, {
+                    center: mapData.center,
+                    zoom: mapData.zoom,
+                    zoomControl: true,
+                    attributionControl: true
+                });
+                console.log('Leaflet map initialized successfully');
+            } catch (mapError) {
+                console.error('Leaflet map initialization error:', mapError);
+                throw new Error(`Failed to initialize map: ${mapError.message}`);
+            }
+            
+            // Add base tile layer
+            L.tileLayer(mapData.tile_url, {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 18
+            }).addTo(this.netherlandsMap);
+            
+            // Add overlays if they exist
+            if (mapData.overlays && mapData.overlays.length > 0) {
+                mapData.overlays.forEach(overlay => {
+                    if (overlay.type === 'geojson') {
+                        const geoJsonLayer = L.geoJSON(overlay.data, {
+                            pointToLayer: (feature, latlng) => {
+                                return L.circleMarker(latlng, overlay.style || {
+                                    radius: 8,
+                                    fillColor: '#ff7800',
+                                    color: '#000',
+                                    weight: 1,
+                                    opacity: 1,
+                                    fillOpacity: 0.8
+                                });
+                            },
+                            onEachFeature: (feature, layer) => {
+                                if (feature.properties) {
+                                    let popupContent = `<strong>${feature.properties.name || 'Unknown Site'}</strong><br>`;
+                                    if (feature.properties.type) {
+                                        popupContent += `Type: ${feature.properties.type}<br>`;
+                                    }
+                                    if (feature.properties.height) {
+                                        popupContent += `Height: ${feature.properties.height}<br>`;
+                                    }
+                                    layer.bindPopup(popupContent);
+                                }
+                            }
+                        });
+                        geoJsonLayer.addTo(this.netherlandsMap);
+                        
+                        // Store reference for layer toggling
+                        if (!this.mapLayers) this.mapLayers = {};
+                        this.mapLayers[overlay.name.toLowerCase().replace(/\s+/g, '')] = geoJsonLayer;
+                    }
+                });
+            }
+            
+            // Fit map to bounds if provided
+            if (mapData.bounds && mapData.bounds.length === 4) {
+                const bounds = L.latLngBounds(
+                    [mapData.bounds[1], mapData.bounds[0]], // SW
+                    [mapData.bounds[3], mapData.bounds[2]]  // NE
+                );
+                this.netherlandsMap.fitBounds(bounds);
+            }
+            
+            // Store reference globally for layer controls
+            window.reApp = this;
+            
+            console.log('Netherlands map loaded successfully');
+            
+        } catch (error) {
+            console.error('Failed to load Netherlands map:', error);
+            
+            // Show specific error message
+            const contentDisplay = document.getElementById('content-display');
+            if (contentDisplay) {
+                let errorMessage = 'Failed to load Global Archaeological Map.';
+                
+                if (error.message.includes('Leaflet')) {
+                    errorMessage += ' Map library not available.';
+                } else if (error.message.includes('API request')) {
+                    errorMessage += ' Server connection failed.';
+                } else if (error.message.includes('DOM')) {
+                    errorMessage += ' Interface error.';
+                } else {
+                    errorMessage += ` Error: ${error.message}`;
+                }
+                
+                contentDisplay.innerHTML = `
+                    <div class="error-state">
+                        <h4>Map Loading Error</h4>
+                        <p>${errorMessage}</p>
+                        <button class="btn btn-primary" onclick="window.app.loadNetherlandsMap()">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            }
+            
+            this.showError(error.message);
+        }
+    }
+    
+    toggleLayer(layerName) {
+        if (!this.mapLayers) return;
+        
+        const layer = this.mapLayers[layerName];
+        if (layer) {
+            if (this.netherlandsMap.hasLayer(layer)) {
+                this.netherlandsMap.removeLayer(layer);
+            } else {
+                this.netherlandsMap.addLayer(layer);
+            }
+        }
     }
 }
 
