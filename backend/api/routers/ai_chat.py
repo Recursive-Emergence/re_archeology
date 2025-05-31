@@ -16,9 +16,6 @@ from backend.utils.config import get_settings
 settings = get_settings()
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-# Initialize OpenAI client
-openai.api_key = settings.OPENAI_API_KEY
-
 # Initialize sentence transformer for local embeddings (optional fallback)
 try:
     # Import is done inside try block to handle case when package is not installed
@@ -71,11 +68,14 @@ class SimpleChatResponse(BaseModel):
 async def get_openai_embedding(text: str) -> List[float]:
     """Generate embedding using OpenAI API."""
     try:
-        response = await openai.Embedding.acreate(
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        response = await client.embeddings.create(
             model=settings.OPENAI_EMBEDDING_MODEL,
             input=text
         )
-        return response['data'][0]['embedding']
+        return response.data[0].embedding
     except Exception as e:
         # Fallback to local model if available
         if embedding_model:
@@ -213,11 +213,14 @@ async def chat_with_ai(
         # Convert to OpenAI format
         openai_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
         
-        # Call OpenAI API
-        response = await openai.ChatCompletion.acreate(
+        # Call OpenAI API using new client format
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        response = await client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=openai_messages,
-            max_tokens=1000,
+            max_tokens=300,  # Reduced from 1000
             temperature=0.7
         )
         
@@ -361,17 +364,40 @@ async def simple_chat(
     request: SimpleChatRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """Simple chat endpoint with basic AI response."""
+    """Simple chat endpoint with OpenAI integration."""
     try:
-        # For now, return a simple response to test the endpoint
-        response_text = f"Hello {current_user.get('name', 'User')}! I received your message: '{request.message}'. This is a test response from Bella, your RE-Archaeology AI assistant."
+        # Create a system message for the RE-Archaeology context
+        system_message = """You are Bella, an AI assistant for RE-Archaeology. Help with archaeological research. Be concise and helpful."""
         
-        # TODO: Add real OpenAI integration once we confirm the endpoint works
-        return SimpleChatResponse(response=response_text)
+        # Prepare messages for OpenAI
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": request.message}
+        ]
+        
+        # Add context if provided
+        if request.context:
+            context_info = f"Additional context: {request.context}"
+            messages.insert(1, {"role": "system", "content": context_info})
+        
+        # Call OpenAI API using the new client format
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=messages,
+            max_tokens=200,  # Reduced from 500
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content
+        
+        return SimpleChatResponse(response=ai_response)
         
     except Exception as e:
         print(f"Error in simple_chat: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+        # Fallback response if OpenAI fails
+        fallback_response = f"Hello {current_user.get('name', 'User')}! I'm Bella, your RE-Archaeology AI assistant. I received your message about: '{request.message}'. I'm currently experiencing some technical difficulties with my AI capabilities, but I'm here to help with your archaeological research!"
+        
+        return SimpleChatResponse(response=fallback_response)

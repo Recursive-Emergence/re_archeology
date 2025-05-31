@@ -92,10 +92,7 @@ async def startup_event():
 def _initialize_neo4j():
     """Helper function to initialize Neo4j connection"""
     # Import here to ensure settings are loaded after .env
-    from backend.utils.config import print_neo4j_config, settings
-    
-    # Print debug information
-    print_neo4j_config()
+    from backend.utils.config import settings
     
     # Try to establish connection
     neo4j_db.connect()
