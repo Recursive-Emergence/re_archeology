@@ -1,5 +1,8 @@
 .env
-
+archive/
+backup/
+docs/
+ref/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

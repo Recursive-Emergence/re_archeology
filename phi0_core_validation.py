@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """
-Windmill Detection Validation Test using Real Earth Engine AHN4 Data
+Structure Detection Validation Test using Real Earth Engine AHN4 Data
 
-This script implements comprehensive validation for windmill detection using the
-φ⁰ v8 compact core with windmill-optimized octonionic feature implementation.
+This script implements comprehensive validation for structure detection using the
+φ⁰ generalized structure detection core with optimized octonionic feature implementation.
 
 Tests both:
-- POSITIVE validation: Verify windmill centers are properly detected  
+- POSITIVE validation: Verify structure centers are properly detected  
 - NEGATIVE validation: Verify surrounding areas do NOT trigger false positives
 
 Uses ONLY real Earth Engine AHN4 LiDAR data - no synthetic fallbacks.
-Tests the v8 windmill-specific enhancements and systematic false positive fixes implemented in phi0_compact_core.py.
+Tests the generalized structure-specific enhancements and systematic false positive fixes 
+implemented in phi0_core.py.
+
+Supports multiple structure types:
+- Windmill foundations
+- Communication towers
+- Archaeological mounds
+- Settlement circles
+- Generic circular structures
 
 Includes comprehensive visualization and performance analysis functionality.
 """
@@ -19,8 +27,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from phi0_compact_core import CompactElevationDetector as ElevationPatternDetector, ElevationPatch, DetectionCandidate
-from phi0_core import V8ReferenceElevationDetector  # Add this import
+from phi0_core import PhiZeroStructureDetector, ElevationPatch  # Updated import for generalized core
 import logging
 import numpy as np
 import json
@@ -47,7 +54,7 @@ DEFAULT_VALIDATION_WINDMILLS = [
     {"name": "De Bonte Hen", "lat": 52.47793734015221, "lon": 4.813402499137949},
     {"name": "De Gekroonde Poelenburg", "lat": 52.474166977199445, "lon": 4.817628676751737},
     {"name": "De Huisman", "lat": 52.47323132365517, "lon": 4.816668420518732},
-    {"name": "Het Klaverblad", "lat": 52.4775485810242, "lon": 4.813724798553969}
+    {"name": "Het Klaverblad", "lat": 52.4775485810242, "lon": 4.813724798553969}, 
 ]
 
 
@@ -55,8 +62,10 @@ DEFAULT_VALIDATION_WINDMILLS = [
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# === CONFIG: Choose which detector to use ===
-USE_V8_REFERENCE = True  # Set to True to use V8ReferenceElevationDetector, False for CompactElevationDetector
+# === CONFIG: Detector Configuration ===
+STRUCTURE_TYPE = "windmill"  # Can be: windmill, tower, mound, settlement, generic
+RESOLUTION_M = 0.5
+KERNEL_SIZE = 21
 
 def initialize_earth_engine():
     """Initialize Earth Engine with service account authentication"""
@@ -111,12 +120,13 @@ def load_real_elevation_patch(lat, lon, windmill_name, buffer_radius_m=20, resol
             elevation_array = np.where(np.isnan(elevation_array), mean_val, elevation_array)
         patch = ElevationPatch(
             elevation_data=elevation_array,
-            coordinates=(lat, lon),
-            patch_size_m=buffer_radius_m * 2,
+            lat=lat,
+            lon=lon,
+            source='AHN4_real',
             resolution_m=resolution_m,
+            patch_size_m=buffer_radius_m * 2,
             metadata={
                 'buffer_radius_m': buffer_radius_m,
-                'source': 'AHN4_real',
                 'method': 'sampleRectangle',
                 'windmill_name': windmill_name
             }
@@ -229,12 +239,12 @@ def diagnostic_feature_stats(detector, training_patches, kernel):
 
 def test_validation_real_data():
     """
-    Validation using the φ⁰ v8 compact detection core.
+    Validation using the φ⁰ generalized structure detection core.
     1. POSITIVE: Verify windmill centers are detected
     2. NEGATIVE: Verify surrounding areas don't trigger false positives
     """
-    logger.info("=== VALIDATION TEST: φ⁰ v8 COMPACT CORE ===")
-    logger.info("Testing v8 windmill-optimized octonionic features with false positive fixes")
+    logger.info("=== VALIDATION TEST: φ⁰ STRUCTURE DETECTION CORE ===")
+    logger.info(f"Testing {STRUCTURE_TYPE} detection with generalized octonionic features")
 
     # Initialize Earth Engine
     logger.info("\n=== Step 0: Initialize Earth Engine ===")
@@ -244,7 +254,7 @@ def test_validation_real_data():
     logger.info("\n=== Step 1: Load Training Patches (Real AHN4 Data) ===")
     training_patches = []
     for windmill in DEFAULT_TRAINING_WINDMILLS:
-        patch = load_real_windmill_patch(windmill, buffer_radius_m=20, resolution_m=0.5)
+        patch = load_real_windmill_patch(windmill, buffer_radius_m=20, resolution_m=RESOLUTION_M)
         patch.elevation_data = clean_patch_data(patch.elevation_data)
         training_patches.append(patch)
     logger.info(f"✅ All {len(training_patches)} training patches loaded with real AHN4 data")
@@ -253,7 +263,7 @@ def test_validation_real_data():
     logger.info("\n=== Step 2: Load Positive Validation Patches (Real AHN4 Data) ===")
     positive_validation_patches = []
     for windmill in DEFAULT_VALIDATION_WINDMILLS:
-        patch = load_real_windmill_patch(windmill, buffer_radius_m=20, resolution_m=0.5)
+        patch = load_real_windmill_patch(windmill, buffer_radius_m=20, resolution_m=RESOLUTION_M)
         patch.elevation_data = clean_patch_data(patch.elevation_data)
         positive_validation_patches.append(patch)
     logger.info(f"✅ All {len(positive_validation_patches)} positive validation patches loaded")
@@ -265,7 +275,7 @@ def test_validation_real_data():
         negative_patches = load_real_negative_patches(
             windmill,
             buffer_radius_m=20,
-            resolution_m=0.5,
+            resolution_m=RESOLUTION_M,
             offset_distance_m=150  # Increased from 50m to 150m for truly negative patches
         )
         for patch in negative_patches:
@@ -273,39 +283,31 @@ def test_validation_real_data():
         negative_validation_patches.extend(negative_patches)
     logger.info(f"✅ All {len(negative_validation_patches)} negative validation patches loaded")
 
-    # Initialize φ⁰ v8 detection core
-    logger.info("\n=== Step 4: Initialize φ⁰ v8 Detection Core ===")
-    if USE_V8_REFERENCE:
-        detector = V8ReferenceElevationDetector(
-            resolution_m=0.5, 
-            kernel_size=21, 
-            pattern_type="windmill"
-        )
-        logger.info("Using V8ReferenceElevationDetector for validation.")
-    else:
-        detector = ElevationPatternDetector(
-            resolution_m=0.5, 
-            kernel_size=21, 
-            pattern_type="windmill"
-        )
-        logger.info("Using CompactElevationDetector for validation.")
+    # Initialize φ⁰ detection core
+    logger.info("\n=== Step 4: Initialize φ⁰ Structure Detection Core ===")
+    detector = PhiZeroStructureDetector(
+        resolution_m=RESOLUTION_M,
+        kernel_size=KERNEL_SIZE,
+        structure_type=STRUCTURE_TYPE
+    )
+    logger.info(f"Using PhiZeroStructureDetector for {STRUCTURE_TYPE} detection.")
 
-    # Build ψ⁰ kernel from training data
-    logger.info("\n=== Step 5: Build ψ⁰ Kernel from Training Data ===")
+    # Build pattern kernel from training data
+    logger.info("\n=== Step 5: Build Pattern Kernel from Training Data ===")
     
     # Build detection kernel
-    logger.info("Building ψ⁰ detection kernel...")
-    kernel = detector.construct_psi0_kernel(training_patches)
+    logger.info("Building pattern detection kernel...")
+    kernel = detector.learn_pattern_kernel(training_patches, use_apex_center=True)
     
     # DIAGNOSTIC: Print feature and kernel stats for first patch
     diagnostic_feature_stats(detector, training_patches, kernel)
     
     logger.info(f"✅ Detection kernel built: {kernel.shape}")
-    logger.info("  → Using compact core v8 windmill-optimized detection")
+    logger.info(f"  → Using generalized {STRUCTURE_TYPE} detection with octonionic features")
     
     # ADDED: Visualize kernel and training elevation patches
     logger.info("\n=== Step 5.5: VISUALIZE KERNELS AND TRAINING DATA ===")
-    kernel_save_path = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_v8_kernel_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    kernel_save_path = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_kernel_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
     visualize_elevation_and_kernel(training_patches, kernel_data=kernel, save_path=kernel_save_path)
 
     # Test positive validation
@@ -323,18 +325,18 @@ def test_validation_real_data():
             
         logger.info(f"   Testing {windmill_name}...")
         
-        # Apply enhanced geometric detection (NEW: replaces φ⁰-only approach)
-        detection_result = detector.enhanced_geometric_decision(features, elevation_data=patch.elevation_data)
+        # Apply enhanced geometric detection using new API
+        detection_result = detector.detect_with_geometric_validation(features, elevation_data=patch.elevation_data)
         
-        if np.isnan(detection_result['details']['phi0_response']).all():
+        if np.isnan(detection_result.details['phi0_response']).all():
             logger.warning(f"   Skipping {windmill_name}: NaN in φ⁰ response.")
             continue
             
-        # Analyze results
-        max_phi0 = detection_result['details']['max_score']
-        center_phi0 = detection_result['details']['center_score']
-        geometric_score = detection_result['details']['geometric_score']
-        detected = detection_result['detected']
+        # Analyze results using new result structure
+        max_phi0 = detection_result.max_score
+        center_phi0 = detection_result.center_score
+        geometric_score = detection_result.geometric_score
+        detected = detection_result.detected
         
         # Store results
         result = {
@@ -343,18 +345,18 @@ def test_validation_real_data():
             'max_phi0_score': float(max_phi0),
             'center_phi0_score': float(center_phi0),
             'geometric_score': float(geometric_score),
-            'confidence': float(detection_result['confidence']),
-            'reason': detection_result['reason'],
+            'confidence': float(detection_result.confidence),
+            'reason': detection_result.reason,
             'expected_detection': True
         }
         
         positive_results.append(result)
-        positive_responses.append(detection_result['details']['phi0_response'])
+        positive_responses.append(detection_result.details['phi0_response'])
         positive_names.append(windmill_name)
         
         # Log results (enhanced with geometric info)
         status = "✅ DETECTED" if detected else "❌ MISSED"
-        logger.info(f"     Result: {status} - φ⁰: {max_phi0:.3f}, Geo: {geometric_score:.3f}, Conf: {detection_result['confidence']:.3f}")
+        logger.info(f"     Result: {status} - φ⁰: {max_phi0:.3f}, Geo: {geometric_score:.3f}, Conf: {detection_result.confidence:.3f}")
 
     # Test negative validation
     logger.info("\n=== Step 7: NEGATIVE VALIDATION - Test Surrounding Areas ===")
@@ -373,17 +375,17 @@ def test_validation_real_data():
             
         logger.info(f"   Testing {patch_name}...")
         
-        # Apply enhanced geometric detection (NEW: replaces φ⁰-only approach)
-        detection_result = detector.enhanced_geometric_decision(features, elevation_data=patch.elevation_data)
+        # Apply enhanced geometric detection using new API
+        detection_result = detector.detect_with_geometric_validation(features, elevation_data=patch.elevation_data)
         
-        if np.isnan(detection_result['details']['phi0_response']).all():
+        if np.isnan(detection_result.details['phi0_response']).all():
             logger.warning(f"   Skipping {patch_name}: NaN in φ⁰ response.")
             continue
             
-        # Analyze results
-        max_phi0 = detection_result['details']['max_score']
-        geometric_score = detection_result['details']['geometric_score']
-        false_positive = detection_result['detected']
+        # Analyze results using new result structure
+        max_phi0 = detection_result.max_score
+        geometric_score = detection_result.geometric_score
+        false_positive = detection_result.detected
         
         # Store results
         result = {
@@ -393,13 +395,13 @@ def test_validation_real_data():
             'false_positive': bool(false_positive),
             'max_phi0_score': float(max_phi0),
             'geometric_score': float(geometric_score),
-            'confidence': float(detection_result['confidence']),
-            'reason': detection_result['reason'],
+            'confidence': float(detection_result.confidence),
+            'reason': detection_result.reason,
             'expected_detection': False
         }
         
         negative_results.append(result)
-        negative_responses.append(detection_result['details']['phi0_response'])
+        negative_responses.append(detection_result.details['phi0_response'])
         negative_names.append(patch_name)
         
         # Log results (enhanced with geometric info)
@@ -414,9 +416,9 @@ def test_validation_real_data():
         all_responses = positive_responses + negative_responses
         all_names = positive_names + negative_names
         
-        # Create comprehensive debug visualization
+        # Create comprehensive debug visualization using new API
         try:
-            debug_save_path = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_v8_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            debug_save_path = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             detector.visualize_detection_results(all_responses, patch_names=all_names, save_path=debug_save_path)
             logger.info(f"✅ Debug visualization saved to: {debug_save_path}")
         except Exception as e:
@@ -424,7 +426,7 @@ def test_validation_real_data():
         
         # Create separate detection results visualization
         try:
-            detection_save_path = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_v8_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            detection_save_path = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             visualize_detection_results(all_responses, patch_names=all_names, save_path=detection_save_path)
             
             # Perform basic performance analysis using available methods
@@ -480,7 +482,8 @@ def test_validation_real_data():
     # Save comprehensive results
     results_data = {
         'timestamp': datetime.now().isoformat(),
-        'test_type': 'phi0_v8_validation',
+        'test_type': 'phi0_structure_validation',
+        'structure_type': STRUCTURE_TYPE,
         'data_source': 'AHN4_Earth_Engine_real_only',
         'training_windmills_count': len(training_patches),
         'validation_results': {
@@ -507,11 +510,11 @@ def test_validation_real_data():
         }
     }
     
-    results_file = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_v8_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    results_file = f"/media/im3/plus/lab4/RE/re_archaeology/phi0_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     with open(results_file, 'w') as f:
         json.dump(results_data, f, indent=2)
     
-    logger.info(f"\n💾 φ⁰ v8 results saved to: {results_file}")
+    logger.info(f"\n💾 φ⁰ {STRUCTURE_TYPE} detection results saved to: {results_file}")
     
     # Recommendation for next steps
     if not overall_success:
@@ -556,7 +559,7 @@ def visualize_elevation_and_kernel(patches, kernel_data=None, save_path=None):
             
             # Add title with windmill name and coordinates
             windmill_name = patch.metadata.get('windmill_name', f'Patch {i+1}')
-            lat, lon = patch.coordinates
+            lat, lon = patch.lat, patch.lon
             ax.set_title(f'{windmill_name}\n({lat:.4f}, {lon:.4f})', fontsize=10)
             
             # Add colorbar
@@ -579,14 +582,14 @@ def visualize_elevation_and_kernel(patches, kernel_data=None, save_path=None):
         # If kernel data provided, create kernel visualization
         if kernel_data is not None:
             fig, axes = plt.subplots(2, 4, figsize=(16, 8))
-            fig.suptitle('ψ⁰ Kernel Feature Maps (v8 Windmill-Optimized)', fontsize=14)
+            fig.suptitle(f'φ⁰ Kernel Feature Maps ({STRUCTURE_TYPE.title()}-Optimized)', fontsize=14)
             
-            for i in range(min(8, kernel_data.shape[0])):
+            for i in range(min(8, kernel_data.shape[2])):
                 row = i // 4
                 col = i % 4
                 ax = axes[row, col]
                 
-                im = ax.imshow(kernel_data[i], cmap='RdBu_r', aspect='equal')
+                im = ax.imshow(kernel_data[:, :, i], cmap='RdBu_r', aspect='equal')
                 ax.set_title(f'Feature {i+1}')
                 plt.colorbar(im, ax=ax)
             
@@ -629,10 +632,15 @@ def visualize_detection_results(phi0_responses, patch_names=None, save_path=None
             center_y, center_x = response.shape[0]//2, response.shape[1]//2
             center_score = response[center_y, center_x]
             
-            ax.set_title(f'{title}\nMax: {max_score:.3f}, Center: {center_score:.3f}', fontsize=10)
+            # Determine detection status
+            detector_threshold = 0.50 if STRUCTURE_TYPE == "windmill" else 0.35  # Use structure-specific threshold
+            is_detected = max_score > detector_threshold
+            status = "🎯 DETECTED" if is_detected else "❌ Below threshold"
+            
+            ax.set_title(f'{title}\nMax: {max_score:.3f}, Center: {center_score:.3f}\n{status}', fontsize=10)
             
             # Add colorbar
-            plt.colorbar(im, ax=ax, label='ψ⁰ Score')
+            plt.colorbar(im, ax=ax, label='φ⁰ Score')
             
             # Mark center and max points
             ax.plot(center_x, center_y, 'b+', markersize=8, markeredgewidth=2, label='Center')
@@ -655,17 +663,17 @@ def visualize_detection_results(phi0_responses, patch_names=None, save_path=None
 
 
 if __name__ == "__main__":
-    print("Testing Windmill Detection φ⁰ v8 Compact Core")
-    print("Single Method Validation with v8 Windmill-Optimized Features")
-    print("=" * 50)
+    print(f"Testing {STRUCTURE_TYPE.title()} Detection - φ⁰ Structure Detection Core")
+    print("Generalized Structure Validation with Octonionic Features")
+    print("=" * 60)
     
     try:
         # Test validation with real data
         success = test_validation_real_data()
         if success:
-            print("\n✅ Windmill detection validation completed successfully!")
+            print(f"\n✅ {STRUCTURE_TYPE.title()} detection validation completed successfully!")
         else:
-            print("\n⚠️  Validation completed but targets not met. Check logs for recommendations.")
+            print(f"\n⚠️  Validation completed but targets not met. Check logs for recommendations.")
         
     except Exception as e:
         print(f"\n❌ Test failed with error: {e}")

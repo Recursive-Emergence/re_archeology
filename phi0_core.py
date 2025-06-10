@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-V8 Reference     def __init__(self, resolution_m: float = 0.5, kernel_size: int = 21, pattern_type: str = "windmill"):
-        self.resolution_m = resolution_m
-        self.kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-        self.pattern_type = pattern_type
-        self.n_features = 8
-        self.detection_threshold = 0.50 if pattern_type == "windmill" else 0.012ion Pattern Detection Core - Direct port of v8 windmill detection logic
+Phi-Zero (φ⁰) Circular Structure Detection Core - Clean Implementation
 
-This class mirrors the API of CompactElevationDetector but implements the v8 logic as found in windmill_detectionoptimized_upgradev8.py.
-Use this for direct side-by-side validation and debugging.
+A streamlined, well-organized implementation of the v8 circular structure detection algorithm.
+Combines elevation histogram matching with geometric pattern analysis for robust
+detection of circular elevated structures in elevation data.
+
+Key Features:
+- 8-dimensional octonionic feature extraction
+- Raw elevation histogram matching
+- Geometric pattern validation
+- Performance analytics and visualization
+- Structure-agnostic design (windmills, towers, mounds, etc.)
+
+Author: Structure Detection Team
+Version: v8-clean
 """
+
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
@@ -17,14 +24,20 @@ from scipy.ndimage import (
     uniform_filter, gaussian_filter, maximum_filter,
     distance_transform_edt, sobel
 )
-from skimage.transform import hough_circle
 import logging
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# DATA STRUCTURES
+# =============================================================================
+
 @dataclass
 class ElevationPatch:
+    """Container for elevation data and metadata"""
     elevation_data: np.ndarray
     lat: float = None
     lon: float = None
@@ -34,72 +47,176 @@ class ElevationPatch:
     patch_size_m: float = None
     metadata: Dict = None
 
+
 @dataclass
 class DetectionCandidate:
+    """Container for detection results"""
     center_y: int
     center_x: int
     psi0_score: float
     coherence: float = 0.0
     confidence: float = 0.0
 
-class V8ReferenceElevationDetector:
-    def __init__(self, resolution_m: float = 0.5, kernel_size: int = 21, pattern_type: str = "windmill"):
+
+@dataclass
+class DetectionResult:
+    """Enhanced detection result with geometric validation"""
+    detected: bool
+    confidence: float
+    reason: str
+    max_score: float
+    center_score: float
+    geometric_score: float
+    details: Dict
+
+
+# =============================================================================
+# MAIN DETECTOR CLASS
+# =============================================================================
+
+class PhiZeroStructureDetector:
+    """
+    Clean implementation of the Phi-Zero circular structure detection algorithm.
+    
+    This detector uses an 8-dimensional octonionic feature space combined with
+    elevation histogram matching and geometric pattern validation to detect
+    circular elevated structures in elevation data.
+    
+    Supports various structure types:
+    - Windmill foundations
+    - Ancient mounds and settlements  
+    - Communication towers
+    - Water towers
+    - Archaeological circular features
+    """
+    
+    def __init__(self, resolution_m: float = 0.5, kernel_size: int = 21, structure_type: str = "windmill"):
+        """
+        Initialize the Phi-Zero structure detector.
+        
+        Args:
+            resolution_m: Spatial resolution in meters per pixel
+            kernel_size: Size of the detection kernel (should be odd)
+            structure_type: Type of structure to detect ("windmill", "tower", "mound", "settlement", "generic")
+        """
         self.resolution_m = resolution_m
         self.kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-        self.pattern_type = pattern_type
+        self.structure_type = structure_type
         self.n_features = 8
-        self.detection_threshold = 0.50 if pattern_type == "windmill" else 0.012
-        self.foundation_radius_m = 8.0 if pattern_type == "windmill" else 10.0
-        self.foundation_radius_px = int(self.foundation_radius_m / resolution_m)
-        self.foundation_scales = [10, 15, 25] if pattern_type == "windmill" else [5, 10, 20]
+        
+        # Structure-specific parameters
+        if structure_type == "windmill":
+            self.detection_threshold = 0.50
+            self.structure_radius_m = 8.0  # Typical windmill foundation radius
+            self.structure_scales = [10, 15, 25]
+        elif structure_type == "tower":
+            self.detection_threshold = 0.45
+            self.structure_radius_m = 5.0  # Communication/water towers
+            self.structure_scales = [5, 8, 12]
+        elif structure_type == "mound":
+            self.detection_threshold = 0.30
+            self.structure_radius_m = 15.0  # Archaeological mounds
+            self.structure_scales = [15, 25, 40]
+        elif structure_type == "settlement":
+            self.detection_threshold = 0.25
+            self.structure_radius_m = 20.0  # Settlement circles
+            self.structure_scales = [20, 30, 50]
+        else:  # generic
+            self.detection_threshold = 0.35
+            self.structure_radius_m = 10.0
+            self.structure_scales = [5, 10, 20]
+        
+        self.structure_radius_px = int(self.structure_radius_m / resolution_m)
+        
+        # Internal state
         self.psi0_kernel = None
-        logger.info(f"V8 reference detector initialized for {pattern_type} at {resolution_m}m resolution")
-
+        self.elevation_kernel = None
+        
+        logger.info(f"PhiZero detector initialized for {structure_type} structures at {resolution_m}m resolution")
+    
+    
+    # =========================================================================
+    # CORE FEATURE EXTRACTION
+    # =========================================================================
+    
     def extract_octonionic_features(self, elevation_data: np.ndarray) -> np.ndarray:
-        # Direct v8 logic
+        """
+        Extract 8-dimensional octonionic features from elevation data with enhanced size discrimination.
+        
+        Features:
+        0. Radial Height Prominence (enhanced with volume discrimination)
+        1. Circular Symmetry
+        2. Radial Gradient Consistency
+        3. Ring Edge Sharpness
+        4. Hough Response
+        5. Local Planarity
+        6. Isolation Score (enhanced with height prominence)
+        7. Geometric Coherence
+        
+        Args:
+            elevation_data: 2D elevation array
+            
+        Returns:
+            3D array of shape (h, w, 8) containing features
+        """
         elevation = np.nan_to_num(elevation_data.astype(np.float64), nan=0.0)
         h, w = elevation.shape
         features = np.zeros((h, w, 8))
+        
+        # Compute gradients once
         grad_x = np.gradient(elevation, axis=1) / self.resolution_m
         grad_y = np.gradient(elevation, axis=0) / self.resolution_m
         grad_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-        # f0: Radial Height Prominence
-        local_max_filter = maximum_filter(elevation, size=2*self.foundation_radius_px+1)
-        local_mean = uniform_filter(elevation, size=2*self.foundation_radius_px+1)
+        
+        # Extract base features
+        base_radial_prominence = self._compute_radial_prominence(elevation)
+        base_isolation = self._compute_isolation_score(elevation)
+        
+        # Enhanced size discrimination metrics
+        volume_metric = self._compute_structure_volume_metric(elevation)
+        height_prominence = self._compute_height_prominence_metric(elevation)
+        
+        # Combine features with size discrimination
+        features[..., 0] = base_radial_prominence * (0.7 + 0.3 * volume_metric)  # Volume-weighted prominence
+        features[..., 1] = self._compute_circular_symmetry(elevation)
+        features[..., 2] = self._compute_radial_gradient_consistency(grad_x, grad_y)
+        features[..., 3] = self._compute_ring_edges(elevation)
+        features[..., 4] = self._compute_hough_response(grad_magnitude)
+        features[..., 5] = self._compute_local_planarity(elevation)
+        features[..., 6] = base_isolation * (0.6 + 0.4 * height_prominence)  # Height-weighted isolation
+        features[..., 7] = self._compute_geometric_coherence(elevation, grad_magnitude)
+        
+        return features
+    
+    def _compute_radial_prominence(self, elevation: np.ndarray) -> np.ndarray:
+        """Compute f0: Radial Height Prominence"""
+        radius = self.structure_radius_px
+        local_max_filter = maximum_filter(elevation, size=2*radius+1)
+        local_mean = uniform_filter(elevation, size=2*radius+1)
         prominence = elevation - local_mean
         relative_prominence = prominence / (local_max_filter - local_mean + 1e-6)
-        features[..., 0] = np.clip(relative_prominence, 0, 1)
-        # f1: Circular Symmetry
-        features[..., 1] = self._compute_circular_symmetry(elevation, self.foundation_radius_px)
-        # f2: Radial Gradient Consistency
-        features[..., 2] = self._compute_radial_gradient_consistency(grad_x, grad_y, self.foundation_radius_px)
-        # f3: Ring Edge Sharpness
-        features[..., 3] = self._detect_ring_edges(elevation, self.foundation_radius_px)
-        # f4: Hough Response
-        features[..., 4] = self._compute_hough_response(grad_magnitude, self.foundation_radius_px)
-        # f5: Planarity
-        features[..., 5] = self._compute_local_planarity(elevation, self.foundation_radius_px)
-        # f6: Isolation
-        features[..., 6] = self._compute_isolation_score(elevation, self.foundation_radius_px)
-        # f7: Geometric Coherence
-        features[..., 7] = self._compute_geometric_coherence(elevation, grad_magnitude, self.foundation_radius_px)
-        return features
-
-    def _compute_circular_symmetry(self, elevation, radius):
+        return np.clip(relative_prominence, 0, 1)
+    
+    def _compute_circular_symmetry(self, elevation: np.ndarray) -> np.ndarray:
+        """Compute f1: Circular Symmetry around each point"""
         h, w = elevation.shape
+        radius = self.structure_radius_px
         symmetry = np.zeros((h, w))
         angles = np.linspace(0, 2*np.pi, 8, endpoint=False)
         pad_size = radius + 1
         padded = np.pad(elevation, pad_size, mode='reflect')
+        
         for y in range(h):
             for x in range(w):
                 y_pad, x_pad = y + pad_size, x + pad_size
                 values = []
+                
                 for angle in angles:
                     dy = int(radius * np.sin(angle))
                     dx = int(radius * np.cos(angle))
                     if (0 <= y_pad + dy < padded.shape[0] and 0 <= x_pad + dx < padded.shape[1]):
                         values.append(padded[y_pad + dy, x_pad + dx])
+                
                 if len(values) >= 6:
                     values = np.array(values)
                     std_dev = np.std(values)
@@ -108,79 +225,106 @@ class V8ReferenceElevationDetector:
                     symmetry[y, x] = 1.0 / (1.0 + 2.0 * relative_std)
                 else:
                     symmetry[y, x] = 0.0
+        
         return symmetry
-
-    def _compute_radial_gradient_consistency(self, grad_x, grad_y, radius):
+    
+    def _compute_radial_gradient_consistency(self, grad_x: np.ndarray, grad_y: np.ndarray) -> np.ndarray:
+        """Compute f2: Radial Gradient Consistency"""
         h, w = grad_x.shape
+        radius = self.structure_radius_px
         consistency = np.zeros((h, w))
+        
         for cy in range(radius, h-radius):
             for cx in range(radius, w-radius):
                 y_min, y_max = cy-radius, cy+radius+1
                 x_min, x_max = cx-radius, cx+radius+1
                 local_gx = grad_x[y_min:y_max, x_min:x_max]
                 local_gy = grad_y[y_min:y_max, x_min:x_max]
+                
                 local_y, local_x = np.ogrid[:2*radius+1, :2*radius+1]
                 dy = local_y - radius
                 dx = local_x - radius
                 dist = np.sqrt(dy**2 + dx**2) + 1e-6
+                
                 expected_gx = dx / dist
                 expected_gy = dy / dist
                 dot_product = local_gx * expected_gx + local_gy * expected_gy
                 weight = np.exp(-dist / radius) * np.sqrt(local_gx**2 + local_gy**2)
                 mask = dist <= radius
+                
                 if np.sum(mask) > 0:
                     consistency[cy, cx] = np.sum(dot_product[mask] * weight[mask]) / (np.sum(weight[mask]) + 1e-6)
+        
         return np.clip(consistency, -1, 1)
-
-    def _detect_ring_edges(self, elevation, radius):
+    
+    def _compute_ring_edges(self, elevation: np.ndarray) -> np.ndarray:
+        """Compute f3: Ring Edge Sharpness using DoG"""
+        radius = self.structure_radius_px
         sigma1 = radius * 0.8 * self.resolution_m
         sigma2 = radius * 1.2 * self.resolution_m
         dog = gaussian_filter(elevation, sigma1) - gaussian_filter(elevation, sigma2)
         edge_strength = np.abs(dog)
+        
         if np.percentile(edge_strength, 95) > 0:
             edge_strength = edge_strength / (np.percentile(edge_strength, 95) + 1e-6)
+        
         return np.clip(edge_strength, 0, 1)
-
-    def _compute_hough_response(self, gradient_magnitude, target_radius):
+    
+    def _compute_hough_response(self, gradient_magnitude: np.ndarray) -> np.ndarray:
+        """Compute f4: Hough Circle Transform Response"""
         h, w = gradient_magnitude.shape
         hough_response = np.zeros((h, w))
+        target_radius = self.structure_radius_px
+        
         try:
+            from skimage.transform import hough_circle
             edges = gradient_magnitude > np.percentile(gradient_magnitude, 75)
             edges = edges.astype(np.uint8) * 255
             radii = np.arange(max(5, target_radius-2), target_radius+3, 1)
             hough_res = hough_circle(edges, radii)
+            
             for radius_idx, radius in enumerate(radii):
                 accumulator = hough_res[radius_idx]
                 weight = np.exp(-0.5 * ((radius - target_radius) / 2)**2)
                 hough_response += accumulator * weight
+            
             if np.max(hough_response) > 0:
                 hough_response = hough_response / np.max(hough_response)
+                
         except Exception as e:
             logger.debug(f"Hough transform failed: {e}, using zero response")
+        
         return hough_response
-
-    def _compute_local_planarity(self, elevation, radius):
+    
+    def _compute_local_planarity(self, elevation: np.ndarray) -> np.ndarray:
+        """Compute f5: Local Planarity via least squares fitting"""
         h, w = elevation.shape
+        radius = self.structure_radius_px
         planarity = np.zeros((h, w))
+        
         for y in range(radius, h-radius):
             for x in range(radius, w-radius):
                 local_patch = elevation[y-radius:y+radius+1, x-radius:x+radius+1]
                 yy, xx = np.mgrid[:local_patch.shape[0], :local_patch.shape[1]]
                 center_y, center_x = radius, radius
                 mask = (yy - center_y)**2 + (xx - center_x)**2 <= radius**2
+                
                 if np.sum(mask) > 3:
                     points = np.column_stack([xx[mask], yy[mask], np.ones(np.sum(mask))])
                     z_values = local_patch[mask]
                     try:
-                        coeffs, residuals, rank, s = np.linalg.lstsq(points, z_values, rcond=None)
+                        coeffs, _, _, _ = np.linalg.lstsq(points, z_values, rcond=None)
                         z_fit = coeffs[0] * xx + coeffs[1] * yy + coeffs[2]
                         residuals = np.abs(local_patch - z_fit)[mask]
                         planarity[y, x] = 1.0 / (1.0 + np.std(residuals))
                     except:
                         planarity[y, x] = 0.0
+        
         return planarity
-
-    def _compute_isolation_score(self, elevation, radius):
+    
+    def _compute_isolation_score(self, elevation: np.ndarray) -> np.ndarray:
+        """Compute f6: Isolation Score"""
+        radius = self.structure_radius_px
         local_max = maximum_filter(elevation, size=2*radius+1)
         extended_max = maximum_filter(elevation, size=4*radius+1)
         isolation = (local_max == extended_max).astype(float)
@@ -188,17 +332,17 @@ class V8ReferenceElevationDetector:
         prominence_std = np.std(prominence) + 1e-6
         isolation = isolation * (1 - np.exp(-prominence / prominence_std))
         return isolation
-
-    def _compute_geometric_coherence(self, elevation, gradient_magnitude, radius):
+    
+    def _compute_geometric_coherence(self, elevation: np.ndarray, gradient_magnitude: np.ndarray) -> np.ndarray:
+        """Compute f7: Geometric Coherence"""
+        radius = self.structure_radius_px
         edges = gradient_magnitude > np.percentile(gradient_magnitude, 80)
         dist_from_edge = distance_transform_edt(~edges)
         
-        # Simplified version - avoid nested loops
         h, w = elevation.shape
         coherence = np.zeros_like(elevation)
-        
-        # Vectorized approach - compute for center region only
         pad = radius
+        
         if h > 2*pad and w > 2*pad:
             center_y, center_x = h//2, w//2
             y_start, y_end = max(pad, center_y-10), min(h-pad, center_y+11)
@@ -216,81 +360,168 @@ class V8ReferenceElevationDetector:
         coherence = gaussian_filter(coherence, sigma=2)
         if np.max(coherence) > 0:
             coherence = coherence / np.max(coherence)
+        
         return coherence
-
-    def construct_psi0_kernel(self, training_patches: List[ElevationPatch]) -> np.ndarray:
-        logger.info(f"Learning ψ⁰ kernel from {len(training_patches)} training patches (v8 logic)")
+    
+    
+    # =========================================================================
+    # KERNEL LEARNING AND PATTERN MATCHING
+    # =========================================================================
+    
+    def _find_optimal_kernel_center(self, elevation: np.ndarray) -> Tuple[int, int]:
+        """
+        Find the optimal center location for kernel extraction.
+        
+        This method locates the elevation apex (maximum point) within the patch,
+        which typically corresponds to the center of circular elevated structures.
+        
+        Args:
+            elevation: 2D elevation array
+            
+        Returns:
+            Tuple of (center_y, center_x) coordinates of the optimal center
+        """
+        # Find the location of maximum elevation (apex)
+        max_pos = np.unravel_index(np.argmax(elevation), elevation.shape)
+        center_y, center_x = max_pos[0], max_pos[1]
+        
+        # Validate that the apex is not at the edge (which could be noise)
+        h, w = elevation.shape
+        min_margin = max(3, self.kernel_size // 4)  # Minimum distance from edge
+        
+        # If apex is too close to edge, find a more central high point
+        if (center_y < min_margin or center_y >= h - min_margin or 
+            center_x < min_margin or center_x >= w - min_margin):
+            
+            # Create a mask excluding edge regions
+            mask = np.zeros_like(elevation, dtype=bool)
+            mask[min_margin:h-min_margin, min_margin:w-min_margin] = True
+            
+            # Find the highest point within the safe region
+            masked_elevation = elevation.copy()
+            masked_elevation[~mask] = np.min(elevation) - 1  # Set edges to very low value
+            
+            max_pos = np.unravel_index(np.argmax(masked_elevation), masked_elevation.shape)
+            center_y, center_x = max_pos[0], max_pos[1]
+        
+        return center_y, center_x
+    
+    def learn_pattern_kernel(self, training_patches: List[ElevationPatch], 
+                           use_apex_center: bool = True) -> np.ndarray:
+        """
+        Learn the Phi-Zero kernel from training patches.
+        
+        This method builds both elevation and feature kernels for pattern matching.
+        The elevation kernel preserves raw elevation patterns for histogram matching,
+        while the feature kernel provides geometric validation.
+        
+        Args:
+            training_patches: List of training elevation patches
+            use_apex_center: If True, center kernel on elevation peak; if False, use geometric center
+            
+        Returns:
+            Normalized feature kernel
+        """
+        logger.info(f"Learning φ⁰ kernel from {len(training_patches)} training patches")
+        logger.info(f"Kernel extraction mode: {'apex-centered' if use_apex_center else 'geometric-centered'}")
+        
         if not training_patches:
             logger.warning("No training patches provided, using default kernel")
             return self._create_default_kernel()
         
-        # CRITICAL FIX: Store raw elevation kernels for histogram matching
         all_elevations = []
         all_features = []
         
-        for patch in training_patches:
+        for i, patch in enumerate(training_patches):
             if hasattr(patch, 'elevation_data') and patch.elevation_data is not None:
                 elevation = patch.elevation_data
                 features = self.extract_octonionic_features(elevation)
                 
                 h, w = elevation.shape
                 if h >= self.kernel_size and w >= self.kernel_size:
-                    # Store both raw elevation and features
-                    start_y = (h - self.kernel_size) // 2
-                    start_x = (w - self.kernel_size) // 2
                     
-                    elevation_kernel = elevation[start_y:start_y+self.kernel_size, start_x:start_x+self.kernel_size]
-                    feature_kernel = features[start_y:start_y+self.kernel_size, start_x:start_x+self.kernel_size, :]
-                    
-                    if np.std(elevation_kernel) > 0.01:
-                        all_elevations.append(elevation_kernel)
-                        all_features.append(feature_kernel)
+                    # Determine kernel center location
+                    if use_apex_center:
+                        center_y, center_x = self._find_optimal_kernel_center(elevation)
+                        logger.debug(f"Patch {i}: apex at ({center_y}, {center_x}), geometric center at ({h//2}, {w//2})")
                     else:
-                        logger.warning(f"Low variance in training patch, skipping")
+                        center_y, center_x = h // 2, w // 2
+                    
+                    # Check if kernel fits within patch bounds
+                    half_kernel = self.kernel_size // 2
+                    if (center_y >= half_kernel and center_y < h - half_kernel and
+                        center_x >= half_kernel and center_x < w - half_kernel):
+                        
+                        # Extract kernel-sized patches centered on chosen point
+                        start_y = center_y - half_kernel
+                        start_x = center_x - half_kernel
+                        
+                        elevation_kernel = elevation[start_y:start_y+self.kernel_size, start_x:start_x+self.kernel_size]
+                        feature_kernel = features[start_y:start_y+self.kernel_size, start_x:start_x+self.kernel_size, :]
+                        
+                        # Only use patches with meaningful variation
+                        if np.std(elevation_kernel) > 0.01:
+                            all_elevations.append(elevation_kernel)
+                            all_features.append(feature_kernel)
+                        else:
+                            logger.warning(f"Patch {i}: Low variance in kernel, skipping")
+                    else:
+                        logger.warning(f"Patch {i}: Apex too close to edge for kernel size {self.kernel_size}, using geometric center")
+                        # Fallback to geometric center
+                        start_y = (h - self.kernel_size) // 2
+                        start_x = (w - self.kernel_size) // 2
+                        
+                        elevation_kernel = elevation[start_y:start_y+self.kernel_size, start_x:start_x+self.kernel_size]
+                        feature_kernel = features[start_y:start_y+self.kernel_size, start_x:start_x+self.kernel_size, :]
+                        
+                        if np.std(elevation_kernel) > 0.01:
+                            all_elevations.append(elevation_kernel)
+                            all_features.append(feature_kernel)
         
         if not all_features:
             logger.warning("No valid training features, using default kernel")
             return self._create_default_kernel()
         
-        # CRITICAL FIX: Use RAW elevation kernels without normalization
-        # The HTML algorithm succeeds because it preserves actual elevation distributions
+        # Build kernels
+        elevation_kernel = np.mean(all_elevations, axis=0)  # Raw elevation
+        feature_kernel = np.mean(all_features, axis=0)      # Features
         
-        # Build raw elevation kernel (NO normalization to preserve actual patterns)
-        elevation_kernel = np.mean(all_elevations, axis=0)  # Average raw elevation
-        feature_kernel = np.mean(all_features, axis=0)      # Average features
+        # Store raw elevation kernel for histogram matching (NO G2 symmetrization)
+        self.elevation_kernel = elevation_kernel
         
-        # Store the RAW elevation kernel for histogram matching (key to HTML success)
-        self.elevation_kernel = self._apply_g2_symmetrization(elevation_kernel)
-        
-        # Create feature kernel for geometric validation
+        # Normalize feature kernel
         feature_kernel_normalized = self._normalize_kernel(feature_kernel)
         self.psi0_kernel = feature_kernel_normalized
         
-        logger.info(f"📊 Raw elevation kernel range: {np.min(self.elevation_kernel):.2f} to {np.max(self.elevation_kernel):.2f}m")
-        logger.info(f"📊 Raw elevation kernel std: {np.std(self.elevation_kernel):.2f}m")
+        logger.info(f"✅ φ⁰ kernel constructed with shape {feature_kernel_normalized.shape}")
+        logger.info(f"📊 Elevation kernel range: {np.min(self.elevation_kernel):.2f} to {np.max(self.elevation_kernel):.2f}m")
         
-        logger.info(f"✅ ψ⁰ kernel constructed with shape {feature_kernel_normalized.shape}")
         return feature_kernel_normalized
-
+    
     def _create_default_kernel(self) -> np.ndarray:
+        """Create a default radial kernel when no training data is available"""
         kernel = np.zeros((self.kernel_size, self.kernel_size, self.n_features))
         center = self.kernel_size // 2
+        
         for i in range(self.kernel_size):
             for j in range(self.kernel_size):
                 distance = np.sqrt((i - center)**2 + (j - center)**2)
                 if distance < self.kernel_size // 2:
                     value = np.exp(-distance / 3.0)
                     kernel[i, j, :] = value
+        
         return self._normalize_kernel(kernel)
-
+    
     def _apply_g2_symmetrization(self, pattern: np.ndarray) -> np.ndarray:
+        """Apply G2 symmetrization (4-fold rotational symmetry)"""
         symmetrized = pattern.copy()
         for angle in [90, 180, 270]:
             rotated = np.rot90(pattern, k=angle//90, axes=(0, 1))
             symmetrized += rotated
         return symmetrized / 4.0
-
+    
     def _normalize_kernel(self, kernel: np.ndarray) -> np.ndarray:
+        """Normalize kernel channels to zero mean, unit variance"""
         normalized = kernel.copy()
         for f in range(self.n_features):
             channel = kernel[..., f]
@@ -301,119 +532,82 @@ class V8ReferenceElevationDetector:
             else:
                 normalized[..., f] = channel - mean
         return normalized
-
-    def apply_psi0_detection(self, feature_data: np.ndarray, enable_center_bias: bool = True, elevation_data: np.ndarray = None) -> np.ndarray:
+    
+    
+    # =========================================================================
+    # PATTERN DETECTION AND MATCHING
+    # =========================================================================
+    
+    def detect_patterns(self, feature_data: np.ndarray, elevation_data: np.ndarray = None, 
+                       enable_center_bias: bool = True) -> np.ndarray:
+        """
+        Apply Phi-Zero pattern detection to feature data.
+        
+        Args:
+            feature_data: 3D array of octonionic features
+            elevation_data: Optional raw elevation data for histogram matching
+            enable_center_bias: Whether to apply center bias weighting
+            
+        Returns:
+            2D coherence map with detection scores
+        """
         if self.psi0_kernel is None:
-            raise ValueError("No ψ⁰ kernel available. Train kernel first.")
+            raise ValueError("No φ⁰ kernel available. Train kernel first using learn_pattern_kernel()")
+        
         h, w = feature_data.shape[:2]
         coherence_map = np.zeros((h, w))
         half_kernel = self.kernel_size // 2
         
-        # Store elevation data for histogram matching
-        self.current_elevation_data = elevation_data
-        
+        # Apply pattern matching at each location
         for y in range(half_kernel, h - half_kernel):
             for x in range(half_kernel, w - half_kernel):
                 local_patch = feature_data[y-half_kernel:y+half_kernel+1, x-half_kernel:x+half_kernel+1, :]
+                
                 if local_patch.shape != (self.kernel_size, self.kernel_size, self.n_features):
                     continue
                 
-                # Extract corresponding elevation patch for histogram matching
+                # Extract corresponding elevation patch if available
                 elevation_patch = None
                 if elevation_data is not None:
                     elevation_patch = elevation_data[y-half_kernel:y+half_kernel+1, x-half_kernel:x+half_kernel+1]
                 
-                coherence = self._calculate_enhanced_coherence_v8(local_patch, self.psi0_kernel, elevation_patch)
+                # Calculate coherence score
+                coherence = self._calculate_coherence_score(local_patch, elevation_patch)
                 coherence_map[y, x] = coherence
+        
+        # Apply center bias if requested
         if enable_center_bias:
             coherence_map = self._apply_center_bias(coherence_map)
+        
         return coherence_map
-
-    def _calculate_enhanced_coherence_v8(self, local_patch, kernel, elevation_patch=None):
+    
+    def _calculate_coherence_score(self, local_patch: np.ndarray, elevation_patch: np.ndarray = None) -> float:
         """
-        Simplified elevation-focused windmill detection
+        Calculate coherence score combining elevation histogram matching and geometric validation.
         
-        Strategy: Keep it simple and focus on what works
-        1. Primary: Pure elevation histogram matching (80%)
-        2. Secondary: Basic geometric validation (20%)
-        3. Remove complex features that cause false positives
-        
-        Args:
-            local_patch: Local patch features
-            kernel: Stored kernel (features)
-            elevation_patch: Raw elevation data for histogram matching
-        
-        Returns:
-            float: Coherence score [0, 1] where higher values indicate windmill-like patterns
+        Strategy:
+        1. Primary: Elevation histogram matching (80% weight)
+        2. Secondary: Geometric feature correlation (20% weight)
         """
         try:
-            # === PART 1: ELEVATION HISTOGRAM MATCHING (Primary) ===
             elevation_score = 0.0
-            
-            if elevation_patch is not None and hasattr(self, 'elevation_kernel') and self.elevation_kernel is not None:
-                local_elevation = elevation_patch
-                kernel_elevation = self.elevation_kernel
-                
-                # Check for meaningful elevation variation
-                local_range = np.max(local_elevation) - np.min(local_elevation)
-                kernel_range = np.max(kernel_elevation) - np.min(kernel_elevation)
-                
-                if local_range >= 0.5 and kernel_range >= 0.5:  # At least 50cm variation
-                    
-                    # Remove base elevation to focus on RELATIVE patterns
-                    local_relative = local_elevation - np.min(local_elevation)
-                    kernel_relative = kernel_elevation - np.min(kernel_elevation)
-                    
-                    # Normalize to [0,1] scale for comparison
-                    local_max_rel = np.max(local_relative)
-                    kernel_max_rel = np.max(kernel_relative)
-                    
-                    if local_max_rel > 0.1 and kernel_max_rel > 0.1:  # Meaningful relative variation
-                        local_normalized = local_relative / local_max_rel
-                        kernel_normalized = kernel_relative / kernel_max_rel
-                        
-                        # Create elevation histograms
-                        num_bins = 16  # Use more bins for better discrimination
-                        bin_edges = np.linspace(0, 1, num_bins + 1)
-                        
-                        local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
-                        kernel_hist, _ = np.histogram(kernel_normalized.flatten(), bins=bin_edges, density=True)
-                        
-                        # Normalize histograms to probability distributions
-                        local_hist = local_hist / (np.sum(local_hist) + 1e-8)
-                        kernel_hist = kernel_hist / (np.sum(kernel_hist) + 1e-8)
-                        
-                        # Cosine similarity between elevation histograms
-                        local_norm = np.linalg.norm(local_hist)
-                        kernel_norm = np.linalg.norm(kernel_hist)
-                        
-                        if local_norm > 1e-8 and kernel_norm > 1e-8:
-                            elevation_score = np.dot(local_hist, kernel_hist) / (local_norm * kernel_norm)
-                            elevation_score = max(0.0, min(1.0, elevation_score))
-            
-            # === PART 2: BASIC GEOMETRIC VALIDATION (Secondary) ===
             geometric_score = 0.0
             
-            if local_patch is not None and kernel is not None and local_patch.shape == kernel.shape:
-                if local_patch.ndim == 3 and local_patch.shape[2] > 1:
-                    # Use geometric features (skip channel 0 which might be elevation)
-                    local_features = local_patch[:, :, 1:3].flatten()  # Use only first 2 geometric features
-                    kernel_features = kernel[:, :, 1:3].flatten()
-                    
-                    if len(local_features) > 0 and len(kernel_features) > 0:
-                        # Simple correlation on limited geometric features
-                        correlation_matrix = np.corrcoef(local_features, kernel_features)
-                        if correlation_matrix.shape == (2, 2):
-                            correlation = correlation_matrix[0, 1]
-                            geometric_score = max(0.0, correlation)  # Convert [-1,1] to [0,1]
+            # === ELEVATION HISTOGRAM MATCHING ===
+            if elevation_patch is not None and self.elevation_kernel is not None:
+                elevation_score = self._compute_elevation_histogram_score(elevation_patch, self.elevation_kernel)
             
-            # === PART 3: SIMPLE WEIGHTED COMBINATION ===
+            # === GEOMETRIC FEATURE VALIDATION ===
+            if local_patch is not None and self.psi0_kernel is not None:
+                geometric_score = self._compute_geometric_correlation_score(local_patch, self.psi0_kernel)
+            
+            # === WEIGHTED COMBINATION ===
             if elevation_score > 0 and geometric_score > 0:
                 # Both available - heavily weight elevation
                 combined_score = 0.80 * elevation_score + 0.20 * geometric_score
             elif elevation_score > 0:
-                # Elevation only - use it directly but with penalty
-                combined_score = elevation_score * 0.85  # Small penalty for lack of geometric confirmation
+                # Elevation only - use with small penalty
+                combined_score = elevation_score * 0.85
             elif geometric_score > 0:
                 # Geometric only - heavily penalize
                 combined_score = geometric_score * 0.10
@@ -426,63 +620,91 @@ class V8ReferenceElevationDetector:
             logger.warning(f"Coherence calculation error: {e}")
             return 0.0
     
-    # === GEOMETRIC PATTERN DETECTION METHODS ===
-    # These methods implement the successful geometric pattern approach
-    # that achieved 100% detection with 0% false positives
+    def _compute_elevation_histogram_score(self, local_elevation: np.ndarray, kernel_elevation: np.ndarray) -> float:
+        """Compute elevation histogram matching score"""
+        # Check for meaningful variation
+        local_range = np.max(local_elevation) - np.min(local_elevation)
+        kernel_range = np.max(kernel_elevation) - np.min(kernel_elevation)
+        
+        if local_range < 0.5 or kernel_range < 0.5:  # Need at least 50cm variation
+            return 0.0
+        
+        # Normalize to relative patterns (remove base elevation)
+        local_relative = local_elevation - np.min(local_elevation)
+        kernel_relative = kernel_elevation - np.min(kernel_elevation)
+        
+        local_max_rel = np.max(local_relative)
+        kernel_max_rel = np.max(kernel_relative)
+        
+        if local_max_rel < 0.1 or kernel_max_rel < 0.1:
+            return 0.0
+        
+        # Scale to [0,1] for comparison
+        local_normalized = local_relative / local_max_rel
+        kernel_normalized = kernel_relative / kernel_max_rel
+        
+        # Create histograms
+        num_bins = 16
+        bin_edges = np.linspace(0, 1, num_bins + 1)
+        
+        local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
+        kernel_hist, _ = np.histogram(kernel_normalized.flatten(), bins=bin_edges, density=True)
+        
+        # Normalize to probability distributions
+        local_hist = local_hist / (np.sum(local_hist) + 1e-8)
+        kernel_hist = kernel_hist / (np.sum(kernel_hist) + 1e-8)
+        
+        # Cosine similarity
+        local_norm = np.linalg.norm(local_hist)
+        kernel_norm = np.linalg.norm(kernel_hist)
+        
+        if local_norm > 1e-8 and kernel_norm > 1e-8:
+            similarity = np.dot(local_hist, kernel_hist) / (local_norm * kernel_norm)
+            return max(0.0, min(1.0, similarity))
+        
+        return 0.0
     
-    def enhanced_geometric_decision(self, feature_data, elevation_data=None):
-        """
-        Enhanced detection decision using geometric pattern analysis.
-        This is the new default method that combines φ⁰ scores with geometric validation.
+    def _compute_geometric_correlation_score(self, local_patch: np.ndarray, kernel: np.ndarray) -> float:
+        """Compute geometric feature correlation score"""
+        if local_patch.shape != kernel.shape or local_patch.ndim != 3:
+            return 0.0
         
-        Returns:
-            dict: {
-                'detected': bool,
-                'confidence': float,
-                'reason': str,
-                'details': dict
-            }
-        """
-        # Get standard φ⁰ response and geometric analysis
-        result = self.detect_with_geometric_validation(feature_data, elevation_data)
+        # Use subset of geometric features (skip channel 0 which might be elevation-based)
+        if local_patch.shape[2] > 2:
+            local_features = local_patch[:, :, 1:3].flatten()
+            kernel_features = kernel[:, :, 1:3].flatten()
+            
+            if len(local_features) > 0 and len(kernel_features) > 0:
+                correlation_matrix = np.corrcoef(local_features, kernel_features)
+                if correlation_matrix.shape == (2, 2):
+                    correlation = correlation_matrix[0, 1]
+                    return max(0.0, correlation)  # Convert [-1,1] to [0,1]
         
-        max_score = result['max_score']
-        geometric_score = result['geometric_score']
-        
-        # Geometric pattern threshold (adjusted for better recall)
-        geometric_threshold = 0.40  # Lowered from 0.45 to capture legitimate windmills
-        
-        # Enhanced decision logic combining both methods
-        if max_score < 0.3:  # Very low φ⁰ score
-            return {
-                'detected': False,
-                'confidence': 0.0,
-                'reason': 'very_low_phi0',
-                'details': result
-            }
-        elif geometric_score < geometric_threshold:
-            return {
-                'detected': False,
-                'confidence': max(0.0, min(0.4, geometric_score)),  # Low confidence
-                'reason': 'poor_geometric_pattern',
-                'details': result
-            }
-        else:
-            # Both sufficient φ⁰ and good geometric pattern
-            confidence = min(1.0, (max_score + geometric_score) / 2.0)
-            return {
-                'detected': True,
-                'confidence': confidence,
-                'reason': 'geometric_windmill_pattern',
-                'details': result
-            }
+        return 0.0
     
-    def detect_with_geometric_validation(self, feature_data, elevation_data=None):
+    def _apply_center_bias(self, coherence_map: np.ndarray) -> np.ndarray:
+        """Apply Gaussian center bias to coherence map"""
+        h, w = coherence_map.shape
+        center_y, center_x = h // 2, w // 2
+        y, x = np.ogrid[:h, :w]
+        distance_squared = ((y - center_y) / h)**2 + ((x - center_x) / w)**2
+        center_weights = np.exp(-distance_squared / (2 * 0.3**2))
+        return 0.5 * coherence_map + 0.5 * (coherence_map * center_weights)
+    
+    
+    # =========================================================================
+    # GEOMETRIC VALIDATION AND ENHANCED DETECTION
+    # =========================================================================
+    
+    def detect_with_geometric_validation(self, feature_data: np.ndarray, 
+                                       elevation_data: np.ndarray = None) -> DetectionResult:
         """
-        Enhanced detection using geometric pattern analysis.
+        Enhanced detection with geometric pattern validation.
+        
+        Returns comprehensive detection result with geometric analysis.
         """
         # Get standard φ⁰ response
-        phi0_response = self.apply_psi0_detection(feature_data, enable_center_bias=True, elevation_data=elevation_data)
+        phi0_response = self.detect_patterns(feature_data, elevation_data, enable_center_bias=True)
         
         max_score = np.max(phi0_response)
         center_y, center_x = phi0_response.shape[0]//2, phi0_response.shape[1]//2
@@ -491,51 +713,57 @@ class V8ReferenceElevationDetector:
         # Analyze geometric patterns
         geometric_score, pattern_metrics = self._analyze_geometric_patterns(phi0_response)
         
-        return {
-            'phi0_response': phi0_response,
-            'max_score': max_score,
-            'center_score': center_score,
-            'geometric_score': geometric_score,
-            'pattern_metrics': pattern_metrics
-        }
+        # Determine detection result
+        geometric_threshold = 0.40
+        
+        if max_score < 0.3:
+            detected = False
+            confidence = 0.0
+            reason = 'very_low_phi0'
+        elif geometric_score < geometric_threshold:
+            detected = False
+            confidence = max(0.0, min(0.4, geometric_score))
+            reason = 'poor_geometric_pattern'
+        else:
+            detected = True
+            confidence = min(1.0, (max_score + geometric_score) / 2.0)
+            reason = 'geometric_structure_pattern'
+        
+        return DetectionResult(
+            detected=detected,
+            confidence=confidence,
+            reason=reason,
+            max_score=max_score,
+            center_score=center_score,
+            geometric_score=geometric_score,
+            details={
+                'phi0_response': phi0_response,
+                'pattern_metrics': pattern_metrics,
+                'threshold_used': geometric_threshold
+            }
+        )
     
-    def _analyze_geometric_patterns(self, phi0_response):
-        """
-        Analyze the geometric characteristics that distinguish windmill patterns.
-        """
+    def _analyze_geometric_patterns(self, phi0_response: np.ndarray) -> Tuple[float, Dict]:
+        """Analyze geometric characteristics that distinguish circular structure patterns"""
         h, w = phi0_response.shape
         center_y, center_x = h//2, w//2
         
-        # Create a response mask for analysis
-        threshold = np.max(phi0_response) * 0.3  # Use 30% of max for broader analysis
+        # Create response mask for analysis
+        threshold = np.max(phi0_response) * 0.3
         response_mask = phi0_response >= threshold
         
-        if np.sum(response_mask) < 10:  # Need minimum area for analysis
+        if np.sum(response_mask) < 10:
             return 0.0, {'reason': 'insufficient_area'}
         
-        # === 1. RADIAL SYMMETRY ANALYSIS ===
-        radial_score = self._compute_geometric_radial_symmetry(phi0_response, center_y, center_x)
+        # Compute geometric metrics
+        radial_score = self._compute_radial_symmetry_metric(phi0_response, center_y, center_x)
+        dominance_score = self._compute_central_dominance_metric(phi0_response, center_y, center_x)
+        compactness_score = self._compute_compactness_metric(response_mask, center_y, center_x)
+        smoothness_score = self._compute_gradient_smoothness_metric(phi0_response, response_mask)
+        aspect_score = self._compute_aspect_ratio_metric(response_mask)
         
-        # === 2. CENTRAL DOMINANCE ANALYSIS ===
-        dominance_score = self._compute_geometric_central_dominance(phi0_response, center_y, center_x)
-        
-        # === 3. PATTERN COMPACTNESS ANALYSIS ===
-        compactness_score = self._compute_geometric_compactness(response_mask, center_y, center_x)
-        
-        # === 4. GRADIENT SMOOTHNESS ANALYSIS ===
-        smoothness_score = self._compute_geometric_gradient_smoothness(phi0_response, response_mask)
-        
-        # === 5. ASPECT RATIO ANALYSIS ===
-        aspect_score = self._compute_geometric_aspect_ratio(response_mask)
-        
-        # Combined geometric score (weighted average)
-        weights = {
-            'radial': 0.25,
-            'dominance': 0.25, 
-            'compactness': 0.20,
-            'smoothness': 0.20,
-            'aspect': 0.10
-        }
+        # Weighted combination
+        weights = {'radial': 0.25, 'dominance': 0.25, 'compactness': 0.20, 'smoothness': 0.20, 'aspect': 0.10}
         
         geometric_score = (
             weights['radial'] * radial_score +
@@ -556,345 +784,400 @@ class V8ReferenceElevationDetector:
         
         return geometric_score, pattern_metrics
     
-    def _compute_geometric_radial_symmetry(self, response, center_y, center_x):
-        """
-        Measure how symmetric the pattern is around the center.
-        Windmills should have high radial symmetry.
-        """
+    def _compute_radial_symmetry_metric(self, response: np.ndarray, center_y: int, center_x: int) -> float:
+        """Measure radial symmetry around center"""
         h, w = response.shape
-        max_radius = min(h, w) // 3  # Don't go to edges
-        
+        max_radius = min(h, w) // 3
         symmetry_scores = []
         
-        # Sample at multiple radii
         for radius in range(2, max_radius, 2):
-            # Get values around the circle at this radius
             angles = np.linspace(0, 2*np.pi, 16, endpoint=False)
             values = []
             
             for angle in angles:
                 y = int(center_y + radius * np.sin(angle))
                 x = int(center_x + radius * np.cos(angle))
-                
                 if 0 <= y < h and 0 <= x < w:
                     values.append(response[y, x])
             
-            if len(values) >= 12:  # Need enough samples
+            if len(values) >= 12:
                 values = np.array(values)
-                # Good symmetry = low variation around the circle
                 mean_val = np.mean(values)
                 if mean_val > 0:
                     cv = np.std(values) / mean_val
-                    symmetry_score = max(0, 1.0 - cv)  # Lower variation = higher score
+                    symmetry_score = max(0, 1.0 - cv)
                     symmetry_scores.append(symmetry_score)
         
         return np.mean(symmetry_scores) if symmetry_scores else 0.0
     
-    def _compute_geometric_central_dominance(self, response, center_y, center_x):
-        """
-        Measure how much the center dominates the pattern.
-        Windmills should have strong central peaks.
-        """
-        try:
-            from skimage.feature import peak_local_maxima
-            peaks = peak_local_maxima(response, min_distance=5)
-        except ImportError:
-            # Fallback if skimage not available
-            return self._compute_simple_central_dominance(response, center_y, center_x)
-            
-        if len(peaks) == 0:
-            return 0.0
-        
-        # Get peak values
-        peak_values = response[peaks[:, 0], peaks[:, 1]]
-        
-        # Find distance of each peak from center
-        peak_distances = []
-        for i in range(len(peaks)):
-            py, px = peaks[i, 0], peaks[i, 1]
-            dist = np.sqrt((py - center_y)**2 + (px - center_x)**2)
-            peak_distances.append(dist)
-        
-        peak_distances = np.array(peak_distances)
-        
-        # Score based on:
-        # 1. Strongest peak should be near center
-        # 2. Should not have many competing peaks
-        max_peak_idx = np.argmax(peak_values)
-        max_peak_distance = peak_distances[max_peak_idx]
-        
-        # Central dominance: closer to center = higher score
-        max_allowed_distance = min(response.shape) * 0.2  # Within 20% of patch size
-        distance_score = max(0, 1.0 - max_peak_distance / max_allowed_distance)
-        
-        # Peak dominance: main peak should be much stronger than others
-        if len(peak_values) > 1:
-            sorted_peaks = np.sort(peak_values)[::-1]  # Descending
-            dominance_ratio = sorted_peaks[0] / (sorted_peaks[1] + 1e-8)
-            dominance_score = min(1.0, dominance_ratio / 2.0)  # 2x stronger = full score
-        else:
-            dominance_score = 1.0  # Single peak is ideal
-        
-        return (distance_score + dominance_score) / 2.0
-    
-    def _compute_simple_central_dominance(self, response, center_y, center_x):
-        """Fallback central dominance computation without skimage"""
+    def _compute_central_dominance_metric(self, response: np.ndarray, center_y: int, center_x: int) -> float:
+        """Measure central dominance of the pattern"""
         max_pos = np.unravel_index(np.argmax(response), response.shape)
         center_distance = np.sqrt((max_pos[0] - center_y)**2 + (max_pos[1] - center_x)**2)
         max_allowed_distance = min(response.shape) * 0.3
         return max(0, 1.0 - center_distance / max_allowed_distance)
     
-    def _compute_geometric_compactness(self, mask, center_y, center_x):
-        """
-        Measure how compact/circular the pattern is.
-        Windmills should have compact, roughly circular patterns.
-        """
+    def _compute_compactness_metric(self, mask: np.ndarray, center_y: int, center_x: int) -> float:
+        """Measure pattern compactness"""
         if np.sum(mask) == 0:
             return 0.0
         
-        # Find the centroid of the mask
         y_coords, x_coords = np.where(mask)
-        centroid_y = np.mean(y_coords)
-        centroid_x = np.mean(x_coords)
+        centroid_y, centroid_x = np.mean(y_coords), np.mean(x_coords)
         
-        # Compactness metric 1: Centroid should be near patch center
+        # Distance from patch center to centroid
         centroid_distance = np.sqrt((centroid_y - center_y)**2 + (centroid_x - center_x)**2)
         max_distance = min(mask.shape) * 0.25
         centroid_score = max(0, 1.0 - centroid_distance / max_distance)
         
-        # Compactness metric 2: Points should be clustered around centroid
+        # Compactness around centroid
         distances_to_centroid = np.sqrt((y_coords - centroid_y)**2 + (x_coords - centroid_x)**2)
         mean_distance = np.mean(distances_to_centroid)
-        
-        # Good compactness = small mean distance relative to patch size
         relative_distance = mean_distance / (min(mask.shape) / 4.0)
         distance_score = max(0, 1.0 - relative_distance)
         
         return (centroid_score + distance_score) / 2.0
     
-    def _compute_geometric_gradient_smoothness(self, response, mask):
-        """
-        Measure how smooth the gradients are in the response.
-        Windmills should have smooth, not noisy patterns.
-        """
-        if np.sum(mask) < 20:  # Need enough points
+    def _compute_gradient_smoothness_metric(self, response: np.ndarray, mask: np.ndarray) -> float:
+        """Measure gradient smoothness in high-response areas"""
+        if np.sum(mask) < 20:
             return 0.0
         
-        # Compute gradients
         grad_y, grad_x = np.gradient(response)
         gradient_magnitude = np.sqrt(grad_y**2 + grad_x**2)
-        
-        # Focus on the high-response areas
         masked_gradients = gradient_magnitude[mask]
         
-        # Smooth patterns have consistent gradient magnitudes
         if len(masked_gradients) > 0:
             grad_mean = np.mean(masked_gradients)
             grad_std = np.std(masked_gradients)
-            
             if grad_mean > 0:
                 cv = grad_std / grad_mean
-                smoothness = max(0, 1.0 - cv)  # Lower variation = smoother
-            else:
-                smoothness = 0.0
-        else:
-            smoothness = 0.0
+                return max(0, 1.0 - cv)
         
-        return smoothness
+        return 0.0
     
-    def _compute_geometric_aspect_ratio(self, mask):
-        """
-        Measure how circular (vs elongated) the pattern is.
-        Windmills should be roughly circular.
-        """
+    def _compute_aspect_ratio_metric(self, mask: np.ndarray) -> float:
+        """Measure how circular the pattern is"""
         if np.sum(mask) == 0:
             return 0.0
         
-        # Find bounding box of the mask
         y_coords, x_coords = np.where(mask)
-        
-        if len(y_coords) < 5:  # Need enough points
+        if len(y_coords) < 5:
             return 0.0
         
         y_range = np.max(y_coords) - np.min(y_coords) + 1
         x_range = np.max(x_coords) - np.min(x_coords) + 1
         
-        # Aspect ratio: closer to 1.0 = more circular
         if min(y_range, x_range) > 0:
             aspect_ratio = max(y_range, x_range) / min(y_range, x_range)
-            # Good aspect ratios are close to 1.0 (circular)
-            aspect_score = max(0, 1.0 - (aspect_ratio - 1.0) / 2.0)
-        else:
-            aspect_score = 0.0
+            return max(0, 1.0 - (aspect_ratio - 1.0) / 2.0)
         
-        return aspect_score
+        return 0.0
     
-    def _compute_radial_symmetry_score(self, elevation_data):
-        """Compute radial symmetry score for φ⁰ feature vector"""
-        center = elevation_data.shape[0] // 2
-        h, w = elevation_data.shape
+    def _compute_structure_volume_metric(self, elevation: np.ndarray, base_elevation: float = None) -> float:
+        """
+        Compute structure volume/mass discrimination metric.
         
-        # Sample points at different radii
-        radii = [self.foundation_radius_px * 0.7, self.foundation_radius_px, self.foundation_radius_px * 1.3]
-        angles = np.linspace(0, 2*np.pi, 16, endpoint=False)  # 16 angular samples
+        This helps distinguish between substantial structures (windmills, towers) 
+        and small elevation variations (rocks, debris, measurement noise).
         
-        symmetry_scores = []
-        
-        for radius in radii:
-            radius_values = []
-            for angle in angles:
-                y = int(center + radius * np.sin(angle))
-                x = int(center + radius * np.cos(angle))
-                
-                if 0 <= y < h and 0 <= x < w:
-                    radius_values.append(elevation_data[y, x])
+        Args:
+            elevation: 2D elevation array
+            base_elevation: Optional base elevation level
             
-            if len(radius_values) >= 12:  # Need at least 12 valid samples
-                radius_values = np.array(radius_values)
-                # Good symmetry = low standard deviation around the circle
-                std_val = np.std(radius_values)
-                symmetry = 1.0 / (1.0 + std_val * 5.0)  # Convert to [0,1] score
-                symmetry_scores.append(symmetry)
-        
-        if not symmetry_scores:
-            return 0.0
-            
-        return np.mean(symmetry_scores)
-
-    def _analyze_radial_patterns(self, elevation_data):
-        """Analyze radial gradient patterns typical of windmill foundations"""
-        center = elevation_data.shape[0] // 2
-        h, w = elevation_data.shape
-        
-        # Compute gradients
-        grad_y, grad_x = np.gradient(elevation_data)
-        
-        # Create radial vectors from center
-        y_coords, x_coords = np.ogrid[:h, :w]
-        dy = y_coords - center
-        dx = x_coords - center
-        
-        # Compute angles and distances from center
-        distances = np.sqrt(dx**2 + dy**2)
-        angles = np.arctan2(dy, dx)
-        
-        # Focus on foundation radius area (inner and outer rings)
-        foundation_radius = self.foundation_radius_px
-        inner_mask = (distances >= foundation_radius * 0.5) & (distances <= foundation_radius * 1.5)
-        
-        if np.sum(inner_mask) < 10:  # Not enough points
-            return 0.0
-        
-        # Compute radial components of gradient
-        # Expected: gradients point outward from center (positive radial component)
-        radial_unit_x = dx / (distances + 1e-8)
-        radial_unit_y = dy / (distances + 1e-8)
-        
-        radial_gradients = grad_x * radial_unit_x + grad_y * radial_unit_y
-        
-        # Windmills should have consistent outward gradients in foundation area
-        foundation_radial_grads = radial_gradients[inner_mask]
-        
-        # Score based on consistency of outward gradients
-        mean_radial_grad = np.mean(foundation_radial_grads)
-        std_radial_grad = np.std(foundation_radial_grads)
-        
-        # Good windmill: positive mean gradient, low std deviation
-        consistency_score = mean_radial_grad / (std_radial_grad + 1e-8)
-        
-        # Normalize to [0,1]
-        return max(0.0, min(1.0, consistency_score / 5.0))  # Typical good values are 1-5
-    
-    def _compute_circular_symmetry_score(self, elevation_data):
-        """Compute how circular/symmetric the elevation pattern is"""
-        center = elevation_data.shape[0] // 2
-        h, w = elevation_data.shape
-        
-        # Sample points at different radii
-        radii = [self.foundation_radius_px * 0.7, self.foundation_radius_px, self.foundation_radius_px * 1.3]
-        angles = np.linspace(0, 2*np.pi, 16, endpoint=False)  # 16 angular samples
-        
-        symmetry_scores = []
-        
-        for radius in radii:
-            radius_values = []
-            for angle in angles:
-                y = int(center + radius * np.sin(angle))
-                x = int(center + radius * np.cos(angle))
-                
-                if 0 <= y < h and 0 <= x < w:
-                    radius_values.append(elevation_data[y, x])
-            
-            if len(radius_values) >= 12:  # Need at least 12 valid samples
-                radius_values = np.array(radius_values)
-                # Good symmetry = low standard deviation around the circle
-                mean_val = np.mean(radius_values)
-                std_val = np.std(radius_values)
-                symmetry = 1.0 / (1.0 + std_val * 10)  # Higher std = lower symmetry
-                symmetry_scores.append(symmetry)
-        
-        if not symmetry_scores:
-            return 0.0
-            
-        return np.mean(symmetry_scores)
-    
-    def _compute_foundation_edge_score(self, elevation_data):
-        """Detect sharp edges typical of foundation boundaries"""
-        # Use Sobel edge detection
-        edges_x = sobel(elevation_data, axis=1)
-        edges_y = sobel(elevation_data, axis=0)
-        edge_magnitude = np.sqrt(edges_x**2 + edges_y**2)
-        
-        # Focus on expected foundation boundary area
-        center = elevation_data.shape[0] // 2
-        h, w = elevation_data.shape
-        y_coords, x_coords = np.ogrid[:h, :w]
-        distances = np.sqrt((x_coords - center)**2 + (y_coords - center)**2)
-        
-        # Foundation edge should be at foundation_radius distance
-        edge_ring_mask = (distances >= self.foundation_radius_px * 0.8) & (distances <= self.foundation_radius_px * 1.2)
-        
-        if np.sum(edge_ring_mask) < 5:
-            return 0.0
-        
-        # Compute edge strength in foundation boundary area
-        boundary_edges = edge_magnitude[edge_ring_mask]
-        mean_edge_strength = np.mean(boundary_edges)
-        
-        # Normalize edge strength (typical values 0-0.5 for elevation data)
-        edge_score = min(1.0, mean_edge_strength * 4.0)
-        
-        return edge_score
-    
-    def _compute_geometric_validation_score(self, original_elevation, normalized_elevation):
-        """Basic geometric validation checks"""
-        local_range = np.max(original_elevation) - np.min(original_elevation)
-        
-        # Check for sufficient elevation variation
-        range_score = 1.0
-        if local_range < 0.5:  # Minimum 50cm variation required
-            range_score = 0.1  # Heavily penalize very flat areas
-        elif local_range < 1.5:  # Less than 1.5m variation  
-            range_score = 0.5  # Moderately penalize low variation areas
-        
-        # Center elevation check using normalized data
-        center_idx = normalized_elevation.shape[0] // 2
-        center_elevation = normalized_elevation[center_idx, center_idx]
-        mean_elevation = np.mean(normalized_elevation)
-        
-        # Windmills should have elevated centers relative to surroundings
-        center_score = 1.0
-        if center_elevation > mean_elevation + 0.15:  # 15% above mean on normalized scale
-            center_score = 1.2  # Bonus for elevated centers
-        elif center_elevation < mean_elevation - 0.1:  # Below average center
-            center_score = 0.6   # Penalty for depressed centers
-        
-        return min(1.0, range_score * center_score)
-
-    def _apply_center_bias(self, coherence_map: np.ndarray) -> np.ndarray:
-        h, w = coherence_map.shape
+        Returns:
+            Volume metric normalized by expected structure size
+        """
+        h, w = elevation.shape
         center_y, center_x = h // 2, w // 2
+        radius = self.structure_radius_px
+        
+        # Create circular mask for structure region
         y, x = np.ogrid[:h, :w]
-        distance_squared = ((y - center_y) / h)**2 + ((x - center_x) / w)**2
-        center_weights = np.exp(-distance_squared / (2 * 0.3**2))
-        return 0.5 * coherence_map + 0.5 * (coherence_map * center_weights)
+        mask = ((y - center_y)**2 + (x - center_x)**2) <= radius**2
+        
+        if not np.any(mask):
+            return 0.0
+        
+        # Calculate base elevation if not provided
+        if base_elevation is None:
+            # Use edge areas as base reference
+            edge_mask = np.zeros_like(elevation, dtype=bool)
+            border_width = max(2, radius // 4)
+            edge_mask[:border_width, :] = True
+            edge_mask[-border_width:, :] = True
+            edge_mask[:, :border_width] = True
+            edge_mask[:, -border_width:] = True
+            
+            if np.any(edge_mask):
+                base_elevation = np.median(elevation[edge_mask])
+            else:
+                base_elevation = np.median(elevation)
+        
+        # Calculate volume above base
+        structure_elevation = elevation[mask]
+        volume_above_base = np.sum(np.maximum(0, structure_elevation - base_elevation)) * (self.resolution_m ** 2)
+        
+        # Expected volume thresholds by structure type
+        if self.structure_type == "windmill":
+            min_volume_m3 = 50.0   # Minimum volume for windmill foundation
+            typical_volume_m3 = 200.0
+        elif self.structure_type == "tower":
+            min_volume_m3 = 20.0   # Smaller tower foundations
+            typical_volume_m3 = 100.0
+        elif self.structure_type == "mound":
+            min_volume_m3 = 100.0  # Archaeological mounds
+            typical_volume_m3 = 500.0
+        else:  # generic
+            min_volume_m3 = 25.0
+            typical_volume_m3 = 150.0
+        
+        # Volume adequacy score
+        if volume_above_base < min_volume_m3:
+            return 0.0  # Too small to be target structure
+        elif volume_above_base > typical_volume_m3 * 3:
+            return 0.5  # Suspiciously large, moderate score
+        else:
+            # Sigmoid scaling between minimum and typical
+            volume_ratio = volume_above_base / typical_volume_m3
+            return min(1.0, volume_ratio)
+    
+    def _compute_height_prominence_metric(self, elevation: np.ndarray) -> float:
+        """
+        Compute height prominence metric to filter tiny elevation variations.
+        
+        Returns:
+            Height prominence score (0-1)
+        """
+        h, w = elevation.shape
+        center_y, center_x = h // 2, w // 2
+        radius = self.structure_radius_px
+        
+        # Structure region
+        y, x = np.ogrid[:h, :w]
+        structure_mask = ((y - center_y)**2 + (x - center_x)**2) <= radius**2
+        
+        # Surrounding region (ring around structure)
+        surround_inner = radius + 2
+        surround_outer = min(h, w) // 2 - 2
+        surround_mask = (((y - center_y)**2 + (x - center_x)**2) > surround_inner**2) & \
+                       (((y - center_y)**2 + (x - center_x)**2) <= surround_outer**2)
+        
+        if not (np.any(structure_mask) and np.any(surround_mask)):
+            return 0.0
+        
+        # Height statistics
+        structure_heights = elevation[structure_mask]
+        surround_heights = elevation[surround_mask]
+        
+        structure_max = np.max(structure_heights)
+        structure_mean = np.mean(structure_heights)
+        surround_mean = np.mean(surround_heights)
+        surround_std = np.std(surround_heights)
+        
+        # Absolute prominence above surroundings
+        absolute_prominence = structure_max - surround_mean
+        
+        # Relative prominence (accounting for local terrain variation)
+        relative_prominence = absolute_prominence / (surround_std + 0.1)
+        
+        # Minimum height thresholds by structure type
+        if self.structure_type == "windmill":
+            min_height_m = 0.8   # Windmill foundations should be at least 80cm prominent
+            typical_height_m = 2.0
+        elif self.structure_type == "tower":
+            min_height_m = 1.0   # Tower foundations
+            typical_height_m = 3.0
+        elif self.structure_type == "mound":
+            min_height_m = 0.5   # Archaeological mounds can be subtle
+            typical_height_m = 2.0
+        else:  # generic
+            min_height_m = 0.6
+            typical_height_m = 1.5
+        
+        # Height adequacy score
+        if absolute_prominence < min_height_m:
+            return 0.0  # Too low to be target structure
+        
+        # Combine absolute and relative prominence
+        height_score = min(1.0, absolute_prominence / typical_height_m)
+        relative_score = min(1.0, relative_prominence / 3.0)  # 3 standard deviations is very prominent
+        
+        return (height_score + relative_score) / 2.0
+    
+    
+    # =========================================================================
+    # PERFORMANCE ANALYSIS AND UTILITIES
+    # =========================================================================
+    
+    def analyze_performance(self, positive_scores: List[float], negative_scores: List[float]) -> Dict:
+        """Analyze detection performance metrics"""
+        pos_mean, neg_mean = np.mean(positive_scores), np.mean(negative_scores)
+        pos_std, neg_std = np.std(positive_scores), np.std(negative_scores)
+        
+        # Signal-to-noise ratio
+        snr = abs(pos_mean - neg_mean) / (pos_std + neg_std + 1e-10)
+        
+        # Effect size (Cohen's d)
+        pooled_std = np.sqrt(((len(positive_scores) - 1) * pos_std**2 + 
+                             (len(negative_scores) - 1) * neg_std**2) / 
+                            (len(positive_scores) + len(negative_scores) - 2))
+        cohens_d = (pos_mean - neg_mean) / pooled_std if pooled_std > 0 else 0
+        
+        # Find optimal threshold
+        all_scores = np.concatenate([positive_scores, negative_scores])
+        thresholds = np.linspace(np.min(all_scores), np.max(all_scores), 100)
+        
+        best_accuracy = 0
+        best_threshold = self.detection_threshold
+        
+        for threshold in thresholds:
+            tp = np.sum(np.array(positive_scores) >= threshold)
+            tn = np.sum(np.array(negative_scores) < threshold)
+            accuracy = (tp + tn) / (len(positive_scores) + len(negative_scores))
+            
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                best_threshold = threshold
+        
+        return {
+            'positive_mean': pos_mean,
+            'negative_mean': neg_mean,
+            'signal_to_noise_ratio': snr,
+            'cohens_d': cohens_d,
+            'optimal_threshold': best_threshold,
+            'optimal_accuracy': best_accuracy,
+            'current_threshold': self.detection_threshold,
+            'separation_strength': 'Strong' if snr > 2.0 else 'Moderate' if snr > 1.0 else 'Weak'
+        }
+    
+    def visualize_detection_results(self, phi0_responses: List[np.ndarray], 
+                                  patch_names: List[str] = None, save_path: str = None) -> str:
+        """Visualize detection results with enhanced plots"""
+        try:
+            import matplotlib.pyplot as plt
+            from datetime import datetime
+            
+            n_responses = len(phi0_responses)
+            if n_responses == 0:
+                logger.warning("No detection responses to visualize")
+                return None
+            
+            # Create figure
+            fig = plt.figure(figsize=(20, 12))
+            cols = min(4, n_responses)
+            rows = (n_responses + cols - 1) // cols
+            
+            for i, response in enumerate(phi0_responses):
+                ax = plt.subplot(rows, cols, i + 1)
+                
+                # Display coherence map
+                im = ax.imshow(response, cmap='hot', aspect='equal', vmin=0, vmax=np.max(response))
+                
+                # Add metrics to title
+                title = patch_names[i] if patch_names and i < len(patch_names) else f'Response {i+1}'
+                max_score = np.max(response)
+                center_y, center_x = response.shape[0]//2, response.shape[1]//2
+                center_score = response[center_y, center_x]
+                
+                is_detected = max_score > self.detection_threshold
+                status = "🎯 DETECTED" if is_detected else "❌ Below threshold"
+                
+                ax.set_title(f'{title}\nMax: {max_score:.3f}, Center: {center_score:.3f}\n{status}', fontsize=10)
+                
+                # Add colorbar
+                plt.colorbar(im, ax=ax, label='φ⁰ Coherence Score')
+                
+                # Mark important points
+                ax.plot(center_x, center_y, 'b+', markersize=8, markeredgewidth=2, label='Center')
+                max_pos = np.unravel_index(np.argmax(response), response.shape)
+                ax.plot(max_pos[1], max_pos[0], 'r*', markersize=10, label='Peak')
+                
+                # Add structure radius circle
+                circle = plt.Circle((center_x, center_y), self.structure_radius_px, 
+                                  fill=False, color='cyan', linewidth=2, linestyle='--',
+                                  label=f'Structure ({self.structure_radius_m}m)')
+                ax.add_patch(circle)
+                ax.legend()
+            
+            plt.tight_layout()
+            
+            # Save figure
+            if save_path is None:
+                save_path = f'/tmp/phi0_detection_results_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
+            
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            logger.info(f"🎯 Detection results visualization saved to: {save_path}")
+            plt.close()
+            
+            return save_path
+            
+        except Exception as e:
+            logger.error(f"❌ Visualization failed: {e}")
+            return None
+
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS
+# =============================================================================
+
+def create_structure_detector(structure_type: str = "windmill", resolution_m: float = 0.5, 
+                            kernel_size: int = 21) -> PhiZeroStructureDetector:
+    """Create a structure detector with specified parameters"""
+    return PhiZeroStructureDetector(resolution_m=resolution_m, kernel_size=kernel_size, 
+                                  structure_type=structure_type)
+
+def create_windmill_detector(resolution_m: float = 0.5, kernel_size: int = 21) -> PhiZeroStructureDetector:
+    """Create a windmill detector with standard parameters (legacy function)"""
+    return PhiZeroStructureDetector(resolution_m=resolution_m, kernel_size=kernel_size, 
+                                  structure_type="windmill")
+
+def create_tower_detector(resolution_m: float = 0.5, kernel_size: int = 21) -> PhiZeroStructureDetector:
+    """Create a tower detector with standard parameters"""
+    return PhiZeroStructureDetector(resolution_m=resolution_m, kernel_size=kernel_size, 
+                                  structure_type="tower")
+
+def create_mound_detector(resolution_m: float = 0.5, kernel_size: int = 21) -> PhiZeroStructureDetector:
+    """Create an archaeological mound detector with standard parameters"""
+    return PhiZeroStructureDetector(resolution_m=resolution_m, kernel_size=kernel_size, 
+                                  structure_type="mound")
+
+def create_settlement_detector(resolution_m: float = 0.5, kernel_size: int = 21) -> PhiZeroStructureDetector:
+    """Create a settlement detector with standard parameters"""
+    return PhiZeroStructureDetector(resolution_m=resolution_m, kernel_size=kernel_size, 
+                                  structure_type="settlement")
+
+
+def quick_detect(elevation_data: np.ndarray, training_patches: List[ElevationPatch] = None,
+                resolution_m: float = 0.5, structure_type: str = "windmill") -> DetectionResult:
+    """
+    Quick detection function for simple use cases.
+    
+    Args:
+        elevation_data: 2D elevation array to analyze
+        training_patches: Optional training data (uses default if None)
+        resolution_m: Spatial resolution
+        structure_type: Type of structure to detect
+        
+    Returns:
+        Detection result
+    """
+    detector = create_structure_detector(structure_type=structure_type, resolution_m=resolution_m)
+    
+    # Use default kernel if no training data provided
+    if training_patches:
+        detector.learn_pattern_kernel(training_patches)
+    else:
+        detector.psi0_kernel = detector._create_default_kernel()
+    
+    # Extract features and detect
+    features = detector.extract_octonionic_features(elevation_data)
+    result = detector.detect_with_geometric_validation(features, elevation_data)
+    
+    return result
+
+
+if __name__ == "__main__":
+    logger.info("Phi-Zero Circular Structure Detection Core - Clean Implementation")
+    logger.info("Supported structure types: windmill, tower, mound, settlement, generic")
+    logger.info("Use create_structure_detector() to get started")
