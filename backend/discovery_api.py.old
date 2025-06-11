@@ -1,0 +1,829 @@
+#!/usr/bin/env python3
+"""
+FastAPI Backend for Real-time Windmill Discovery Visualization
+
+This backend provides:
+1. WebSocket endpoint for real-time discovery progress updates
+2. REST API for starting/stopping discovery sessions
+3. Patch-by-patch elevation visualization data
+4. Structure detection information for mouse-over displays
+
+The discovery process emits real-time updates showing:
+- Current scanning location
+- Elevation patch visualization data
+- Detection results (positive/negative with confidence)
+- Structure metrics and analysis details
+"""
+
+import asyncio
+import json
+import logging
+import uuid
+import time
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass, asdict
+from contextlib import asynccontextmanager
+import numpy as np
+
+def safe_serialize(obj):
+    """Convert object to JSON-serializable format"""
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif hasattr(obj, '__dict__'):
+        # Handle custom objects by converting to dict
+        return {k: safe_serialize(v) for k, v in obj.__dict__.items()}
+    elif isinstance(obj, dict):
+        return {k: safe_serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [safe_serialize(item) for item in obj]
+    else:
+        return obj
+
+def safe_asdict(dataclass_obj):
+    """Convert dataclass to dict with safe JSON serialization"""
+    data = asdict(dataclass_obj)
+    return safe_serialize(data)
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse
+import uvicorn
+
+# Import our discovery modules
+import sys
+import os
+
+# Add parent directory to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
+try:
+    from phi0_core import PhiZeroStructureDetector, ElevationPatch
+    from discovery_realtime import (
+        initialize_earth_engine, 
+        load_focused_discovery_patch,
+        clean_patch_data,
+        ZAANSE_SCHANS_TRAINING
+    )
+except ImportError as e:
+    print(f"Failed to import required modules: {e}")
+    print("Make sure you're running from the re_archaeology directory")
+    sys.exit(1)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Global heartbeat task
+heartbeat_task = None
+manager = None  # Will be initialized after class definition
+
+async def heartbeat_loop():
+    """Background task to send periodic heartbeats"""
+    global manager
+    while True:
+        try:
+            await asyncio.sleep(30)  # Send heartbeat every 30 seconds
+            if manager:
+                await manager.send_heartbeat()
+        except Exception as e:
+            logger.error(f"Error in heartbeat loop: {e}")
+            await asyncio.sleep(5)  # Brief pause before retrying
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events"""
+    global heartbeat_task, manager
+    
+    # Startup - initialize manager first
+    if manager is None:
+        manager = EnhancedConnectionManager()
+    
+    heartbeat_task = asyncio.create_task(heartbeat_loop())
+    logger.info("Enhanced status management system initialized")
+    
+    yield
+    
+    # Shutdown
+    if heartbeat_task:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+    
+    logger.info("Enhanced status management system shutdown")
+
+app = FastAPI(title="Windmill Discovery Real-time API", version="1.0.0", lifespan=lifespan)
+
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount static files for frontend
+frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
+if os.path.exists(frontend_path):
+    app.mount("/js", StaticFiles(directory=os.path.join(frontend_path, "js")), name="static_js")
+    app.mount("/css", StaticFiles(directory=os.path.join(frontend_path, "css")), name="static_css")
+    app.mount("/images", StaticFiles(directory=os.path.join(frontend_path, "images")), name="static_images")
+
+@dataclass
+class ScanPatch:
+    """Information about a single scanned patch"""
+    session_id: str
+    patch_id: str
+    lat: float
+    lon: float
+    timestamp: str
+    elevation_data: List[List[float]]  # 2D elevation matrix
+    elevation_stats: Dict[str, float]
+    detection_result: Optional[Dict[str, Any]]
+    is_positive: bool
+    confidence: float
+    patch_bounds: Dict[str, float]  # lat_min, lat_max, lon_min, lon_max
+    visualization_data: Dict[str, Any]
+    
+@dataclass 
+class DiscoverySession:
+    """Active discovery session"""
+    session_id: str
+    region_name: str
+    start_time: str
+    status: str  # 'active', 'completed', 'stopped'
+    total_patches: int
+    processed_patches: int
+    positive_detections: int
+    bounds: Dict[str, float]
+    config: Dict[str, Any]
+
+# Global state
+active_sessions: Dict[str, DiscoverySession] = {}
+session_patches: Dict[str, List[ScanPatch]] = {}
+websocket_connections: List[WebSocket] = []
+
+class EnhancedConnectionManager:
+    """Enhanced WebSocket connection manager with better status tracking"""
+    
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self.connection_metadata: Dict[WebSocket, Dict] = {}
+        self.message_queue: Dict[str, List] = {}
+        self.last_heartbeat: Dict[WebSocket, float] = {}
+        
+    async def connect(self, websocket: WebSocket, user_id: str = None):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        
+        # Store connection metadata
+        self.connection_metadata[websocket] = {
+            'user_id': user_id,
+            'connected_at': datetime.now(),
+            'last_seen': datetime.now(),
+            'messages_sent': 0,
+            'messages_received': 0
+        }
+        
+        self.last_heartbeat[websocket] = time.time()
+        
+        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+        
+        # Send connection confirmation
+        await self.send_to_connection(websocket, {
+            'type': 'connection_established',
+            'timestamp': datetime.now().isoformat(),
+            'connection_id': id(websocket)
+        })
+    
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        
+        # Clean up metadata
+        self.connection_metadata.pop(websocket, None)
+        self.last_heartbeat.pop(websocket, None)
+        
+        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+    
+    async def send_to_connection(self, websocket: WebSocket, message: dict):
+        """Send message to specific connection with error handling"""
+        try:
+            await websocket.send_text(json.dumps(message))
+            
+            # Update metadata
+            if websocket in self.connection_metadata:
+                self.connection_metadata[websocket]['messages_sent'] += 1
+                self.connection_metadata[websocket]['last_seen'] = datetime.now()
+            
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to send message to connection: {e}")
+            self.disconnect(websocket)
+            return False
+    
+    async def send_message(self, message: dict):
+        """Broadcast message to all connected clients with better error handling"""
+        if not self.active_connections:
+            return 0
+            
+        successful_sends = 0
+        failed_connections = []
+        
+        for connection in self.active_connections:
+            success = await self.send_to_connection(connection, message)
+            if success:
+                successful_sends += 1
+            else:
+                failed_connections.append(connection)
+        
+        # Clean up failed connections
+        for failed_conn in failed_connections:
+            self.disconnect(failed_conn)
+        
+        return successful_sends
+    
+    async def send_heartbeat(self):
+        """Send heartbeat to all connections and check for stale ones"""
+        current_time = time.time()
+        stale_connections = []
+        
+        for websocket in list(self.active_connections):
+            # Check if connection is stale (no heartbeat response in 120 seconds to match frontend)
+            if current_time - self.last_heartbeat.get(websocket, 0) > 120:
+                logger.warning(f"Connection {id(websocket)} appears stale, removing")
+                stale_connections.append(websocket)
+                continue
+            
+            # Send heartbeat
+            heartbeat_message = {
+                'type': 'heartbeat',
+                'timestamp': datetime.now().isoformat(),
+                'connection_uptime': current_time - self.connection_metadata.get(websocket, {}).get('connected_at', datetime.now()).timestamp()
+            }
+            
+            await self.send_to_connection(websocket, heartbeat_message)
+        
+        # Clean up stale connections
+        for stale_conn in stale_connections:
+            self.disconnect(stale_conn)
+    
+    def get_connection_stats(self):
+        """Get detailed connection statistics"""
+        return {
+            'total_connections': len(self.active_connections),
+            'connections': [
+                {
+                    'id': id(ws),
+                    'user_id': meta.get('user_id'),
+                    'connected_at': meta.get('connected_at').isoformat(),
+                    'last_seen': meta.get('last_seen').isoformat(),
+                    'messages_sent': meta.get('messages_sent', 0),
+                    'messages_received': meta.get('messages_received', 0),
+                    'uptime_seconds': (datetime.now() - meta.get('connected_at', datetime.now())).total_seconds()
+                }
+                for ws, meta in self.connection_metadata.items()
+            ]
+        }
+
+# Initialize manager globally (will be set in lifespan startup)
+if manager is None:
+    manager = EnhancedConnectionManager()
+
+def create_elevation_visualization(elevation_data: np.ndarray, patch_bounds: Dict[str, float]) -> Dict[str, Any]:
+    """Create visualization data from elevation patch"""
+    try:
+        # Calculate elevation statistics
+        stats = {
+            'min': float(np.min(elevation_data)),
+            'max': float(np.max(elevation_data)),
+            'mean': float(np.mean(elevation_data)),
+            'std': float(np.std(elevation_data))
+        }
+        
+        # Create color mapping based on elevation values
+        normalized = (elevation_data - stats['min']) / (stats['max'] - stats['min']) if stats['max'] > stats['min'] else np.zeros_like(elevation_data)
+        
+        # Convert to color values (normalized 0-1 for visualization)
+        colors = []
+        for row in normalized:
+            color_row = []
+            for val in row:
+                # Create color gradient from blue (low) to red (high)
+                if val < 0.33:
+                    # Blue to cyan
+                    r = 0
+                    g = int(val * 3 * 255)
+                    b = 255
+                elif val < 0.66:
+                    # Cyan to yellow
+                    r = int((val - 0.33) * 3 * 255)
+                    g = 255
+                    b = int((1 - (val - 0.33) * 3) * 255)
+                else:
+                    # Yellow to red
+                    r = 255
+                    g = int((1 - (val - 0.66) * 3) * 255)
+                    b = 0
+                
+                color_row.append(f"#{r:02x}{g:02x}{b:02x}")
+            colors.append(color_row)
+        
+        return {
+            'elevation_matrix': elevation_data.tolist(),
+            'color_matrix': colors,
+            'stats': stats,
+            'bounds': patch_bounds,
+            'dimensions': {
+                'height': elevation_data.shape[0],
+                'width': elevation_data.shape[1]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to create elevation visualization: {e}")
+        return {
+            'elevation_matrix': elevation_data.tolist() if hasattr(elevation_data, 'tolist') else [],
+            'color_matrix': [],
+            'stats': {'min': 0, 'max': 0, 'mean': 0, 'std': 0},
+            'bounds': patch_bounds,
+            'dimensions': {'height': 0, 'width': 0}
+        }
+
+async def run_discovery_session(session: DiscoverySession, websocket_manager: EnhancedConnectionManager):
+    """Run the discovery process with real-time updates"""
+    try:
+        logger.info(f"Starting discovery session {session.session_id}")
+        
+        # Import discovery runner
+        from discovery_realtime import run_realtime_discovery
+        
+        # Send session started message
+        await websocket_manager.send_message({
+            'type': 'session_started',
+            'session': safe_asdict(session)
+        })
+        
+        # Run the discovery with callback for real-time updates
+        async def update_callback(update_data: Dict[str, Any]):
+            """Callback for real-time discovery updates"""
+            try:
+                if update_data['type'] == 'patch_result':
+                    # Create scan patch data
+                    patch_data = update_data['data']
+                    
+                    # Create elevation visualization
+                    elevation_viz = create_elevation_visualization(
+                        np.array(patch_data['elevation_data']),
+                        patch_data['patch_bounds']
+                    )
+                    
+                    scan_patch = ScanPatch(
+                        session_id=session.session_id,
+                        patch_id=f"patch_{len(session_patches.get(session.session_id, []))}",
+                        lat=patch_data['lat'],
+                        lon=patch_data['lon'],
+                        timestamp=datetime.now().isoformat(),
+                        elevation_data=patch_data['elevation_data'],
+                        elevation_stats=elevation_viz['stats'],
+                        detection_result=patch_data.get('detection_result'),
+                        is_positive=patch_data.get('is_positive', False),
+                        confidence=patch_data.get('confidence', 0.0),
+                        patch_bounds=patch_data['patch_bounds'],
+                        visualization_data=elevation_viz
+                    )
+                    
+                    # Store patch data
+                    if session.session_id not in session_patches:
+                        session_patches[session.session_id] = []
+                    session_patches[session.session_id].append(scan_patch)
+                    
+                    # Update session progress
+                    session.processed_patches += 1
+                    if scan_patch.is_positive:
+                        session.positive_detections += 1
+                    
+                    # Send real-time update
+                    await websocket_manager.send_message({
+                        'type': 'patch_scanned',
+                        'patch': safe_asdict(scan_patch),
+                        'session_progress': {
+                            'processed': session.processed_patches,
+                            'total': session.total_patches,
+                            'positive_detections': session.positive_detections
+                        }
+                    })
+                
+                elif update_data['type'] == 'progress':
+                    await websocket_manager.send_message({
+                        'type': 'progress_update',
+                        'data': update_data['data']
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error in update callback: {e}")
+        
+        # Run the actual discovery
+        results = await run_realtime_discovery(
+            session.config,
+            update_callback
+        )
+        
+        # Mark session as completed
+        session.status = 'completed'
+        
+        # Send completion message
+        await websocket_manager.send_message({
+            'type': 'session_completed',
+            'session': safe_asdict(session),
+            'results': safe_serialize(results)
+        })
+        
+        logger.info(f"Discovery session {session.session_id} completed")
+        
+    except Exception as e:
+        logger.error(f"Error in discovery session {session.session_id}: {e}")
+        session.status = 'error'
+        await websocket_manager.send_message({
+            'type': 'session_error',
+            'session_id': session.session_id,
+            'error': str(e)
+        })
+
+@app.websocket("/ws/discovery")
+async def websocket_discovery_endpoint(websocket: WebSocket):
+    """Enhanced WebSocket endpoint for real-time discovery updates"""
+    await manager.connect(websocket)
+    logger.info(f"WebSocket client connected from {websocket.client}")
+    
+    try:
+        while True:
+            # Wait for client messages
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            logger.info(f"Received WebSocket message: {message.get('type')}")
+            
+            # Update message received count
+            if websocket in manager.connection_metadata:
+                manager.connection_metadata[websocket]['messages_received'] += 1
+                manager.connection_metadata[websocket]['last_seen'] = datetime.now()
+            
+            # Handle different message types
+            if message.get('type') == 'ping':
+                await manager.send_to_connection(websocket, {
+                    'type': 'pong',
+                    'timestamp': datetime.now().isoformat()
+                })
+            elif message.get('type') == 'pong':
+                # Update heartbeat timestamp
+                manager.last_heartbeat[websocket] = time.time()
+            elif message.get('type') == 'start_discovery':
+                await handle_start_discovery(message.get('config'), websocket)
+            elif message.get('type') == 'stop_discovery':
+                await handle_stop_discovery(message.get('session_id'), websocket)
+            elif message.get('type') == 'get_status':
+                # Send current system status
+                await manager.send_to_connection(websocket, {
+                    'type': 'system_status',
+                    'active_sessions': len(active_sessions),
+                    'total_connections': len(manager.active_connections),
+                    'connection_stats': manager.get_connection_stats(),
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                logger.warning(f"Unknown WebSocket message type: {message.get('type')}")
+                await manager.send_to_connection(websocket, {
+                    'type': 'error',
+                    'message': f'Unknown message type: {message.get("type")}'
+                })
+                
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket client disconnected")
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
+# =============================================================================
+# KERNEL MANAGEMENT API ENDPOINTS
+# =============================================================================
+
+@app.get("/api/kernels")
+async def get_cached_kernels(structure_type: str = None):
+    """Get list of cached kernels"""
+    try:
+        from phi0_core import list_cached_kernels
+        kernels = list_cached_kernels(structure_type)
+        return {
+            'status': 'success',
+            'kernels': kernels,
+            'total_count': len(kernels)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cached kernels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/kernels/clear")
+async def clear_kernel_cache(structure_type: str = None, confirm: bool = False):
+    """Clear cached kernels"""
+    try:
+        from phi0_core import clear_kernel_cache
+        removed_count = clear_kernel_cache(structure_type, confirm)
+        return {
+            'status': 'success',
+            'removed_count': removed_count,
+            'message': f'Cleared {removed_count} cached kernels'
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear kernel cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/kernels/retrain")
+async def force_retrain_kernel(config: Dict[str, Any]):
+    """Force retrain kernel for a structure type"""
+    try:
+        structure_type = config.get('structure_type', 'windmill')
+        
+        # Import and create detector
+        detector = PhiZeroStructureDetector(
+            resolution_m=config.get('resolution_m', 0.5),
+            kernel_size=config.get('kernel_size', 21),
+            structure_type=structure_type
+        )
+        
+        # Load training patches (using default for now)
+        training_patches = []
+        for windmill in ZAANSE_SCHANS_TRAINING:
+            try:
+                patch = load_focused_discovery_patch(
+                    windmill['lat'], windmill['lon'], 
+                    buffer_radius_m=40, resolution_m=0.5, 
+                    use_fallback=True
+                )
+                if patch:
+                    training_patches.append(patch)
+            except Exception as e:
+                logger.warning(f"Failed to load training patch: {e}")
+        
+        if not training_patches:
+            raise Exception("No training patches available")
+        
+        # Force retrain kernel
+        kernel = detector.learn_pattern_kernel(training_patches, force_retrain=True)
+        
+        if kernel is not None:
+            return {
+                'status': 'success',
+                'message': f'Kernel retrained for {structure_type}',
+                'kernel_shape': kernel.shape,
+                'training_patches': len(training_patches)
+            }
+        else:
+            raise Exception("Kernel retraining failed")
+            
+    except Exception as e:
+        logger.error(f"Failed to retrain kernel: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================================================
+# DISCOVERY SESSION API ENDPOINTS
+# =============================================================================
+
+@app.post("/api/discovery/start")
+async def start_discovery_session(config: Dict[str, Any]):
+    """Start a new discovery session"""
+    try:
+        session_id = str(uuid.uuid4())
+        
+        # Create discovery session
+        session = DiscoverySession(
+            session_id=session_id,
+            region_name=config.get('region_name', 'Unknown Region'),
+            start_time=datetime.now().isoformat(),
+            status='active',
+            total_patches=config.get('expected_patches', 400),  # Default grid size
+            processed_patches=0,
+            positive_detections=0,
+            bounds=config.get('bounds', {}),
+            config=config
+        )
+        
+        active_sessions[session_id] = session
+        
+        # Start discovery in background
+        asyncio.create_task(run_discovery_session(session, manager))
+        
+        return {
+            'status': 'success',
+            'session_id': session_id,
+            'message': 'Discovery session started'
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to start discovery session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/discovery/stop/{session_id}")
+async def stop_discovery_session(session_id: str):
+    """Stop an active discovery session"""
+    try:
+        if session_id not in active_sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session = active_sessions[session_id]
+        session.status = 'stopped'
+        
+        await manager.send_message({
+            'type': 'session_stopped',
+            'session_id': session_id
+        })
+        
+        return {
+            'status': 'success',
+            'message': f'Discovery session {session_id} stopped'
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to stop discovery session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/discovery/sessions")
+async def get_active_sessions():
+    """Get list of active discovery sessions"""
+    return {
+        'active_sessions': [safe_asdict(session) for session in active_sessions.values()],
+        'total_connections': len(manager.active_connections)
+    }
+
+@app.get("/api/discovery/session/{session_id}")
+async def get_session_details(session_id: str):
+    """Get detailed information about a specific session"""
+    if session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session = active_sessions[session_id]
+    patches = session_patches.get(session_id, [])
+    
+    return {
+        'session': safe_asdict(session),
+        'patches': [safe_asdict(patch) for patch in patches],
+        'total_patches': len(patches)
+    }
+
+@app.get("/api/discovery/session/{session_id}/patches")
+async def get_session_patches(session_id: str):
+    """Get all patches for a specific session"""
+    if session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    patches = session_patches.get(session_id, [])
+    return {
+        'session_id': session_id,
+        'patches': [safe_asdict(patch) for patch in patches],
+        'total_patches': len(patches)
+    }
+
+@app.get("/viewer")
+async def serve_viewer():
+    """Serve the frontend visualization interface"""
+    try:
+        frontend_path = os.path.join(parent_dir, "frontend", "discovery_viewer_new.html")
+        if not os.path.exists(frontend_path):
+            # Fallback to the original file
+            frontend_path = os.path.join(parent_dir, "frontend", "discovery_viewer.html")
+        return FileResponse(frontend_path, media_type="text/html")
+    except Exception as e:
+        logger.error(f"Failed to serve viewer: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load viewer interface")
+
+@app.get("/")
+async def root():
+    """Root endpoint - redirect to viewer"""
+    return {"message": "Windmill Discovery API", "viewer": "/viewer", "api_docs": "/docs"}
+
+@app.get("/health")
+async def health_check():
+    """Enhanced health check endpoint with detailed system status"""
+    connection_stats = manager.get_connection_stats()
+    
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "system": {
+            "active_sessions": len(active_sessions),
+            "websocket_connections": len(manager.active_connections),
+            "total_patches_processed": sum(len(patches) for patches in session_patches.values()),
+            "uptime_info": {
+                "server_start": datetime.now().isoformat(),  # This should be stored globally in production
+                "current_time": datetime.now().isoformat()
+            }
+        },
+        "connections": connection_stats,
+        "sessions": {
+            "active": [
+                {
+                    "session_id": sid,
+                    "status": session.status,
+                    "processed": session.processed_patches,
+                    "total": session.total_patches,
+                    "detections": session.positive_detections
+                }
+                for sid, session in active_sessions.items()
+            ]
+        }
+    }
+
+@app.get("/api/system/status")
+async def get_system_status():
+    """Get detailed system status for monitoring"""
+    return await health_check()
+
+@app.get("/api/system/connections")
+async def get_connection_details():
+    """Get detailed WebSocket connection information"""
+    return manager.get_connection_stats()
+
+async def handle_start_discovery(config: Dict[str, Any], websocket: WebSocket):
+    """Handle start discovery WebSocket message"""
+    try:
+        session_id = str(uuid.uuid4())
+        
+        # Create discovery session
+        session = DiscoverySession(
+            session_id=session_id,
+            region_name=config.get('region_name', f"Region_{session_id[:8]}"),
+            start_time=datetime.now().isoformat(),
+            status='active',
+            total_patches=config.get('expected_patches', 400),
+            processed_patches=0,
+            positive_detections=0,
+            bounds=config.get('bounds', {}),
+            config=config
+        )
+        
+        active_sessions[session_id] = session
+        
+        # Send session started confirmation
+        await manager.send_message({
+            'type': 'session_started',
+            'session': safe_asdict(session)
+        })
+        
+        # Start discovery in background
+        asyncio.create_task(run_discovery_session(session, manager))
+        
+        logger.info(f"Started discovery session {session_id} via WebSocket")
+        
+    except Exception as e:
+        logger.error(f"Failed to start discovery via WebSocket: {e}")
+        await manager.send_message({
+            'type': 'error',
+            'message': f'Failed to start discovery: {str(e)}'
+        })
+
+async def handle_stop_discovery(session_id: str, websocket: WebSocket):
+    """Handle stop discovery WebSocket message"""
+    try:
+        if session_id and session_id in active_sessions:
+            session = active_sessions[session_id]
+            session.status = 'stopped'
+            
+            await manager.send_message({
+                'type': 'session_stopped',
+                'session_id': session_id
+            })
+            
+            logger.info(f"Stopped discovery session {session_id} via WebSocket")
+        else:
+            await manager.send_message({
+                'type': 'error',
+                'message': 'Session not found or no session ID provided'
+            })
+            
+    except Exception as e:
+        logger.error(f"Failed to stop discovery via WebSocket: {e}")
+        await manager.send_message({
+            'type': 'error',
+            'message': f'Failed to stop discovery: {str(e)}'
+        })
+
+if __name__ == "__main__":
+    logger.info("Starting Windmill Discovery API server...")
+    uvicorn.run(
+        "discovery_api:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        log_level="info"
+    )

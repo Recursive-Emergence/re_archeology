@@ -7,7 +7,9 @@ This script implements comprehensive validation for structure detection using th
 
 Tests both:
 - POSITIVE validation: Verify structure centers are properly detected  
-- NEGATIVE validation: Verify surrounding areas do NOT trigger false positives
+- NEGATIVE validation: Ve        if 'coherence_map' in detection_result.details and np.isnan(detection_result.details['coherence_map']).all():
+            logger.warning(f"   Skipping {negative_name}: NaN in φ⁰ response.")
+            continuey surrounding areas do NOT trigger false positives
 
 Uses ONLY real Earth Engine AHN4 LiDAR data - no synthetic fallbacks.
 Tests the generalized structure-specific enhancements and systematic false positive fixes 
@@ -55,6 +57,7 @@ DEFAULT_VALIDATION_WINDMILLS = [
     {"name": "De Gekroonde Poelenburg", "lat": 52.474166977199445, "lon": 4.817628676751737},
     {"name": "De Huisman", "lat": 52.47323132365517, "lon": 4.816668420518732},
     {"name": "Het Klaverblad", "lat": 52.4775485810242, "lon": 4.813724798553969}, 
+    {"name": "Some Trees", "lat": 52.628085, "lon": 4.762604},  # 52.628085,4.762604
 ]
 
 
@@ -328,7 +331,7 @@ def test_validation_real_data():
         # Apply enhanced geometric detection using new API
         detection_result = detector.detect_with_geometric_validation(features, elevation_data=patch.elevation_data)
         
-        if np.isnan(detection_result.details['phi0_response']).all():
+        if 'coherence_map' in detection_result.details and np.isnan(detection_result.details['coherence_map']).all():
             logger.warning(f"   Skipping {windmill_name}: NaN in φ⁰ response.")
             continue
             
@@ -351,7 +354,7 @@ def test_validation_real_data():
         }
         
         positive_results.append(result)
-        positive_responses.append(detection_result.details['phi0_response'])
+        positive_responses.append(detection_result.details['coherence_map'])
         positive_names.append(windmill_name)
         
         # Log results (enhanced with geometric info)
@@ -378,7 +381,7 @@ def test_validation_real_data():
         # Apply enhanced geometric detection using new API
         detection_result = detector.detect_with_geometric_validation(features, elevation_data=patch.elevation_data)
         
-        if np.isnan(detection_result.details['phi0_response']).all():
+        if np.isnan(detection_result.details['coherence_map']).all():
             logger.warning(f"   Skipping {patch_name}: NaN in φ⁰ response.")
             continue
             
@@ -401,7 +404,7 @@ def test_validation_real_data():
         }
         
         negative_results.append(result)
-        negative_responses.append(detection_result.details['phi0_response'])
+        negative_responses.append(detection_result.details['coherence_map'])
         negative_names.append(patch_name)
         
         # Log results (enhanced with geometric info)
@@ -410,6 +413,12 @@ def test_validation_real_data():
 
     # Enhanced Analysis and Visualization
     logger.info("\n=== Step 7.5: ENHANCED ANALYSIS & DEBUG VISUALIZATION ===")
+    
+    # Update adaptive thresholds based on validation performance
+    if positive_results and negative_results:
+        logger.info("🔧 Updating adaptive thresholds based on validation performance...")
+        updated_thresholds = detector.update_adaptive_thresholds_from_validation(positive_results, negative_results)
+        logger.info(f"✅ Thresholds updated - φ⁰: {updated_thresholds['min_phi0_threshold']:.3f}, Geometric: {updated_thresholds['geometric_threshold']:.3f}")
     
     # Create debug visualizations
     if positive_responses or negative_responses:

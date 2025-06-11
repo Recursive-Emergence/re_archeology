@@ -1,54 +1,68 @@
+# RE-Archaeology Framework - Unified Requirements
+# Updated for MVP3 with unified backend integration
+
 # Core FastAPI and server dependencies
 fastapi==0.104.1
-uvicorn[standard]==0.23.2  # includes uvloop and httptools for better performance
+uvicorn[standard]==0.24.0
+gunicorn==21.2.0
 
-# Neo4j driver with optimizations
+# Database and storage
 neo4j==5.15.0
+redis==5.0.1
+aioredis==2.0.1
 
-# OpenAI and AI functionality
-openai==1.12.0
-
-# Google Auth
+# Authentication and security
+PyJWT==2.8.0
 google-auth==2.23.0
 google-auth-oauthlib==1.0.0
 google-auth-httplib2==0.1.1
-PyJWT==2.8.0
+python-multipart==0.0.6
 
-# WebSocket and real-time features with performance optimizations
+# AI and OpenAI integration
+openai==1.12.0
+sentence-transformers==2.2.2
+
+# WebSocket and real-time features
 websockets==12.0
-redis==5.0.1
-aioredis==2.0.1  # Async Redis client for better performance
 
-# Scientific computing and geospatial libraries
-geopandas==0.14.0
+# Scientific computing and geospatial
 numpy==1.26.0
 scipy==1.11.3
 pandas==2.1.1
-earthengine-api==0.1.370
-google-cloud-storage==2.10.0
+scikit-learn==1.3.0
+matplotlib==3.7.2
 
-# Validation and configuration
-pydantic==2.4.2
-pydantic-settings==2.0.3
-python-dotenv==1.0.0
-
-# Required for form data handling
-python-multipart==0.0.6
-
-# Additional geospatial tools
+# Geospatial libraries
+geopandas==0.14.0
 shapely==2.0.2
 rasterio==1.3.8
 geojson==3.1.0
 
-# Performance monitoring and optimization
-psutil==5.9.6  # System monitoring
-orjson==3.9.10  # Faster JSON serialization
-aiofiles==23.2.1  # Async file operations
+# Earth Engine integration
+earthengine-api==0.1.379
+google-cloud-storage==2.10.0
 
-# Production optimizations
-gunicorn==21.2.0  # Production WSGI server alternative
+# Configuration and validation
+pydantic==2.4.2
+pydantic-settings==2.0.3
+python-dotenv==1.0.0
 
-# Testing (only for development)
-pytest==7.4.2
+# HTTP and networking
+requests==2.31.0
 httpx==0.25.0
+
+# File operations and utilities
+aiofiles==23.2.1
+jinja2==3.1.2
+
+# Performance optimizations
+orjson==3.9.10
+psutil==5.9.6
+
+# Development and testing
+pytest==7.4.2
 tabulate==0.9.0
+
+# Additional utilities for discovery engine
+Pillow==10.0.1
+tqdm==4.66.1

@@ -1,6 +1,7 @@
 """
 OpenAI Chat and Semantic Search API with authentication.
 """
+import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -12,6 +13,9 @@ from backend.core.neo4j_database import neo4j_db
 from backend.models.ontology_models import SearchEmbedding, EntityType
 from backend.api.routers.auth import get_current_user
 from backend.utils.config import get_settings
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -64,6 +68,7 @@ class SimpleChatRequest(BaseModel):
 
 class SimpleChatResponse(BaseModel):
     response: str
+    tokens_used: Optional[int] = None
 
 async def get_openai_embedding(text: str) -> List[float]:
     """Generate embedding using OpenAI API."""
@@ -364,40 +369,68 @@ async def simple_chat(
     request: SimpleChatRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """Simple chat endpoint with OpenAI integration."""
+    """Simple chat endpoint for Bella AI assistant."""
     try:
-        # Create a system message for the RE-Archaeology context
-        system_message = """You are Bella, an AI assistant for RE-Archaeology. Help with archaeological research. Be concise and helpful."""
+        # Initialize OpenAI client
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         
-        # Prepare messages for OpenAI
+        # Create context-aware system message
+        system_message = """You are Bella, an AI assistant specialized in archaeological discoveries and RE-Archaeology framework. 
+You are knowledgeable about:
+- Archaeological structure detection using φ⁰-ψ⁰ resonance analysis
+- Windmill and tower structure identification
+- Elevation data analysis and interpretation
+- Real-time discovery scanning processes
+- Historical and archaeological contexts
+
+Be helpful, enthusiastic, and provide informative responses about archaeological discoveries and the scanning process."""
+        
+        # Add context information if provided
+        context_info = ""
+        if request.context:
+            if request.context.get('current_scan'):
+                context_info += f"Current scan session: {request.context['current_scan'].get('session_id', 'Active')}\n"
+            if request.context.get('total_patches'):
+                context_info += f"Total patches scanned: {request.context['total_patches']}\n"
+            if request.context.get('positive_detections'):
+                context_info += f"Positive detections found: {request.context['positive_detections']}\n"
+        
+        if context_info:
+            system_message += f"\n\nCurrent scanning context:\n{context_info}"
+        
+        # Create messages for OpenAI
         messages = [
             {"role": "system", "content": system_message},
             {"role": "user", "content": request.message}
         ]
         
-        # Add context if provided
-        if request.context:
-            context_info = f"Additional context: {request.context}"
-            messages.insert(1, {"role": "system", "content": context_info})
-        
-        # Call OpenAI API using the new client format
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        
+        # Get response from OpenAI
         response = await client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
-            max_tokens=200,  # Reduced from 500
+            max_tokens=500,
             temperature=0.7
         )
         
         ai_response = response.choices[0].message.content
+        tokens_used = response.usage.total_tokens if response.usage else None
         
-        return SimpleChatResponse(response=ai_response)
+        return SimpleChatResponse(
+            response=ai_response,
+            tokens_used=tokens_used
+        )
         
     except Exception as e:
-        print(f"Error in simple_chat: {str(e)}")
+        logger.error(f"Chat error: {str(e)}")
         # Fallback response if OpenAI fails
-        fallback_response = f"Hello {current_user.get('name', 'User')}! I'm Bella, your RE-Archaeology AI assistant. I received your message about: '{request.message}'. I'm currently experiencing some technical difficulties with my AI capabilities, but I'm here to help with your archaeological research!"
-        
-        return SimpleChatResponse(response=fallback_response)
+        fallback_responses = [
+            "I'm having trouble connecting right now, but I'm here to help with archaeological discoveries!",
+            "My connection is a bit spotty, but I'd love to discuss your findings with you!",
+            "I'm experiencing some technical difficulties, but I'm excited to learn about your discoveries!"
+        ]
+        import random
+        return SimpleChatResponse(
+            response=random.choice(fallback_responses),
+            tokens_used=None
+        )

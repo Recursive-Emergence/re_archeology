@@ -3,78 +3,755 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RE-Archaeology Framework</title>
+    <title>RE-Archaeology Framework - Unified Discovery Platform</title>
     
     <!-- Google OAuth -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Material Design Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-          crossorigin=""/>
-    
-    <!-- Leaflet JavaScript -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-            crossorigin=""></script>
-    
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/main_chat.css">
-    <link rel="stylesheet" href="css/map_labels.css">
-    <link rel="stylesheet" href="css/improved_map.css">
+    <link rel="stylesheet" href="css/status-enhancements.css">
+    <link rel="stylesheet" href="css/visualization-enhancements.css">
+    
+    <style>
+        /* Unified three-pane layout styles */
+        :root {
+            --discovery-panel-width: 320px;
+            --chat-panel-width: 320px;
+            --header-height: 70px;
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --border-color: #404040;
+            --accent-color: #00ff88;
+            --text-primary: #ffffff;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .unified-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+        }
+        
+        /* Header */
+        .app-header {
+            height: var(--header-height);
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 1.5rem;
+            flex-shrink: 0;
+            z-index: 1000;
+        }
+        
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+        
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .site-logo {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+        }
+        
+        .header-content h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+        
+        .header-content h1 a {
+            color: inherit;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        
+        .header-content h1 a:hover {
+            color: var(--accent-color);
+        }
+        
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .task-indicator {
+            color: #aaa;
+            font-size: 0.875rem;
+        }
+        
+        /* Three-pane main content */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        /* Discovery Panel (Left) */
+        .discovery-panel {
+            width: var(--discovery-panel-width);
+            min-width: 280px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .discovery-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: #252525;
+        }
+        
+        .discovery-header h1 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: var(--accent-color);
+        }
+        
+        .discovery-header p {
+            color: #aaa;
+            font-size: 13px;
+            margin: 0;
+        }
+        
+        .discovery-controls {
+            padding: 16px;
+            flex: 1;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) var(--bg-primary);
+        }
+        
+        .discovery-controls::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .discovery-controls::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+        
+        .discovery-controls::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+        
+        .control-group {
+            margin-bottom: 20px;
+            background: #1f1f1f;
+            border-radius: 6px;
+            padding: 12px;
+            border: 1px solid #353535;
+        }
+        
+        .control-group h3 {
+            font-size: 14px;
+            color: var(--accent-color);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .input-group {
+            margin-bottom: 12px;
+        }
+        
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: #ccc;
+            margin-bottom: 4px;
+        }
+        
+        .input-group input,
+        .input-group select {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+        
+        .input-group input:focus,
+        .input-group select:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+        
+        .btn {
+            padding: 8px 14px;
+            background: var(--accent-color);
+            color: #000;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        
+        .button-grid .btn:first-child {
+            grid-column: 1 / -1;
+        }
+        
+        .btn:hover {
+            background: #00cc6a;
+            transform: translateY(-1px);
+        }
+        
+        .btn:disabled {
+            background: var(--border-color);
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: var(--border-color);
+            color: var(--text-primary);
+        }
+        
+        .btn-secondary:hover {
+            background: #4a4a4a;
+        }
+        
+        .btn-stop {
+            background: #ff4444;
+            color: var(--text-primary);
+        }
+        
+        .btn-stop:hover {
+            background: #cc3333;
+        }
+        
+        .discovery-status {
+            padding: 16px 20px;
+            background: #252525;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .status-value {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+        
+        /* Map Container (Center) */
+        .map-container {
+            flex: 1;
+            position: relative;
+            background: var(--bg-primary);
+        }
+        
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        
+        /* Connection status overlay */
+        .connection-status {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            padding: 6px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            z-index: 1200;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            backdrop-filter: blur(10px);
+            font-weight: 600;
+        }
+        
+        .connection-status.connected {
+            background: rgba(0, 255, 136, 0.25);
+            border: 1px solid var(--accent-color);
+            color: var(--accent-color);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(255, 68, 68, 0.25);
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            box-shadow: 0 0 15px rgba(255, 68, 68, 0.3);
+        }
+        
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        
+        /* Progress overlay */
+        .progress-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid var(--accent-color);
+            z-index: 1001;
+            text-align: center;
+            display: none;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            margin: 16px 0;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-color), #00cc6a, var(--accent-color));
+            background-size: 200% 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+            animation: progress-shimmer 2s infinite;
+        }
+        
+        @keyframes progress-shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        /* Chat Panel (Right) - from main_chat.css */
+        .chat-panel {
+            width: var(--chat-panel-width);
+            background-color: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        .chat-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            background-color: #252525;
+        }
+        
+        .chat-header h5 {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+        }
+        
+        .chat-header small {
+            color: #aaa;
+            font-size: 0.875rem;
+        }
+        
+        /* Authentication Section */
+        .auth-section {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            background-color: var(--bg-secondary);
+        }
+        
+        .login-prompt {
+            color: #aaa;
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        
+        /* Chat Messages */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        
+        .chat-welcome {
+            text-align: center;
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+        
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            max-width: 85%;
+        }
+        
+        .message.user {
+            background-color: #007bff;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+        
+        .message.ai {
+            background-color: #3a3a3a;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+        
+        .message-content {
+            margin-bottom: 0.25rem;
+            line-height: 1.4;
+        }
+        
+        .message-time {
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+        
+        /* Chat Input */
+        .chat-input-section {
+            border-top: 1px solid var(--border-color);
+            padding: 1rem;
+            background-color: var(--bg-secondary);
+        }
+        
+        .chat-input-container {
+            display: flex;
+            gap: 0.5rem;
+            align-items: stretch;
+        }
+        
+        .chat-input-container input {
+            flex: 1;
+            min-width: 0;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.875rem;
+        }
+        
+        .chat-input-container input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        
+        .chat-input-container input::placeholder {
+            color: #666;
+        }
+        
+        .chat-input-container button {
+            flex-shrink: 0;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .chat-input-container button:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        
+        .chat-input-container button:disabled {
+            background: var(--border-color);
+            cursor: not-allowed;
+        }
+        
+        /* User Profile Section */
+        .user-profile-section {
+            border-top: 1px solid var(--border-color);
+            padding: 0.75rem;
+            background-color: var(--bg-secondary);
+            flex-shrink: 0;
+        }
+        
+        .user-profile-bottom {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid var(--border-color);
+        }
+        
+        .user-details {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .user-name {
+            font-weight: 500;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            margin-bottom: 0.125rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .user-email {
+            color: #aaa;
+            font-size: 0.7rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        /* OAuth Configuration Notice */
+        .oauth-notice {
+            margin-top: 0.5rem;
+            padding: 0.25rem;
+            font-size: 0.75rem;
+            color: #666;
+            text-align: center;
+            opacity: 0.7;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .discovery-panel,
+            .chat-panel {
+                width: 280px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .discovery-panel,
+            .chat-panel {
+                width: 100%;
+                height: 200px;
+            }
+            
+            .map-container {
+                flex: 1;
+            }
+        }
+    </style>
 </head>
 <body>
-    <div id="app">
+    <div class="unified-container">
         <!-- Header -->
         <div class="app-header">
             <div class="header-content">
                 <div class="header-logo">
                     <img src="images/site-logo.svg" alt="RE-Archaeology" class="site-logo">
-                    <h1><a href="#" onclick="window.app.goToHomepage(); return false;">RE-Archaeology Framework</a></h1>
+                    <h1><a href="#" onclick="window.unifiedApp.goToHomepage(); return false;">RE-Archaeology Framework</a></h1>
                 </div>
                 <div class="header-actions">
                     <div class="task-indicator">
-                        <span>Active Tasks: 0</span>
+                        <span id="activeTasksIndicator">Active Tasks: 0</span>
                     </div>
                 </div>
             </div>
         </div>
         
-        <!-- Main Content -->
+        <!-- Three-pane main content -->
         <div class="main-content">
-            <!-- Left Sidebar - Discussions -->
-            <aside class="sidebar">
-                <div class="sidebar-header">
-                    <h3>Discussions</h3>
+            <!-- Discovery Panel (Left) -->
+            <div class="discovery-panel">
+                <div class="discovery-header">
+                    <h1>🏛️ Structure Discovery</h1>
+                    <p>Real-time archaeological structure detection using φ⁰-ψ⁰ resonance analysis</p>
                 </div>
-                <div class="categories-list" id="categories-nav">
-                    <!-- Discussion categories will be loaded here -->
+                
+                <div class="discovery-controls">
+                    <!-- Region Selection -->
+                    <div class="control-group">
+                        <h3>🗺️ Scan Region</h3>
+                        <div class="input-group">
+                            <label>Center Latitude</label>
+                            <input type="number" id="centerLat" value="52.4751" step="0.0001">
+                        </div>
+                        <div class="input-group">
+                            <label>Center Longitude</label>
+                            <input type="number" id="centerLon" value="4.8156" step="0.0001">
+                        </div>
+                        <div class="input-group">
+                            <label>Scan Radius (km)</label>
+                            <input type="number" id="scanRadius" value="2" step="0.5" min="0.5" max="10">
+                        </div>
+                        <div class="input-group">
+                            <label>Patch Size (m)</label>
+                            <input type="number" id="patchSize" value="64" step="16" min="32" max="256">
+                        </div>
+                    </div>
+                    
+                    <!-- Detection Settings -->
+                    <div class="control-group">
+                        <h3>🎯 Detection Settings</h3>
+                        <div class="input-group">
+                            <label>φ⁰ Threshold</label>
+                            <input type="number" id="phi0Threshold" value="0.35" step="0.05" min="0" max="1">
+                        </div>
+                        <div class="input-group">
+                            <label>ψ⁰ Threshold</label>
+                            <input type="number" id="psi0Threshold" value="0.4" step="0.05" min="0" max="1">
+                        </div>
+                        <div class="input-group">
+                            <label>Detection Mode</label>
+                            <select id="detectionMode">
+                                <option value="windmill" selected>Windmill Structures</option>
+                                <option value="tower">Tower Structures</option>
+                                <option value="mound">Archaeological Mounds</option>
+                                <option value="generic">Generic Structures</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="control-group">
+                        <h3>🚀 Actions</h3>
+                        <div class="button-grid">
+                            <button class="btn btn-primary" id="startScanBtn">Start Scan</button>
+                            <button class="btn btn-stop" id="stopScanBtn" disabled>Stop</button>
+                            <button class="btn btn-secondary" id="clearResultsBtn">Clear</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Visualization Options -->
+                    <div class="control-group">
+                        <h3>👁️ Visualization</h3>
+                        <div class="input-group">
+                            <label>
+                                <input type="checkbox" id="showElevation" checked> Show elevation data
+                            </label>
+                        </div>
+                        <div class="input-group">
+                            <label>
+                                <input type="checkbox" id="showConfidence" checked> Color by confidence
+                            </label>
+                        </div>
+                        <div class="input-group">
+                            <label>
+                                <input type="checkbox" id="showScanAnimation"> Show scan animation
+                            </label>
+                        </div>
+                    </div>
                 </div>
-            </aside>
+                
+                <!-- Discovery Status -->
+                <div class="discovery-status">
+                    <div class="status-item">
+                        <span>Session:</span>
+                        <span class="status-value" id="sessionStatus">Idle</span>
+                    </div>
+                    <div class="status-item">
+                        <span>Processed:</span>
+                        <span class="status-value" id="processedPatches">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span>Detections:</span>
+                        <span class="status-value" id="totalDetections">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span>High Confidence:</span>
+                        <span class="status-value" id="highConfidenceDetections">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span>Kernel Status:</span>
+                        <span class="status-value" id="kernelStatus">Unknown</span>
+                    </div>
+                </div>
+            </div>
             
-            <!-- Main Content Area -->
-            <main class="content-area">
-                <div class="content-header">
-                    <h2>Global Archaeological Map</h2>
+            <!-- Map Container (Center) -->
+            <div class="map-container">
+                <div id="map"></div>
+                
+                <!-- Connection Status -->
+                <div class="connection-status disconnected" id="connectionStatus">
+                    <div class="connection-dot"></div>
+                    <span>Disconnected</span>
                 </div>
-                <div class="content-body" id="content-display">
-                    <!-- Content will be loaded here -->
+                
+                <!-- Progress Overlay -->
+                <div class="progress-overlay" id="progressOverlay">
+                    <div id="progressText">Initializing scan...</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div id="progressDetails">Preparing detection algorithms...</div>
                 </div>
-            </main>
+            </div>
             
-            <!-- Chat Panel - Right Side -->
-            <aside class="chat-panel">
-            <header class="chat-header">
-                <h5 class="mb-0">👩‍🔬 Bella</h5>
-                <small>Guardian of Civiliazations</small>
-            </header>
-            
-            <!-- Authentication - Login Only -->
-            <section class="auth-section" id="login-section">
-                <p class="login-prompt">Sign in to chat with Bella</p>                    <!-- Google OAuth -->
+            <!-- Chat Panel (Right) -->
+            <div class="chat-panel">
+                <header class="chat-header">
+                    <h5 class="mb-0">👩‍🔬 Bella</h5>
+                    <small>Guardian of Civilizations</small>
+                </header>
+                
+                <!-- Authentication - Login Only -->
+                <section class="auth-section" id="login-section">
+                    <p class="login-prompt">Sign in to chat with Bella</p>
+                    <!-- Google OAuth -->
                     <div id="g_id_onload"
                          data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
                          data-callback="handleGoogleLogin"
@@ -83,81 +760,585 @@
                          data-cancel_on_tap_outside="false"
                          data-use_fedcm_for_prompt="false">
                     </div>
-                <div class="g_id_signin" 
-                     data-type="standard" 
-                     data-size="medium" 
-                     data-theme="outline" 
-                     data-text="sign_in_with">
-                </div>
-        
-                <!-- OAuth Configuration Notice -->
-                <div id="oauth-config-notice" class="oauth-notice" style="display: none;">
-                    <small class="text-muted">
-                        <i>⚠️ OAuth configuration needed for production use</i>
-                    </small>
-                </div>
-            </section>
-            
-            <!-- Chat Messages -->
-            <section class="chat-messages" id="chat-messages">
-                <div class="chat-welcome" id="chat-welcome">
-                    <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
-                    <p class="small">Sign in to start our conversation!</p>
-                </div>
-            </section>
-            
-            <!-- Chat Input -->
-            <section class="chat-input-section">
-                <form id="chat-input-form" class="chat-input-container" style="display: none;">
-                    <input type="text" 
-                           id="chat-input" 
-                           class="form-control" 
-                           placeholder="Ask Bella anything..." 
-                           disabled>
-                    <button type="submit" id="send-btn" class="btn btn-primary" disabled>
-                        Send
-                    </button>
-                </form>
-            </section>
-            
-            <!-- User Profile - Bottom -->
-            <section class="user-profile-section" id="user-profile" style="display: none;">
-                <div class="user-profile-bottom">
-                    <img id="user-avatar" class="user-avatar" src="" alt="">
-                    <div class="user-details">
-                        <div id="user-name" class="user-name"></div>
-                        <div id="user-email" class="user-email text-muted small"></div>
+                    <div class="g_id_signin" 
+                         data-type="standard" 
+                         data-size="medium" 
+                         data-theme="outline" 
+                         data-text="sign_in_with">
                     </div>
-                    <button id="logout-btn" class="btn btn-sm btn-outline-secondary" style="display: none;">
-                        Logout
-                    </button>
-                </div>
-            </section>
-        </aside>
+            
+                    <!-- OAuth Configuration Notice -->
+                    <div id="oauth-config-notice" class="oauth-notice" style="display: none;">
+                        <small class="text-muted">
+                            <i>⚠️ OAuth configuration needed for production use</i>
+                        </small>
+                    </div>
+                </section>
+                
+                <!-- Chat Messages -->
+                <section class="chat-messages" id="chat-messages">
+                    <div class="chat-welcome" id="chat-welcome">
+                        <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
+                        <p class="small">Sign in to start our conversation!</p>
+                    </div>
+                </section>
+                
+                <!-- Chat Input -->
+                <section class="chat-input-section">
+                    <form id="chat-input-form" class="chat-input-container" style="display: none;">
+                        <input type="text" 
+                               id="chat-input" 
+                               class="form-control" 
+                               placeholder="Ask Bella about discoveries..." 
+                               disabled>
+                        <button type="submit" id="send-btn" class="btn btn-primary" disabled>
+                            Send
+                        </button>
+                    </form>
+                </section>
+                
+                <!-- User Profile - Bottom -->
+                <section class="user-profile-section" id="user-profile" style="display: none;">
+                    <div class="user-profile-bottom">
+                        <img id="user-avatar" class="user-avatar" src="" alt="">
+                        <div class="user-details">
+                            <div id="user-name" class="user-name"></div>
+                            <div id="user-email" class="user-email text-muted small"></div>
+                        </div>
+                        <button id="logout-btn" class="btn btn-sm btn-outline-secondary" style="display: none;">
+                            Logout
+                        </button>
+                    </div>
+                </section>
+            </div>
         </div>
     </div>
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <!-- Application Configuration -->
-    <script src="js/config.js"></script>
-    
-    <!-- Application JS -->
-    <script src="js/app.js"></script>
-    
     <script>
-        // Google OAuth callback
+        // Global configuration
+        window.AppConfig = {
+            googleClientId: '555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com',
+            apiBase: '/api/v1',
+            log() {
+                console.log('%c🔧 RE-Archaeology Configuration', 'color: #2563eb; font-weight: bold; font-size: 14px;');
+                console.log(`%c   Google Client ID: %c${this.googleClientId}`, 'color: #64748b;', 'color: #0f172a;');
+                console.log(`%c   API Base: %c${this.apiBase}`, 'color: #64748b;', 'color: #0f172a;');
+                console.log(`%c   Current Origin: %c${window.location.origin}`, 'color: #64748b;', 'color: #0f172a;');
+            }
+        };
+    </script>
+    
+    <!-- Discovery API -->
+    <script src="js/discovery-api.js"></script>
+    <!-- Enhanced Status Management -->
+    <script src="js/status-manager.js"></script>
+    <script src="js/status-ui-manager.js"></script>
+    
+    <!-- Main Application -->
+    <script>
+        // Unified Application Class
+        class UnifiedREArchaeologyApp {
+            constructor() {
+                // Initialize both discovery and chat functionality
+                this.currentUser = null;
+                this.isAuthenticated = false;
+                this.apiBase = window.AppConfig ? window.AppConfig.apiBase : '/api/v1';
+                
+                // Discovery functionality
+                this.statusManager = new StatusManager();
+                this.statusUI = new StatusUIManager(this.statusManager);
+                this.map = null;
+                this.isScanning = false;
+                this.currentSession = null;
+                this.patches = new Map();
+                this.scanAreaCircle = null;
+                
+                this.init();
+            }
+            
+            async init() {
+                try {
+                    console.log('Initializing unified RE-Archaeology app...');
+                    
+                    // Initialize discovery components
+                    await this.initDiscovery();
+                    
+                    // Initialize chat components
+                    this.initChat();
+                    
+                    // Setup authentication
+                    this.checkAuthState();
+                    
+                    console.log('✅ Unified app initialized successfully');
+                } catch (error) {
+                    console.error('❌ Failed to initialize unified app:', error);
+                }
+            }
+            
+            async initDiscovery() {
+                // Initialize map
+                this.initMap();
+                
+                // Setup discovery event handlers
+                this.setupDiscoveryEvents();
+                
+                // Try to connect to WebSocket
+                try {
+                    await this.statusManager.connect();
+                    console.log('✅ Discovery WebSocket connected');
+                } catch (error) {
+                    console.warn('⚠️ Discovery running in offline mode:', error.message);
+                    this.setupOfflineMode();
+                }
+            }
+            
+            initMap() {
+                // Initialize the map
+                this.map = L.map('map').setView([52.4751, 4.8156], 13);
+                
+                // Add base layer
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(this.map);
+                
+                // Add scan area circle
+                this.scanAreaCircle = L.circle([52.4751, 4.8156], {
+                    color: '#00ff88',
+                    fillColor: '#00ff88',
+                    fillOpacity: 0.1,
+                    radius: 2000
+                }).addTo(this.map);
+                
+                // Handle map clicks for setting scan center
+                this.map.on('click', (e) => {
+                    if (!this.isScanning) {
+                        document.getElementById('centerLat').value = e.latlng.lat.toFixed(6);
+                        document.getElementById('centerLon').value = e.latlng.lng.toFixed(6);
+                        this.updateScanArea();
+                    }
+                });
+                
+                this.updateScanArea();
+            }
+            
+            setupDiscoveryEvents() {
+                // Button events
+                document.getElementById('startScanBtn').addEventListener('click', () => this.startScan());
+                document.getElementById('stopScanBtn').addEventListener('click', () => this.stopScan());
+                document.getElementById('clearResultsBtn').addEventListener('click', () => this.clearResults());
+                
+                // Input events
+                document.getElementById('centerLat').addEventListener('change', () => this.updateScanArea());
+                document.getElementById('centerLon').addEventListener('change', () => this.updateScanArea());
+                document.getElementById('scanRadius').addEventListener('change', () => this.updateScanArea());
+                
+                // Status manager events
+                this.statusManager.on('connectionEstablished', () => {
+                    document.getElementById('connectionStatus').className = 'connection-status connected';
+                    document.getElementById('connectionStatus').innerHTML = '<div class="connection-dot"></div><span>Connected</span>';
+                    document.getElementById('startScanBtn').disabled = false;
+                });
+                
+                this.statusManager.on('disconnected', () => {
+                    document.getElementById('connectionStatus').className = 'connection-status disconnected';
+                    document.getElementById('connectionStatus').innerHTML = '<div class="connection-dot"></div><span>Disconnected</span>';
+                    document.getElementById('startScanBtn').disabled = true;
+                    document.getElementById('stopScanBtn').disabled = true;
+                });
+                
+                this.statusManager.on('sessionStarted', (session) => {
+                    this.currentSession = session;
+                    this.isScanning = true;
+                    document.getElementById('sessionStatus').textContent = 'Scanning';
+                    document.getElementById('progressOverlay').style.display = 'block';
+                });
+                
+                this.statusManager.on('sessionCompleted', () => {
+                    this.isScanning = false;
+                    this.currentSession = null;
+                    document.getElementById('sessionStatus').textContent = 'Completed';
+                    document.getElementById('progressOverlay').style.display = 'none';
+                });
+                
+                this.statusManager.on('patchResult', (patch) => {
+                    this.handlePatchUpdate(patch);
+                });
+            }
+            
+            setupOfflineMode() {
+                // Disable features that require WebSocket connection
+                document.getElementById('startScanBtn').disabled = true;
+                document.getElementById('stopScanBtn').disabled = true;
+                document.getElementById('sessionStatus').textContent = 'Offline Mode';
+            }
+            
+            updateScanArea() {
+                const lat = parseFloat(document.getElementById('centerLat').value);
+                const lon = parseFloat(document.getElementById('centerLon').value);
+                const radius = parseFloat(document.getElementById('scanRadius').value) * 1000;
+                
+                this.scanAreaCircle.setLatLng([lat, lon]);
+                this.scanAreaCircle.setRadius(radius);
+                this.map.setView([lat, lon], this.map.getZoom());
+            }
+            
+            async startScan() {
+                if (this.isScanning || !this.statusManager.isConnected()) {
+                    return;
+                }
+                
+                const config = {
+                    center_lat: parseFloat(document.getElementById('centerLat').value),
+                    center_lon: parseFloat(document.getElementById('centerLon').value),
+                    scan_radius_km: parseFloat(document.getElementById('scanRadius').value),
+                    patch_size_m: parseInt(document.getElementById('patchSize').value),
+                    phi0_threshold: parseFloat(document.getElementById('phi0Threshold').value),
+                    psi0_threshold: parseFloat(document.getElementById('psi0Threshold').value),
+                    detection_mode: document.getElementById('detectionMode').value
+                };
+                
+                try {
+                    await this.statusManager.startDiscovery(config);
+                } catch (error) {
+                    console.error('Failed to start scan:', error);
+                }
+            }
+            
+            async stopScan() {
+                if (!this.statusManager.isConnected()) {
+                    return;
+                }
+                
+                try {
+                    await this.statusManager.stopDiscovery(this.currentSession?.session_id);
+                } catch (error) {
+                    console.error('Failed to stop scan:', error);
+                }
+            }
+            
+            clearResults() {
+                // Remove all patch layers
+                this.patches.forEach(patch => {
+                    if (patch.mapElement) {
+                        this.map.removeLayer(patch.mapElement);
+                    }
+                });
+                
+                this.patches.clear();
+                
+                // Reset counters
+                document.getElementById('processedPatches').textContent = '0';
+                document.getElementById('totalDetections').textContent = '0';
+                document.getElementById('highConfidenceDetections').textContent = '0';
+            }
+            
+            handlePatchUpdate(patch) {
+                this.patches.set(patch.patch_id, patch);
+                this.addPatchToMap(patch);
+                
+                // Update counters
+                document.getElementById('processedPatches').textContent = this.patches.size;
+                
+                const positivePatches = Array.from(this.patches.values()).filter(p => p.is_positive);
+                document.getElementById('totalDetections').textContent = positivePatches.length;
+                
+                const highConfidencePatches = positivePatches.filter(p => (p.confidence || 0) >= 0.8);
+                document.getElementById('highConfidenceDetections').textContent = highConfidencePatches.length;
+            }
+            
+            addPatchToMap(patch) {
+                const bounds = this.getPatchBounds(patch);
+                const color = this.getPatchColor(patch);
+                
+                const rectangle = L.rectangle(bounds, {
+                    color: color,
+                    weight: 1,
+                    fillColor: color,
+                    fillOpacity: patch.is_positive ? 0.7 : 0.3
+                }).addTo(this.map);
+                
+                // Add popup with patch info
+                rectangle.bindPopup(`
+                    <strong>Patch ${patch.patch_id}</strong><br>
+                    φ⁰ Score: ${patch.detection_result?.phi0?.toFixed(3) || 'N/A'}<br>
+                    ψ⁰ Score: ${patch.detection_result?.psi0?.toFixed(3) || 'N/A'}<br>
+                    Confidence: ${((patch.confidence || 0) * 100).toFixed(1)}%<br>
+                    Detection: ${patch.is_positive ? 'Positive' : 'Negative'}
+                `);
+                
+                patch.mapElement = rectangle;
+            }
+            
+            getPatchBounds(patch) {
+                const patchSizeKm = (parseInt(document.getElementById('patchSize').value) || 64) / 1000;
+                const latOffset = patchSizeKm / 111; // Approximate degrees
+                const lonOffset = patchSizeKm / (111 * Math.cos(patch.lat * Math.PI / 180));
+                
+                return [
+                    [patch.lat - latOffset/2, patch.lon - lonOffset/2],
+                    [patch.lat + latOffset/2, patch.lon + lonOffset/2]
+                ];
+            }
+            
+            getPatchColor(patch) {
+                if (!patch.is_positive) {
+                    return '#666666';
+                }
+                
+                const confidence = patch.confidence || 0;
+                if (confidence >= 0.8) return '#ff4444';
+                if (confidence >= 0.6) return '#ffaa00';
+                if (confidence >= 0.4) return '#ffff00';
+                return '#00ff88';
+            }
+            
+            // Chat functionality
+            initChat() {
+                this.setupChatEventListeners();
+            }
+            
+            setupChatEventListeners() {
+                const chatInput = document.getElementById('chat-input');
+                const sendBtn = document.getElementById('send-btn');
+                const chatInputForm = document.getElementById('chat-input-form');
+                const logoutBtn = document.getElementById('logout-btn');
+                
+                if (chatInput && sendBtn) {
+                    chatInput.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && !chatInput.disabled) {
+                            e.preventDefault();
+                            this.sendMessage();
+                        }
+                    });
+                    sendBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        this.sendMessage();
+                    });
+                }
+                
+                if (chatInputForm) {
+                    chatInputForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        this.sendMessage();
+                    });
+                }
+                
+                if (logoutBtn) {
+                    logoutBtn.addEventListener('click', () => this.logout());
+                }
+            }
+            
+            // Authentication
+            checkAuthState() {
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    this.validateToken(token);
+                }
+            }
+            
+            async validateToken(token) {
+                try {
+                    const response = await fetch(`${this.apiBase}/auth/validate`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const userData = await response.json();
+                        this.currentUser = userData;
+                        this.setAuthenticatedState(true);
+                    } else {
+                        localStorage.removeItem('auth_token');
+                        this.setAuthenticatedState(false);
+                    }
+                } catch (error) {
+                    console.error('Token validation error:', error);
+                    localStorage.removeItem('auth_token');
+                    this.setAuthenticatedState(false);
+                }
+            }
+            
+            async handleGoogleLogin(response) {
+                try {
+                    const authResponse = await fetch(`${this.apiBase}/auth/google`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            token: response.credential
+                        })
+                    });
+                    
+                    if (authResponse.ok) {
+                        const data = await authResponse.json();
+                        localStorage.setItem('auth_token', data.access_token);
+                        this.currentUser = data.user;
+                        this.setAuthenticatedState(true);
+                        
+                        // Send welcome message from Bella
+                        this.addChatMessage('ai', `Hello ${data.user.name}! I'm excited to help you explore archaeological discoveries. Feel free to ask me about any findings or start a scan to discover new structures!`);
+                    } else {
+                        console.error('Google login failed');
+                    }
+                } catch (error) {
+                    console.error('Google login error:', error);
+                }
+            }
+            
+            handleGoogleError(error) {
+                console.error('Google Sign-In Error:', error);
+            }
+            
+            setAuthenticatedState(isAuth) {
+                this.isAuthenticated = isAuth;
+                
+                const loginSection = document.getElementById('login-section');
+                const userProfileSection = document.getElementById('user-profile');
+                const chatWelcome = document.getElementById('chat-welcome');
+                const chatInputForm = document.getElementById('chat-input-form');
+                const chatInput = document.getElementById('chat-input');
+                const sendBtn = document.getElementById('send-btn');
+                const logoutBtn = document.getElementById('logout-btn');
+                
+                if (isAuth && this.currentUser) {
+                    // Show user profile, hide login
+                    loginSection.style.display = 'none';
+                    userProfileSection.style.display = 'block';
+                    chatWelcome.style.display = 'none';
+                    chatInputForm.style.display = 'flex';
+                    
+                    // Update user info - with debugging
+                    console.log('Setting user profile:', this.currentUser);
+                    const avatarUrl = this.currentUser.picture || this.currentUser.profile_picture || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNkZGQiLz4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxMiIgcj0iNSIgZmlsbD0iIzk5OSIvPgo8cGF0aCBkPSJtNCwyNmMwLTYuNjI3LDUuMzczLTEyLDEyLTEyczEyLDUuMzczLDEyLDEyIiBmaWxsPSIjOTk5Ii8+Cjwvc3ZnPgo=';
+                    console.log('Setting avatar URL:', avatarUrl);
+                    
+                    const avatarElement = document.getElementById('user-avatar');
+                    const nameElement = document.getElementById('user-name');
+                    const emailElement = document.getElementById('user-email');
+                    
+                    if (avatarElement) {
+                        avatarElement.src = avatarUrl;
+                        avatarElement.onerror = () => {
+                            console.warn('Failed to load avatar, using fallback');
+                            avatarElement.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNkZGQiLz4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxMiIgcj0iNSIgZmlsbD0iIzk5OSIvPgo8cGF0aCBkPSJtNCwyNmMwLTYuNjI3LDUuMzczLTEyLDEyLTEyczEyLDUuMzczLDEyLDEyIiBmaWxsPSIjOTk5Ii8+Cjwvc3ZnPgo=';
+                        };
+                    }
+                    if (nameElement) nameElement.textContent = this.currentUser.name || '';
+                    if (emailElement) emailElement.textContent = this.currentUser.email || '';
+                    if (logoutBtn) logoutBtn.style.display = 'block';
+                    
+                    // Enable chat input
+                    if (chatInput) chatInput.disabled = false;
+                    if (sendBtn) sendBtn.disabled = false;
+                } else {
+                    // Show login, hide user profile
+                    loginSection.style.display = 'block';
+                    userProfileSection.style.display = 'none';
+                    chatWelcome.style.display = 'block';
+                    chatInputForm.style.display = 'none';
+                    if (logoutBtn) logoutBtn.style.display = 'none';
+                    
+                    // Disable chat input
+                    if (chatInput) chatInput.disabled = true;
+                    if (sendBtn) sendBtn.disabled = true;
+                }
+            }
+            
+            async logout() {
+                localStorage.removeItem('auth_token');
+                this.currentUser = null;
+                this.setAuthenticatedState(false);
+                
+                // Clear chat messages
+                const chatMessages = document.getElementById('chat-messages');
+                chatMessages.innerHTML = `
+                    <div class="chat-welcome" id="chat-welcome">
+                        <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
+                        <p class="small">Sign in to start our conversation!</p>
+                    </div>
+                `;
+            }
+            
+            // AI Chat
+            async sendMessage() {
+                const chatInput = document.getElementById('chat-input');
+                const message = chatInput.value.trim();
+                
+                if (!message || !this.isAuthenticated) return;
+                
+                // Add user message
+                this.addChatMessage('user', message);
+                chatInput.value = '';
+                
+                try {
+                    const response = await fetch(`${this.apiBase}/ai/message`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                        },
+                        body: JSON.stringify({
+                            message: message,
+                            context: {
+                                current_scan: this.currentSession,
+                                total_patches: this.patches.size,
+                                positive_detections: Array.from(this.patches.values()).filter(p => p.is_positive).length
+                            }
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.addChatMessage('ai', data.response);
+                    } else {
+                        this.addChatMessage('ai', 'Sorry, I encountered an error processing your message.');
+                    }
+                } catch (error) {
+                    console.error('Chat error:', error);
+                    this.addChatMessage('ai', 'Sorry, I\'m having trouble connecting right now. Please try again.');
+                }
+            }
+            
+            addChatMessage(type, content) {
+                const chatMessages = document.getElementById('chat-messages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                messageDiv.innerHTML = `
+                    <div class="message-content">${content}</div>
+                    <div class="message-time">${new Date().toLocaleTimeString()}</div>
+                `;
+                
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            
+            // Utilities
+            goToHomepage() {
+                // Reset to initial state
+                this.clearResults();
+                document.getElementById('sessionStatus').textContent = 'Idle';
+            }
+        }
+        
+        // Google OAuth callbacks
         window.handleGoogleLogin = function(response) {
-            if (window.app) {
-                window.app.handleGoogleLogin(response);
+            if (window.unifiedApp) {
+                window.unifiedApp.handleGoogleLogin(response);
             }
         };
         
-        // Google OAuth error callback
         window.handleGoogleError = function(error) {
-            if (window.app) {
-                window.app.handleGoogleError(error);
+            if (window.unifiedApp) {
+                window.unifiedApp.handleGoogleError(error);
             } else {
                 console.error('Google Sign-In Error:', error);
             }
@@ -177,7 +1358,7 @@
                 googleOnload.setAttribute('data-error_callback', 'handleGoogleError');
             }
             
-            window.app = new REArchaeologyApp();
+            window.unifiedApp = new UnifiedREArchaeologyApp();
         });
     </script>
 </body>

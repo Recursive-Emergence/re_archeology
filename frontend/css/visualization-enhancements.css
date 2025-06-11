@@ -1,0 +1,444 @@
+/* Enhanced styles for the windmill discovery visualization components */
+
+.elevation-cell {
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.elevation-cell:hover {
+    transform: scale(1.1);
+    border-color: #00ff88;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 255, 136, 0.3);
+}
+
+.patch-popup {
+    max-width: 300px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.patch-popup h4 {
+    margin: 0 0 12px 0;
+    color: #00ff88;
+    font-size: 16px;
+    border-bottom: 1px solid #404040;
+    padding-bottom: 8px;
+}
+
+.popup-content {
+    margin-bottom: 12px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.info-row span:first-child {
+    color: #aaa;
+    font-weight: 500;
+}
+
+.info-row span:last-child {
+    color: #fff;
+    font-weight: 600;
+}
+
+.info-row .positive {
+    color: #00ff88;
+}
+
+.info-row .negative {
+    color: #ff6b6b;
+}
+
+.popup-actions {
+    text-align: center;
+    padding-top: 8px;
+    border-top: 1px solid #404040;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    background: #00ff88;
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.btn-small:hover {
+    background: #00cc6a;
+    transform: translateY(-1px);
+}
+
+.coords-display {
+    font-family: 'Courier New', monospace;
+    user-select: none;
+}
+
+.patch.positive {
+    animation: fadeIn 0.3s ease-in;
+}
+
+.patch.negative {
+    animation: fadeIn 0.3s ease-in;
+    opacity: 0.6;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.scan-animation {
+    animation: scanPulse 2s ease-out;
+}
+
+/* Patch details panel enhancements */
+.close-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: #ff4444;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-btn:hover {
+    background: #cc3333;
+}
+
+.analysis-section {
+    padding: 16px;
+    background: rgba(45, 45, 45, 0.9);
+    border-radius: 8px;
+    margin-top: 16px;
+}
+
+.analysis-section h4,
+.analysis-section h5 {
+    color: #00ff88;
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
+.analysis-grid,
+.stats-grid,
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.metric,
+.stat,
+.info {
+    background: rgba(26, 26, 26, 0.8);
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #404040;
+}
+
+.metric label,
+.stat label,
+.info label {
+    display: block;
+    font-size: 11px;
+    color: #aaa;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metric .value,
+.stat span,
+.info span {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.score-high { color: #00ff88 !important; }
+.score-medium { color: #ffaa00 !important; }
+.score-low { color: #ff6b6b !important; }
+.score-unknown { color: #666 !important; }
+
+.confidence-high { color: #00ff88 !important; }
+.confidence-medium { color: #ffaa00 !important; }
+.confidence-low { color: #ffff00 !important; }
+.confidence-very-low { color: #ff6b6b !important; }
+.confidence-unknown { color: #666 !important; }
+
+.patch-info-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-badge.positive {
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+    border: 1px solid #00ff88;
+}
+
+.status-badge.negative {
+    background: rgba(255, 107, 107, 0.2);
+    color: #ff6b6b;
+    border: 1px solid #ff6b6b;
+}
+
+.patch-coordinates {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #aaa;
+    margin-bottom: 16px;
+}
+
+.patch-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.patch-actions .btn-small {
+    flex: 1;
+    min-width: 80px;
+}
+
+.cell-details-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    animation: fadeIn 0.2s ease;
+}
+
+.modal-content {
+    background: #2d2d2d;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #404040;
+    max-width: 300px;
+    width: 90%;
+}
+
+.modal-content h4 {
+    color: #00ff88;
+    margin-bottom: 16px;
+    font-size: 16px;
+}
+
+.cell-info {
+    margin-bottom: 16px;
+}
+
+.cell-info .info-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+/* Enhanced tooltips */
+.leaflet-tooltip {
+    background: rgba(0, 0, 0, 0.9) !important;
+    border: 1px solid #00ff88 !important;
+    border-radius: 4px !important;
+    color: #fff !important;
+    font-size: 12px !important;
+}
+
+.leaflet-tooltip:before {
+    border-top-color: #00ff88 !important;
+}
+
+/* Map controls styling */
+.leaflet-control-layers {
+    background: rgba(45, 45, 45, 0.9) !important;
+    border: 1px solid #404040 !important;
+    border-radius: 8px !important;
+}
+
+.leaflet-control-layers-toggle {
+    background-color: #2d2d2d !important;
+    border: 1px solid #404040 !important;
+}
+
+.leaflet-control-layers-list {
+    color: #fff !important;
+}
+
+.leaflet-control-layers label {
+    color: #fff !important;
+}
+
+.leaflet-control-scale-line {
+    background: rgba(0, 0, 0, 0.8) !important;
+    border: 1px solid #404040 !important;
+    color: #fff !important;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 280px;
+    }
+    
+    .patch-hover-info {
+        max-width: 250px;
+        font-size: 11px;
+    }
+    
+    .legend {
+        bottom: 10px;
+        right: 10px;
+        padding: 12px;
+    }
+    
+    .progress-overlay {
+        min-width: 250px;
+        padding: 12px 16px;
+    }
+    
+    .analysis-grid,
+    .stats-grid,
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .sidebar {
+        width: 100%;
+        height: auto;
+        max-height: 50vh;
+        position: absolute;
+        top: 0;
+        z-index: 1500;
+        transform: translateY(-100%);
+        transition: transform 0.3s ease;
+    }
+    
+    .sidebar.open {
+        transform: translateY(0);
+    }
+    
+    .map-container {
+        width: 100%;
+    }
+    
+    .patch-grid {
+        left: 10px;
+        right: 10px;
+        max-width: none;
+    }
+}
+
+/* Dark theme enhancements */
+.leaflet-popup-content-wrapper {
+    background: #2d2d2d !important;
+    color: #fff !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+}
+
+.leaflet-popup-tip {
+    background: #2d2d2d !important;
+}
+
+.leaflet-container a {
+    color: #00ff88 !important;
+}
+
+/* Loading animations */
+.loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(0, 255, 136, 0.3);
+    border-radius: 50%;
+    border-top-color: #00ff88;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Accessibility improvements */
+.btn:focus,
+.btn-small:focus {
+    outline: 2px solid #00ff88;
+    outline-offset: 2px;
+}
+
+.elevation-cell:focus {
+    outline: 2px solid #00ff88;
+    outline-offset: 1px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .legend,
+    .patch-hover-info,
+    .progress-overlay {
+        border-width: 2px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+    }
+    
+    .status-badge,
+    .btn,
+    .btn-small {
+        border: 2px solid currentColor;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .scan-animation,
+    .patch,
+    .btn,
+    .elevation-cell {
+        animation: none !important;
+        transition: none !important;
+    }
+}
