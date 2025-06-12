@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RE-Archaeology Framework - Unified Discovery Platform</title>
+    <title>RE-Archaeology Framework - Archaeological Discovery Platform</title>
     
     <!-- Google OAuth -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -14,16 +14,11 @@
     <!-- Material Design Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="css/main_chat.css">
     <link rel="stylesheet" href="css/status-enhancements.css">
     <link rel="stylesheet" href="css/visualization-enhancements.css">
     
     <style>
-        /* Unified three-pane layout styles */
         :root {
             --discovery-panel-width: 320px;
             --chat-panel-width: 320px;
@@ -35,32 +30,35 @@
             --text-primary: #ffffff;
         }
         
-        body {
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
-            overflow: hidden;
-            margin: 0;
-            padding: 0;
         }
         
-        .unified-container {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            width: 100vw;
-        }
-        
-        /* Header */
+        /* Header - Fixed at top */
         .app-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            width: 100vw;
             height: var(--header-height);
             background-color: var(--bg-secondary);
             border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             padding: 0 1.5rem;
-            flex-shrink: 0;
-            z-index: 1000;
+            z-index: 2000;
         }
         
         .header-content {
@@ -106,48 +104,88 @@
         }
         
         .task-indicator {
-            color: #aaa;
+            color: var(--accent-color);
             font-size: 0.875rem;
+            font-weight: 600;
+            min-width: 250px;
+            text-align: right;
         }
         
-        /* Three-pane main content */
+        /* Main content - Full screen below header */
         .main-content {
-            display: flex;
-            flex: 1;
+            position: fixed;
+            top: var(--header-height);
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100vw;
+            height: calc(100vh - var(--header-height));
             overflow: hidden;
         }
         
-        /* Discovery Panel (Left) */
+        /* Map - Full screen background */
+        .map-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Discovery Panel - Floating left */
         .discovery-panel {
+            position: absolute;
+            top: 80px;
+            left: 20px;
             width: var(--discovery-panel-width);
-            min-width: 280px;
-            background: var(--bg-secondary);
-            border-right: 1px solid var(--border-color);
+            max-height: calc(100vh - var(--header-height) - 120px);
+            background: rgba(45, 45, 45, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(64, 64, 64, 0.8);
+            border-radius: 12px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            z-index: 1001;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        
+        .discovery-panel:hover {
+            background: rgba(45, 45, 45, 0.95);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
         }
         
         .discovery-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            background: #252525;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(64, 64, 64, 0.6);
+            background: rgba(37, 37, 37, 0.8);
+            border-radius: 12px 12px 0 0;
         }
         
         .discovery-header h1 {
-            font-size: 18px;
-            margin-bottom: 8px;
+            font-size: 16px;
+            margin-bottom: 4px;
             color: var(--accent-color);
         }
         
         .discovery-header p {
             color: #aaa;
-            font-size: 13px;
+            font-size: 11px;
             margin: 0;
         }
         
         .discovery-controls {
-            padding: 16px;
+            padding: 12px;
             flex: 1;
             overflow-y: auto;
             scrollbar-width: thin;
@@ -168,41 +206,72 @@
         }
         
         .control-group {
-            margin-bottom: 20px;
-            background: #1f1f1f;
+            margin-bottom: 12px;
+            background: rgba(31, 31, 31, 0.8);
             border-radius: 6px;
-            padding: 12px;
-            border: 1px solid #353535;
+            padding: 8px;
+            border: 1px solid rgba(53, 53, 53, 0.8);
+            backdrop-filter: blur(5px);
         }
         
         .control-group h3 {
-            font-size: 14px;
+            font-size: 12px;
             color: var(--accent-color);
-            margin-bottom: 12px;
+            margin-bottom: 8px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         
+        .control-group[data-collapsible="true"] h3 {
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.2s ease;
+        }
+        
+        .control-group[data-collapsible="true"] h3:hover {
+            color: var(--accent-color);
+        }
+        
+        .control-group .toggle-icon {
+            float: right;
+            font-size: 12px;
+            transition: transform 0.2s ease;
+        }
+        
+        .control-group.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+        
+        .control-group .control-content {
+            transition: max-height 0.3s ease;
+            overflow: hidden;
+        }
+        
+        .control-group.collapsed .control-content {
+            max-height: 0;
+            opacity: 0.5;
+        }
+        
         .input-group {
-            margin-bottom: 12px;
+            margin-bottom: 8px;
         }
         
         .input-group label {
             display: block;
-            font-size: 12px;
+            font-size: 11px;
             color: #ccc;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
         }
         
         .input-group input,
         .input-group select {
             width: 100%;
-            padding: 8px 12px;
+            padding: 6px 10px;
             background: var(--bg-primary);
             border: 1px solid var(--border-color);
             border-radius: 4px;
             color: var(--text-primary);
-            font-size: 14px;
+            font-size: 13px;
         }
         
         .input-group input:focus,
@@ -223,16 +292,6 @@
             transition: all 0.2s;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-        }
-        
-        .button-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-        
-        .button-grid .btn:first-child {
-            grid-column: 1 / -1;
         }
         
         .btn:hover {
@@ -265,17 +324,38 @@
             background: #cc3333;
         }
         
+        .btn-test {
+            background: #ff6b35;
+            border-color: #ff6b35;
+        }
+        
+        .btn-test:hover {
+            background: #e55a2b;
+            border-color: #e55a2b;
+        }
+        
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        
+        .button-grid .btn:first-child {
+            grid-column: 1 / -1;
+        }
+        
         .discovery-status {
-            padding: 16px 20px;
-            background: #252525;
-            border-top: 1px solid var(--border-color);
+            padding: 12px 16px;
+            background: rgba(37, 37, 37, 0.8);
+            border-top: 1px solid rgba(64, 64, 64, 0.6);
+            border-radius: 0 0 12px 12px;
         }
         
         .status-item {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 8px;
-            font-size: 14px;
+            margin-bottom: 6px;
+            font-size: 12px;
         }
         
         .status-value {
@@ -283,126 +363,36 @@
             font-weight: 600;
         }
         
-        /* Map Container (Center) */
-        .map-container {
-            flex: 1;
-            position: relative;
-            background: var(--bg-primary);
-        }
-        
-        #map {
-            height: 100%;
-            width: 100%;
-        }
-        
-        /* Connection status overlay */
-        .connection-status {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            padding: 6px 10px;
-            border-radius: 16px;
-            font-size: 11px;
-            z-index: 1200;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            backdrop-filter: blur(10px);
-            font-weight: 600;
-        }
-        
-        .connection-status.connected {
-            background: rgba(0, 255, 136, 0.25);
-            border: 1px solid var(--accent-color);
-            color: var(--accent-color);
-            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
-        }
-        
-        .connection-status.disconnected {
-            background: rgba(255, 68, 68, 0.25);
-            border: 1px solid #ff4444;
-            color: #ff4444;
-            box-shadow: 0 0 15px rgba(255, 68, 68, 0.3);
-        }
-        
-        .connection-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: currentColor;
-        }
-        
-        /* Progress overlay */
-        .progress-overlay {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.95);
-            padding: 20px;
-            border-radius: 12px;
-            border: 2px solid var(--accent-color);
-            z-index: 1001;
-            text-align: center;
-            display: none;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: var(--border-color);
-            border-radius: 4px;
-            margin: 16px 0;
-            overflow: hidden;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--accent-color), #00cc6a, var(--accent-color));
-            background-size: 200% 100%;
-            width: 0%;
-            transition: width 0.3s ease;
-            animation: progress-shimmer 2s infinite;
-        }
-        
-        @keyframes progress-shimmer {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
-        }
-        
-        .scan-animation {
-            animation: scanPulse 1.5s ease-out forwards;
-        }
-        
-        @keyframes scanPulse {
-            0% {
-                transform: scale(0.5);
-                opacity: 1;
-            }
-            100% {
-                transform: scale(2);
-                opacity: 0;
-            }
-        }
-        
-        /* Chat Panel (Right) - from main_chat.css */
+        /* Chat Panel - Floating right */
         .chat-panel {
+            position: absolute;
+            bottom: 20px; /* Adjusted to move it higher */
+            right: 20px;
             width: var(--chat-panel-width);
-            background-color: var(--bg-secondary);
-            border-left: 1px solid var(--border-color);
+            max-height: calc(100vh - var(--header-height) - 40px);
+            background: rgba(45, 45, 45, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(64, 64, 64, 0.8);
+            border-radius: 12px;
             display: flex;
             flex-direction: column;
-            height: 100%;
             overflow: hidden;
+            z-index: 1001;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        
+        .chat-panel:hover {
+            background: rgba(45, 45, 45, 0.95);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
         }
         
         .chat-header {
             padding: 1rem;
-            border-bottom: 1px solid var(--border-color);
-            background-color: #252525;
+            border-bottom: 1px solid rgba(64, 64, 64, 0.6);
+            background: rgba(37, 37, 37, 0.8);
+            border-radius: 12px 12px 0 0;
         }
         
         .chat-header h5 {
@@ -416,7 +406,6 @@
             font-size: 0.875rem;
         }
         
-        /* Authentication Section */
         .auth-section {
             padding: 1rem;
             border-bottom: 1px solid var(--border-color);
@@ -430,7 +419,6 @@
             text-align: center;
         }
         
-        /* Chat Messages */
         .chat-messages {
             flex: 1;
             overflow-y: auto;
@@ -476,7 +464,6 @@
             opacity: 0.7;
         }
         
-        /* Chat Input */
         .chat-input-section {
             border-top: 1px solid var(--border-color);
             padding: 1rem;
@@ -530,7 +517,6 @@
             cursor: not-allowed;
         }
         
-        /* User Profile Section */
         .user-profile-section {
             border-top: 1px solid var(--border-color);
             padding: 0.75rem;
@@ -575,7 +561,6 @@
             text-overflow: ellipsis;
         }
         
-        /* OAuth Configuration Notice */
         .oauth-notice {
             margin-top: 0.5rem;
             padding: 0.25rem;
@@ -585,61 +570,134 @@
             opacity: 0.7;
         }
         
-        /* Responsive Design */
-        @media (max-width: 1200px) {
-            .discovery-panel,
-            .chat-panel {
-                width: 280px;
+        /* Connection status overlay */
+        .connection-status {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            padding: 6px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            z-index: 1200;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            backdrop-filter: blur(10px);
+            font-weight: 600;
+        }
+        
+        .connection-status.connected {
+            background: rgba(0, 255, 136, 0.25);
+            border: 1px solid var(--accent-color);
+            color: var(--accent-color);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+        }
+        
+        .connection-status.disconnected {
+            background: rgba(255, 68, 68, 0.25);
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            box-shadow: 0 0 15px rgba(255, 68, 68, 0.3);
+        }
+        
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        
+        .scan-animation {
+            animation: scanPulse 1.5s ease-out forwards;
+        }
+        
+        @keyframes scanPulse {
+            0% {
+                transform: scale(0.5);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2);
+                opacity: 0;
             }
         }
         
-        @media (max-width: 768px) {
-            .main-content {
-                flex-direction: column;
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            :root {
+                --discovery-panel-width: 280px;
+                --chat-panel-width: 280px;
+            }
+        }
+        
+        @media (max-width: 900px) {
+            :root {
+                --discovery-panel-width: 250px;
+                --chat-panel-width: 250px;
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .discovery-panel {
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                width: calc(100vw - 20px);
+                max-height: 200px;
             }
             
-            .discovery-panel,
             .chat-panel {
-                width: 100%;
-                height: 200px;
-            }
-            
-            .map-container {
-                flex: 1;
+                bottom: 10px;
+                left: 10px;
+                right: 10px;
+                top: auto;
+                width: calc(100vw - 20px);
+                max-height: 200px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="unified-container">
-        <!-- Header -->
-        <div class="app-header">
-            <div class="header-content">
-                <div class="header-logo">
-                    <img src="images/site-logo.svg" alt="RE-Archaeology" class="site-logo">
-                    <h1><a href="#" onclick="window.unifiedApp.goToHomepage(); return false;">RE-Archaeology Framework</a></h1>
-                </div>
-                <div class="header-actions">
-                    <div class="task-indicator">
-                        <span id="activeTasksIndicator">Active Tasks: 0</span>
-                    </div>
+    <!-- Header -->
+    <div class="app-header">
+        <div class="header-content">
+            <div class="header-logo">
+                <img src="images/site-logo.svg" alt="RE-Archaeology" class="site-logo">
+                <h1><a href="#" onclick="window.unifiedApp.goToHomepage(); return false;">RE-Archaeology Framework</a></h1>
+            </div>
+            <div class="header-actions">
+                <div class="task-indicator">
+                    <span id="scanningStatusIndicator">Status: Ready</span>
                 </div>
             </div>
         </div>
+    </div>
+    
+    <!-- Main content -->
+    <div class="main-content">
+        <!-- Map Container (Full screen background) -->
+        <div class="map-container">
+            <div id="map"></div>
+            
+            <!-- Connection Status -->
+            <div class="connection-status disconnected" id="connectionStatus">
+                <div class="connection-dot"></div>
+                <span>Disconnected</span>
+            </div>
+        </div>
         
-        <!-- Three-pane main content -->
-        <div class="main-content">
-            <!-- Discovery Panel (Left) -->
-            <div class="discovery-panel">
-                <div class="discovery-header">
-                    <h1>🏛️ Structure Discovery</h1>
-                    <p>Real-time archaeological structure detection using φ⁰-ψ⁰ resonance analysis</p>
-                </div>
-                
-                <div class="discovery-controls">
-                    <!-- Region Selection -->
-                    <div class="control-group">
-                        <h3>🗺️ Scan Region</h3>
+        <!-- Discovery Panel (Floating Left) -->
+        <div class="discovery-panel">
+            <div class="discovery-header">
+                <h1>🏛️ Structure Discovery</h1>
+                <p>Real-time archaeological structure detection using φ⁰-ψ⁰ resonance analysis</p>
+            </div>
+            
+            <div class="discovery-controls">
+                <!-- Region Selection -->
+                <div class="control-group" data-collapsible="true">
+                    <h3 onclick="toggleControlGroup(this)">🗺️ Scan Region <span class="toggle-icon">▼</span></h3>
+                    <div class="control-content">
                         <div class="input-group">
                             <label>Center Latitude</label>
                             <input type="number" id="centerLat" value="52.4751" step="0.0001">
@@ -657,10 +715,12 @@
                             <input type="number" id="patchSize" value="40" step="16" min="32" max="256">
                         </div>
                     </div>
-                    
-                    <!-- Detection Settings -->
-                    <div class="control-group">
-                        <h3>🎯 Detection Settings</h3>
+                </div>
+                
+                <!-- Detection Settings -->
+                <div class="control-group" data-collapsible="true">
+                    <h3 onclick="toggleControlGroup(this)">🎯 Detection Settings <span class="toggle-icon">▼</span></h3>
+                    <div class="control-content">
                         <div class="input-group">
                             <label>φ⁰ Threshold</label>
                             <input type="number" id="phi0Threshold" value="0.35" step="0.05" min="0" max="1">
@@ -679,20 +739,22 @@
                             </select>
                         </div>
                     </div>
-                    
-                    <!-- Action Buttons -->
-                    <div class="control-group">
-                        <h3>🚀 Actions</h3>
-                        <div class="button-grid">
-                            <button class="btn btn-primary" id="startScanBtn">Start Scan</button>
-                            <button class="btn btn-stop" id="stopScanBtn" disabled>Stop</button>
-                            <button class="btn btn-secondary" id="clearResultsBtn">Clear</button>
-                        </div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div class="control-group">
+                    <h3>🚀 Actions</h3>
+                    <div class="button-grid">
+                        <button class="btn btn-primary" id="startScanBtn">Start Scan</button>
+                        <button class="btn btn-stop" id="stopScanBtn" disabled>Stop</button>
+                        <button class="btn btn-secondary" id="clearResultsBtn">Clear</button>
                     </div>
-                    
-                    <!-- Visualization Options -->
-                    <div class="control-group">
-                        <h3>👁️ Visualization</h3>
+                </div>
+                
+                <!-- Visualization Options -->
+                <div class="control-group" data-collapsible="true">
+                    <h3 onclick="toggleControlGroup(this)">👁️ Visualization <span class="toggle-icon">▼</span></h3>
+                    <div class="control-content">
                         <div class="input-group">
                             <label>
                                 <input type="checkbox" id="showElevation" checked> Show elevation data
@@ -710,122 +772,102 @@
                         </div>
                     </div>
                 </div>
-                
-                <!-- Discovery Status -->
-                <div class="discovery-status">
-                    <div class="status-item">
-                        <span>Session:</span>
-                        <span class="status-value" id="sessionStatus">Idle</span>
-                    </div>
-                    <div class="status-item">
-                        <span>Processed:</span>
-                        <span class="status-value" id="processedPatches">0</span>
-                    </div>
-                    <div class="status-item">
-                        <span>Detections:</span>
-                        <span class="status-value" id="totalDetections">0</span>
-                    </div>
-                    <div class="status-item">
-                        <span>High Confidence:</span>
-                        <span class="status-value" id="highConfidenceDetections">0</span>
-                    </div>
-                    <div class="status-item">
-                        <span>Kernel Status:</span>
-                        <span class="status-value" id="kernelStatus">Unknown</span>
-                    </div>
-                </div>
             </div>
             
-            <!-- Map Container (Center) -->
-            <div class="map-container">
-                <div id="map"></div>
-                
-                <!-- Connection Status -->
-                <div class="connection-status disconnected" id="connectionStatus">
-                    <div class="connection-dot"></div>
-                    <span>Disconnected</span>
+            <!-- Discovery Status -->
+            <div class="discovery-status">
+                <div class="status-item">
+                    <span>Session:</span>
+                    <span class="status-value" id="sessionStatus">Idle</span>
                 </div>
-                
-                <!-- Progress Overlay -->
-                <div class="progress-overlay" id="progressOverlay">
-                    <div id="progressText">Initializing scan...</div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <div id="progressDetails">Preparing detection algorithms...</div>
+                <div class="status-item">
+                    <span>Processed:</span>
+                    <span class="status-value" id="processedPatches">0</span>
+                </div>
+                <div class="status-item">
+                    <span>Detections:</span>
+                    <span class="status-value" id="totalDetections">0</span>
+                </div>
+                <div class="status-item">
+                    <span>High Confidence:</span>
+                    <span class="status-value" id="highConfidenceDetections">0</span>
+                </div>
+                <div class="status-item">
+                    <span>Kernel Status:</span>
+                    <span class="status-value" id="kernelStatus">Unknown</span>
                 </div>
             </div>
+        </div>
+        
+        <!-- Chat Panel (Floating Right) -->
+        <div class="chat-panel">
+            <header class="chat-header">
+                <h5 class="mb-0">👩‍🔬 Bella</h5>
+                <small>Guardian of Civilizations</small>
+            </header>
             
-            <!-- Chat Panel (Right) -->
-            <div class="chat-panel">
-                <header class="chat-header">
-                    <h5 class="mb-0">👩‍🔬 Bella</h5>
-                    <small>Guardian of Civilizations</small>
-                </header>
-                
-                <!-- Authentication - Login Only -->
-                <section class="auth-section" id="login-section">
-                    <p class="login-prompt">Sign in to chat with Bella</p>
-                    <!-- Google OAuth -->
-                    <div id="g_id_onload"
-                         data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
-                         data-callback="handleGoogleLogin"
-                         data-error_callback="handleGoogleError"
-                         data-auto_prompt="false"
-                         data-cancel_on_tap_outside="false"
-                         data-use_fedcm_for_prompt="false">
-                    </div>
-                    <div class="g_id_signin" 
-                         data-type="standard" 
-                         data-size="medium" 
-                         data-theme="outline" 
-                         data-text="sign_in_with">
-                    </div>
+            <!-- Authentication - Login Only -->
+            <section class="auth-section" id="login-section">
+                <p class="login-prompt">Sign in to chat with Bella</p>
+                <!-- Google OAuth -->
+                <div id="g_id_onload"
+                     data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
+                     data-callback="handleGoogleLogin"
+                     data-error_callback="handleGoogleError"
+                     data-auto_prompt="false"
+                     data-cancel_on_tap_outside="false"
+                     data-use_fedcm_for_prompt="false">
+                </div>
+                <div class="g_id_signin" 
+                     data-type="standard" 
+                     data-size="medium" 
+                     data-theme="outline" 
+                     data-text="sign_in_with">
+                </div>
+        
+                <!-- OAuth Configuration Notice -->
+                <div id="oauth-config-notice" class="oauth-notice" style="display: none;">
+                    <small class="text-muted">
+                        <i>⚠️ OAuth configuration needed for production use</i>
+                    </small>
+                </div>
+            </section>
             
-                    <!-- OAuth Configuration Notice -->
-                    <div id="oauth-config-notice" class="oauth-notice" style="display: none;">
-                        <small class="text-muted">
-                            <i>⚠️ OAuth configuration needed for production use</i>
-                        </small>
+            <!-- Chat Messages -->
+            <section class="chat-messages" id="chat-messages">
+                <div class="chat-welcome" id="chat-welcome">
+                    <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
+                    <p class="small">Sign in to start our conversation!</p>
+                </div>
+            </section>
+            
+            <!-- Chat Input -->
+            <section class="chat-input-section">
+                <form id="chat-input-form" class="chat-input-container" style="display: none;">
+                    <input type="text" 
+                           id="chat-input" 
+                           class="form-control" 
+                           placeholder="Ask Bella about discoveries..." 
+                           disabled>
+                    <button type="submit" id="send-btn" class="btn btn-primary" disabled>
+                        Send
+                    </button>
+                </form>
+            </section>
+            
+            <!-- User Profile - Bottom -->
+            <section class="user-profile-section" id="user-profile" style="display: none;">
+                <div class="user-profile-bottom">
+                    <img id="user-avatar" class="user-avatar" src="" alt="">
+                    <div class="user-details">
+                        <div id="user-name" class="user-name"></div>
+                        <div id="user-email" class="user-email text-muted small"></div>
                     </div>
-                </section>
-                
-                <!-- Chat Messages -->
-                <section class="chat-messages" id="chat-messages">
-                    <div class="chat-welcome" id="chat-welcome">
-                        <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
-                        <p class="small">Sign in to start our conversation!</p>
-                    </div>
-                </section>
-                
-                <!-- Chat Input -->
-                <section class="chat-input-section">
-                    <form id="chat-input-form" class="chat-input-container" style="display: none;">
-                        <input type="text" 
-                               id="chat-input" 
-                               class="form-control" 
-                               placeholder="Ask Bella about discoveries..." 
-                               disabled>
-                        <button type="submit" id="send-btn" class="btn btn-primary" disabled>
-                            Send
-                        </button>
-                    </form>
-                </section>
-                
-                <!-- User Profile - Bottom -->
-                <section class="user-profile-section" id="user-profile" style="display: none;">
-                    <div class="user-profile-bottom">
-                        <img id="user-avatar" class="user-avatar" src="" alt="">
-                        <div class="user-details">
-                            <div id="user-name" class="user-name"></div>
-                            <div id="user-email" class="user-email text-muted small"></div>
-                        </div>
-                        <button id="logout-btn" class="btn btn-sm btn-outline-secondary" style="display: none;">
-                            Logout
-                        </button>
-                    </div>
-                </section>
-            </div>
+                    <button id="logout-btn" class="btn btn-sm btn-outline-secondary" style="display: none;">
+                        Logout
+                    </button>
+                </div>
+            </section>
         </div>
     </div>
 
@@ -855,6 +897,8 @@
     <!-- Enhanced Status Management -->
     <script src="js/status-manager.js"></script>
     <script src="js/status-ui-manager.js"></script>
+    <!-- Patch Visualization -->
+    <script src="js/patch-visualization.js"></script>
     
     <!-- Main Application -->
     <script>
@@ -901,6 +945,9 @@
                 // Initialize map
                 this.initMap();
                 
+                // Initialize patch visualization
+                this.initPatchVisualization();
+                
                 // Setup discovery event handlers
                 this.setupDiscoveryEvents();
                 
@@ -911,6 +958,17 @@
                 } catch (error) {
                     console.warn('⚠️ Discovery running in offline mode:', error.message);
                     this.setupOfflineMode();
+                }
+            }
+
+            initPatchVisualization() {
+                // Initialize patch visualization system
+                if (typeof PatchVisualization !== 'undefined') {
+                    this.patchViz = new PatchVisualization();
+                    window.patchViz = this.patchViz; // Make globally accessible
+                    console.log('✅ Patch visualization initialized');
+                } else {
+                    console.warn('⚠️ PatchVisualization class not found');
                 }
             }
             
@@ -996,22 +1054,70 @@
                     this.currentSession = session;
                     this.isScanning = true;
                     document.getElementById('sessionStatus').textContent = 'Scanning';
-                    document.getElementById('progressOverlay').style.display = 'block';
+                    document.getElementById('scanningStatusIndicator').textContent = 'Scanning: 0% (0/0) • Initializing...';
                 });
                 
                 this.statusManager.on('sessionCompleted', () => {
                     this.isScanning = false;
                     this.currentSession = null;
                     document.getElementById('sessionStatus').textContent = 'Completed';
-                    document.getElementById('progressOverlay').style.display = 'none';
+                    document.getElementById('scanningStatusIndicator').textContent = 'Status: Completed';
                 });
                 
                 this.statusManager.on('patchResult', (patch) => {
                     this.handlePatchUpdate(patch);
                     
+                    // Update progress in header status with detailed information
+                    if (this.isScanning && this.statusManager.state?.progress) {
+                        const progress = this.statusManager.state.progress;
+                        const percentage = Math.round(progress.percentage || 0);
+                        const current = progress.current || 0;
+                        const total = progress.total || 0;
+                        const rate = progress.rate ? Math.round(progress.rate * 10) / 10 : 0;
+                        const eta = progress.eta;
+                        
+                        let statusText = `Scanning: ${percentage}% (${current}/${total})`;
+                        if (rate > 0) {
+                            statusText += ` • ${rate}/s`;
+                        }
+                        if (eta) {
+                            const etaMinutes = Math.round(eta / 60);
+                            if (etaMinutes > 0) {
+                                statusText += ` • ETA: ${etaMinutes}m`;
+                            }
+                        }
+                        
+                        document.getElementById('scanningStatusIndicator').textContent = statusText;
+                    }
+                    
                     // Show scan animation if enabled
                     if (document.getElementById('showScanAnimation')?.checked) {
                         this.showScanAnimation(patch.lat, patch.lon);
+                    }
+                });
+                
+                // Listen for periodic status updates to refresh progress display
+                this.statusManager.on('statusUpdate', (status) => {
+                    if (this.isScanning && status.progress) {
+                        const progress = status.progress;
+                        const percentage = Math.round(progress.percentage || 0);
+                        const current = progress.current || 0;
+                        const total = progress.total || 0;
+                        const rate = progress.rate ? Math.round(progress.rate * 10) / 10 : 0;
+                        const eta = progress.eta;
+                        
+                        let statusText = `Scanning: ${percentage}% (${current}/${total})`;
+                        if (rate > 0) {
+                            statusText += ` • ${rate}/s`;
+                        }
+                        if (eta) {
+                            const etaMinutes = Math.round(eta / 60);
+                            if (etaMinutes > 0) {
+                                statusText += ` • ETA: ${etaMinutes}m`;
+                            }
+                        }
+                        
+                        document.getElementById('scanningStatusIndicator').textContent = statusText;
                     }
                 });
             }
@@ -1021,6 +1127,7 @@
                 document.getElementById('startScanBtn').disabled = true;
                 document.getElementById('stopScanBtn').disabled = true;
                 document.getElementById('sessionStatus').textContent = 'Offline Mode';
+                document.getElementById('scanningStatusIndicator').textContent = 'Status: Offline';
             }
             
             updateScanArea() {
@@ -1098,7 +1205,7 @@
                 
                 // Reset UI state
                 document.getElementById('sessionStatus').textContent = 'Idle';
-                document.getElementById('progressOverlay').style.display = 'none';
+                document.getElementById('scanningStatusIndicator').textContent = 'Status: Ready';
                 document.getElementById('startScanBtn').disabled = false;
                 document.getElementById('stopScanBtn').disabled = true;
                 
@@ -1140,6 +1247,10 @@
             }
             
             handlePatchUpdate(patch) {
+                console.log('🔄 handlePatchUpdate called with patch:', patch.patch_id);
+                console.log('🔄 Patch has elevation_data:', !!patch.elevation_data);
+                console.log('🔄 Patch keys:', Object.keys(patch));
+                
                 this.patches.set(patch.patch_id, patch);
                 this.addPatchToMap(patch);
                 
@@ -1166,11 +1277,34 @@
                 
                 // Add popup with patch info
                 rectangle.bindPopup(`
-                    <strong>Patch ${patch.patch_id}</strong><br>
-                    φ⁰ Score: ${patch.detection_result?.phi0?.toFixed(3) || 'N/A'}<br>
-                    ψ⁰ Score: ${patch.detection_result?.psi0?.toFixed(3) || 'N/A'}<br>
-                    Confidence: ${((patch.confidence || 0) * 100).toFixed(1)}%<br>
-                    Detection: ${patch.is_positive ? 'Positive' : 'Negative'}
+                    <div class="patch-popup">
+                        <h4>Patch ${patch.patch_id}</h4>
+                        <div class="popup-content">
+                            <div class="info-row">
+                                <span>φ⁰ Score:</span>
+                                <span>${patch.detection_result?.phi0?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div class="info-row">
+                                <span>ψ⁰ Score:</span>
+                                <span>${patch.detection_result?.psi0?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div class="info-row">
+                                <span>Confidence:</span>
+                                <span>${((patch.confidence || 0) * 100).toFixed(1)}%</span>
+                            </div>
+                            <div class="info-row">
+                                <span>Detection:</span>
+                                <span class="${patch.is_positive ? 'positive' : 'negative'}">
+                                    ${patch.is_positive ? 'Positive' : 'Negative'}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="popup-actions">
+                            <button onclick="window.unifiedApp.showPatchDetails('${patch.patch_id}')" class="btn-small">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
                 `);
                 
                 patch.mapElement = rectangle;
@@ -1257,7 +1391,7 @@
                     
                     if (response.ok) {
                         const userData = await response.json();
-                        this.currentUser = userData;
+                        this.currentUser = userData.user || userData; // Handle both response formats
                         this.setAuthenticatedState(true);
                     } else {
                         localStorage.removeItem('auth_token');
@@ -1322,8 +1456,12 @@
                     
                     // Update user info - with debugging
                     console.log('Setting user profile:', this.currentUser);
+                    console.log('Available user fields:', Object.keys(this.currentUser));
+                    
                     const avatarUrl = this.currentUser.picture || this.currentUser.profile_picture || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNkZGQiLz4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxMiIgcj0iNSIgZmlsbD0iIzk5OSIvPgo8cGF0aCBkPSJtNCwyNmMwLTYuNjI3LDUuMzczLTEyLDEyLTEyczEyLDUuMzczLDEyLDEyIiBmaWxsPSIjOTk5Ii8+Cjwvc3ZnPgo=';
-                    console.log('Setting avatar URL:', avatarUrl);
+                    console.log('Avatar URL chosen:', avatarUrl);
+                    console.log('Picture field:', this.currentUser.picture);
+                    console.log('Profile_picture field:', this.currentUser.profile_picture);
                     
                     const avatarElement = document.getElementById('user-avatar');
                     const nameElement = document.getElementById('user-name');
@@ -1427,9 +1565,17 @@
             
             // Utilities
             goToHomepage() {
-                // Reset to initial state
+                // Reset to main discovery interface (homepage)
                 this.clearResults();
-                document.getElementById('sessionStatus').textContent = 'Idle';
+                document.getElementById('sessionStatus').textContent = 'Ready for Discovery';
+                document.getElementById('scanningStatusIndicator').textContent = 'Status: Ready';
+                
+                // Ensure map is centered on default location
+                if (this.map) {
+                    this.map.setView([52.4751, 4.8156], 13);
+                }
+                
+                console.log('Returned to main discovery interface (homepage)');
             }
             
             showScanAnimation(lat, lon) {
@@ -1446,6 +1592,28 @@
                 setTimeout(() => {
                     this.map.removeLayer(scanCircle);
                 }, 1500);
+            }
+
+            // Show detailed visualization for a patch
+            showPatchDetails(patchId) {
+                console.log('🎯 UnifiedApp.showPatchDetails called with patchId:', patchId);
+                
+                const patch = this.patches.get(patchId);
+                if (!patch) {
+                    console.warn('❌ Patch not found:', patchId);
+                    return;
+                }
+
+                console.log('✅ Patch found:', patch.patch_id);
+                console.log('✅ Patch has elevation_data:', !!patch.elevation_data);
+                
+                // Use the patch visualization system
+                if (this.patchViz) {
+                    console.log('✅ PatchViz system available, calling showPatchDetails');
+                    this.patchViz.showPatchDetails(patch);
+                } else {
+                    console.error('❌ Patch visualization system not initialized');
+                }
             }
         }
         
@@ -1464,6 +1632,66 @@
             }
         };
         
+        // Toggle function for collapsible control groups
+        window.toggleControlGroup = function(headerElement) {
+            const controlGroup = headerElement.parentElement;
+            const content = controlGroup.querySelector('.control-content');
+            const toggleIcon = headerElement.querySelector('.toggle-icon');
+            
+            if (content.style.display === 'none' || content.style.display === '') {
+                content.style.display = 'block';
+                toggleIcon.textContent = '▼';
+                controlGroup.classList.remove('collapsed');
+            } else {
+                content.style.display = 'none';
+                toggleIcon.textContent = '▶';
+                controlGroup.classList.add('collapsed');
+            }
+        };
+
+        // Test function for patch visualization
+        window.testPatchVisualization = function() {
+            console.log('🧪 Test button clicked!');
+            console.log('🧪 window.unifiedApp exists:', !!window.unifiedApp);
+            console.log('🧪 window.patchViz exists:', !!window.patchViz);
+            console.log('🧪 unifiedApp.patchViz exists:', !!(window.unifiedApp && window.unifiedApp.patchViz));
+            
+            // Try multiple ways to access the visualization
+            if (window.patchViz) {
+                console.log('✅ Using window.patchViz');
+                window.patchViz.testVisualization();
+            } else if (window.unifiedApp && window.unifiedApp.patchViz) {
+                console.log('✅ Using unifiedApp.patchViz');
+                window.unifiedApp.patchViz.testVisualization();
+            } else {
+                console.error('❌ No patch visualization system found!');
+                // Manual modal test
+                console.log('🔧 Testing modal manually...');
+                const modal = document.getElementById('patchGrid');
+                if (modal) {
+                    console.log('✅ Modal element found');
+                    modal.style.display = 'flex';
+                    modal.innerHTML = `
+                        <div class="patch-modal-content">
+                            <div class="patch-modal-header">
+                                <h3>Test Modal</h3>
+                                <button class="close-btn" onclick="document.getElementById('patchGrid').style.display='none'">×</button>
+                            </div>
+                            <div class="patch-modal-body">
+                                <div style="padding: 20px; text-align: center; color: #00ff88;">
+                                    <h4>🧪 Modal Test Successful!</h4>
+                                    <p>The modal is working correctly.</p>
+                                    <p>Issue might be with patch visualization system initialization.</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    console.error('❌ Modal element not found!');
+                }
+            }
+        };
+
         // Initialize app when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             // Log configuration
@@ -1480,6 +1708,74 @@
             
             window.unifiedApp = new UnifiedREArchaeologyApp();
         });
+        
+        // Initialize collapsible panels on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize collapsible panels - collapse some by default
+            const collapsibleGroups = document.querySelectorAll('.control-group[data-collapsible="true"]');
+            collapsibleGroups.forEach((group, index) => {
+                const header = group.querySelector('h3');
+                // Collapse Detection Settings and Visualization panels by default
+                if (header.textContent.includes('Detection Settings') || 
+                    header.textContent.includes('Visualization')) {
+                    toggleControlGroup(header);
+                }
+            });
+            
+            // Test modal visibility
+            console.log('🔍 Modal element on page load:', !!document.getElementById('patchGrid'));
+            const modal = document.getElementById('patchGrid');
+            if (modal) {
+                console.log('✅ Modal found, current display:', modal.style.display);
+                console.log('✅ Modal computed style:', window.getComputedStyle(modal).display);
+                console.log('✅ Modal z-index:', window.getComputedStyle(modal).zIndex);
+            }
+        });
+
     </script>
+
+    <!-- Patch Details Modal -->
+    <div id="patchGrid" class="patch-details-modal" style="display: none;">
+        <div class="patch-modal-content">
+            <div class="patch-modal-header">
+                <h3>Patch Details</h3>
+                <button class="close-btn" onclick="window.patchViz?.hidePatchDetails()">×</button>
+            </div>
+            
+            <div class="patch-modal-body">
+                <!-- Patch Information Panel -->
+                <div id="patchInfoPanel" class="patch-info-section">
+                    <!-- Content will be dynamically populated -->
+                </div>
+                
+                <!-- Main Content Grid: Elevation Image + Histogram -->
+                <div class="dual-visualization-container">
+                    <!-- Elevation Grid Visualization -->
+                    <div class="elevation-visualization-section">
+                        <h4>Elevation Data Visualization</h4>
+                        <div id="elevationGrid" class="elevation-grid">
+                            <!-- Elevation grid cells will be dynamically populated -->
+                        </div>
+                    </div>
+                    
+                    <!-- Elevation Histogram -->
+                    <div class="histogram-visualization-section">
+                        <h4>Elevation Histogram</h4>
+                        <div id="elevationChart" class="elevation-chart-container">
+                            <canvas id="elevationHistogramCanvas" width="400" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Detection Analysis -->
+                <div id="detectionAnalysis" class="detection-analysis-section">
+                    <!-- Detection analysis content will be dynamically populated -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart.js Library for Histogram -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>

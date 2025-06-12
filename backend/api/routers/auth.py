@@ -107,7 +107,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         return {
             "user_id": user_id, 
             "email": payload.get("email"),
-            "name": payload.get("name")
+            "name": payload.get("name"),
+            "picture": payload.get("picture")  # Include picture from JWT
         }
     except jwt.JWTError:
         logger.warning("JWT token verification failed")
@@ -140,7 +141,8 @@ async def get_current_user_optional(token: Optional[str] = None) -> Optional[dic
         return {
             "user_id": user_id, 
             "email": payload.get("email"),
-            "name": payload.get("name")
+            "name": payload.get("name"),
+            "picture": payload.get("picture")  # Include picture from JWT
         }
     except jwt.JWTError:
         logger.debug("JWT token verification failed (optional)")
@@ -173,11 +175,12 @@ async def google_auth(request: GoogleTokenRequest):
     
     logger.info(f"Authenticated user with Google OAuth: {email}")
     
-    # Create access token
+    # Create access token with picture included
     access_token = create_access_token({
         "sub": user_data["id"],
         "email": user_data["email"],
-        "name": user_data["name"]
+        "name": user_data["name"],
+        "picture": picture  # Include picture in JWT
     })
     
     return TokenResponse(

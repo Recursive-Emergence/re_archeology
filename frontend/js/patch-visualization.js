@@ -23,14 +23,13 @@ class PatchVisualization {
      */
     setupElevationGrid() {
         const gridContainer = document.getElementById('patchGrid');
-        if (!gridContainer) return;
+        if (!gridContainer) {
+            console.warn('⚠️ patchGrid container not found during setup');
+            return;
+        }
 
-        // Add close button
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'close-btn';
-        closeBtn.innerHTML = '×';
-        closeBtn.onclick = () => this.hidePatchDetails();
-        gridContainer.appendChild(closeBtn);
+        // Don't add a close button here - it's already in the HTML structure
+        console.log('✅ Elevation grid setup complete');
     }
 
     /**
@@ -46,11 +45,19 @@ class PatchVisualization {
             this.hidePatchDetails();
         });
 
+        // Test visualization with mock data (for debugging)
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'T' && e.ctrlKey && e.shiftKey) {
+                console.log('🧪 Testing patch visualization with mock data');
+                this.testVisualization();
+            }
+        });
+
         // Click outside to close
         document.addEventListener('click', (e) => {
             const gridContainer = document.getElementById('patchGrid');
             if (gridContainer && 
-                gridContainer.style.display === 'block' && 
+                gridContainer.style.display === 'flex' && 
                 !gridContainer.contains(e.target) && 
                 !e.target.closest('.leaflet-interactive')) {
                 this.hidePatchDetails();
@@ -62,7 +69,37 @@ class PatchVisualization {
      * Show detailed visualization for a patch
      */
     showPatchDetails(patch) {
+        console.log('🔍 PatchVisualization.showPatchDetails called with patch:', patch.patch_id);
+        console.log('🔍 Patch elevation_data present:', !!patch.elevation_data);
+        console.log('🔍 Patch elevation_data type:', typeof patch.elevation_data);
+        console.log('🔍 Patch elevation_data sample:', patch.elevation_data ? patch.elevation_data.slice(0, 3) : 'none');
+        
         this.currentPatch = patch;
+        
+        // Show the modal first
+        const gridContainer = document.getElementById('patchGrid');
+        if (gridContainer) {
+            console.log('✅ Modal container found');
+            console.log('🔍 Current display style:', gridContainer.style.display);
+            console.log('🔍 Computed display style:', window.getComputedStyle(gridContainer).display);
+            
+            // Force show the modal
+            gridContainer.style.display = 'flex';
+            gridContainer.style.visibility = 'visible';
+            gridContainer.style.opacity = '1';
+            
+            console.log('✅ Modal display set to flex');
+            
+            // Add a temporary background for debugging
+            gridContainer.style.background = 'rgba(255, 0, 0, 0.8)';
+            setTimeout(() => {
+                gridContainer.style.background = 'rgba(0, 0, 0, 0.8)';
+            }, 1000);
+            
+        } else {
+            console.error('❌ Modal container not found!');
+            return;
+        }
         
         // Show elevation grid
         this.displayElevationGrid(patch);
@@ -81,15 +118,29 @@ class PatchVisualization {
      * Display elevation data as a colored grid with enhanced visualization
      */
     displayElevationGrid(patch) {
+        console.log('🔍 displayElevationGrid called for patch:', patch.patch_id);
+        
         const gridContainer = document.getElementById('patchGrid');
         const elevationGrid = document.getElementById('elevationGrid');
         
-        if (!gridContainer || !elevationGrid) return;
+        console.log('🔍 Grid container found:', !!gridContainer);
+        console.log('🔍 Elevation grid found:', !!elevationGrid);
+        
+        if (!gridContainer || !elevationGrid) {
+            console.error('❌ Missing grid containers!');
+            return;
+        }
 
         elevationGrid.innerHTML = '';
 
         if (!patch.elevation_data || !Array.isArray(patch.elevation_data)) {
-            gridContainer.style.display = 'none';
+            console.warn('⚠️ No elevation data or not array for patch:', patch.patch_id);
+            elevationGrid.innerHTML = `
+                <div style="text-align: center; color: #aaa; padding: 40px; grid-column: 1 / -1;">
+                    <p>📊 No elevation data available</p>
+                    <p>This patch may be outside the LiDAR coverage area</p>
+                </div>
+            `;
             return;
         }
 
@@ -97,8 +148,16 @@ class PatchVisualization {
         const rows = data.length;
         const cols = data[0]?.length || 0;
 
+        console.log('🔍 Elevation data dimensions:', rows, 'x', cols);
+
         if (rows === 0 || cols === 0) {
-            gridContainer.style.display = 'none';
+            console.warn('⚠️ Empty elevation data dimensions');
+            elevationGrid.innerHTML = `
+                <div style="text-align: center; color: #aaa; padding: 40px; grid-column: 1 / -1;">
+                    <p>📊 Empty elevation data</p>
+                    <p>Data dimensions: ${rows} x ${cols}</p>
+                </div>
+            `;
             return;
         }
 
@@ -171,7 +230,7 @@ class PatchVisualization {
             }
         }
 
-        gridContainer.style.display = 'block';
+        gridContainer.style.display = 'flex';
     }
 
     /**
@@ -231,20 +290,253 @@ class PatchVisualization {
     }
 
     /**
-     * Display elevation chart (if Chart.js is available)
+     * Display elevation chart (histogram) using Chart.js
      */
     displayElevationChart(patch) {
-        // This would require Chart.js library
-        // For now, create a simple ASCII-style visualization
-        if (typeof Chart === 'undefined') {
-            return; // Chart.js not available
+        console.log('📊 displayElevationChart called for patch:', patch.patch_id);
+        
+        const chartContainer = document.getElementById('elevationChart');
+        let canvas = document.getElementById('elevationHistogramCanvas');
+        
+        console.log('📊 Chart container found:', !!chartContainer);
+        console.log('📊 Canvas found:', !!canvas);
+        console.log('📊 Chart.js available:', typeof Chart !== 'undefined');
+        
+        if (!chartContainer) {
+            console.error('❌ Missing chart container!');
+            return;
         }
 
-        const chartContainer = document.getElementById('elevationChart');
-        if (!chartContainer) return;
+        // Recreate canvas if it doesn't exist or has issues
+        if (!canvas) {
+            console.log('📊 Creating new canvas element');
+            canvas = document.createElement('canvas');
+            canvas.id = 'elevationHistogramCanvas';
+            chartContainer.innerHTML = '';
+            chartContainer.appendChild(canvas);
+        }
 
-        // Implementation would go here for 3D surface plot
-        // This is a placeholder for future enhancement
+        // Set canvas dimensions explicitly
+        const containerRect = chartContainer.getBoundingClientRect();
+        canvas.width = Math.max(400, containerRect.width - 40);
+        canvas.height = Math.max(250, containerRect.height - 40);
+        canvas.style.width = `${canvas.width}px`;
+        canvas.style.height = `${canvas.height}px`;
+
+        // Check if Chart.js is available
+        if (typeof Chart === 'undefined') {
+            console.warn('⚠️ Chart.js not available');
+            chartContainer.innerHTML = `
+                <div style="text-align: center; color: #aaa; padding: 40px;">
+                    <p>📊 Chart.js library not loaded</p>
+                    <p>Histogram visualization unavailable</p>
+                </div>
+            `;
+            return;
+        }
+
+        if (!patch.elevation_data || !Array.isArray(patch.elevation_data)) {
+            console.warn('⚠️ No elevation data for histogram');
+            chartContainer.innerHTML = `
+                <div style="text-align: center; color: #aaa; padding: 40px;">
+                    <p>📊 No elevation data available</p>
+                    <p>Cannot generate histogram</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Flatten elevation data and filter out invalid values
+        const elevationValues = patch.elevation_data
+            .flat()
+            .filter(v => v !== null && v !== undefined && !isNaN(v));
+
+        if (elevationValues.length === 0) {
+            chartContainer.innerHTML = `
+                <div style="text-align: center; color: #aaa; padding: 40px;">
+                    <p>📊 No valid elevation data</p>
+                    <p>Cannot generate histogram</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Calculate histogram bins
+        const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
+        const numBins = Math.min(20, Math.max(5, Math.ceil(Math.sqrt(elevationValues.length))));
+        const binWidth = (stats.max - stats.min) / numBins;
+        
+        // Create bins
+        const bins = Array(numBins).fill(0);
+        const binLabels = [];
+        
+        for (let i = 0; i < numBins; i++) {
+            const binStart = stats.min + i * binWidth;
+            const binEnd = stats.min + (i + 1) * binWidth;
+            binLabels.push(`${binStart.toFixed(1)}-${binEnd.toFixed(1)}m`);
+        }
+
+        // Fill bins
+        elevationValues.forEach(value => {
+            const binIndex = Math.min(Math.floor((value - stats.min) / binWidth), numBins - 1);
+            if (binIndex >= 0) {
+                bins[binIndex]++;
+            }
+        });
+
+        // Destroy existing chart if it exists
+        if (this.charts.has('elevation-histogram')) {
+            console.log('📊 Destroying existing chart');
+            this.charts.get('elevation-histogram').destroy();
+            this.charts.delete('elevation-histogram');
+        }
+
+        // Clear canvas context
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        console.log('📊 Creating Chart.js histogram with dimensions:', canvas.width, 'x', canvas.height);
+        console.log('📊 Histogram data - bins:', bins.length, 'values:', elevationValues.length);
+
+        // Create new chart with explicit sizing
+        const chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: binLabels,
+                datasets: [{
+                    label: 'Frequency',
+                    data: bins,
+                    backgroundColor: 'rgba(0, 255, 136, 0.6)',
+                    borderColor: '#00ff88',
+                    borderWidth: 1,
+                    borderRadius: 2
+                }]
+            },
+            options: {
+                responsive: false,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 800,
+                    easing: 'easeInOutQuart'
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Elevation Distribution - Patch ${patch.patch_id}`,
+                        color: '#00ff88',
+                        font: {
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    },
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        titleColor: '#00ff88',
+                        bodyColor: '#fff',
+                        borderColor: '#00ff88',
+                        borderWidth: 1,
+                        callbacks: {
+                            title: function(context) {
+                                return `Elevation Range: ${context[0].label}`;
+                            },
+                            label: function(context) {
+                                const percentage = ((context.raw / elevationValues.length) * 100).toFixed(1);
+                                return `Count: ${context.raw} (${percentage}%)`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Elevation Range (meters)',
+                            color: '#ccc'
+                        },
+                        ticks: {
+                            color: '#ccc',
+                            maxRotation: 45
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Frequency',
+                            color: '#ccc'
+                        },
+                        ticks: {
+                            color: '#ccc',
+                            precision: 0,
+                            maxTicksLimit: 10
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                }
+            }
+        });
+
+        // Store chart reference for cleanup
+        this.charts.set('elevation-histogram', chart);
+
+        console.log('📊 Chart created successfully!', chart);
+
+        // Force chart update and render
+        setTimeout(() => {
+            chart.update();
+            chart.render();
+            console.log('📊 Chart updated and rendered');
+        }, 100);
+
+        // Add statistics overlay
+        this.addStatisticsOverlay(chartContainer, stats, elevationValues.length);
+    }
+
+    /**
+     * Add statistics overlay to chart container
+     */
+    addStatisticsOverlay(container, stats, count) {
+        const existingOverlay = container.querySelector('.stats-overlay');
+        if (existingOverlay) {
+            existingOverlay.remove();
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'stats-overlay';
+        overlay.style.cssText = `
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #00ff88;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 11px;
+            color: #ccc;
+            pointer-events: none;
+        `;
+        
+        overlay.innerHTML = `
+            <div><strong>Statistics:</strong></div>
+            <div>Count: ${count}</div>
+            <div>Min: ${stats.min.toFixed(2)}m</div>
+            <div>Max: ${stats.max.toFixed(2)}m</div>
+            <div>Mean: ${stats.mean.toFixed(2)}m</div>
+            <div>Std: ${stats.std.toFixed(2)}m</div>
+        `;
+
+        container.appendChild(overlay);
     }
 
     /**
@@ -492,6 +784,56 @@ class PatchVisualization {
         });
         this.charts.clear();
         this.currentPatch = null;
+    }
+
+    /**
+     * Test visualization with mock elevation data
+     */
+    testVisualization() {
+        // Create mock patch with elevation data
+        const mockPatch = {
+            patch_id: 'test-patch-001',
+            lat: 52.4751,
+            lon: 4.8156,
+            is_positive: true,
+            confidence: 0.85,
+            patch_size_m: 40,
+            detection_result: {
+                phi0: 0.72,
+                psi0: 0.68
+            },
+            elevation_data: this.generateMockElevationData(32, 32),
+            elevation_stats: {
+                min: 2.1,
+                max: 8.7,
+                mean: 4.2,
+                std: 1.3
+            }
+        };
+
+        console.log('🧪 Mock patch created:', mockPatch);
+        this.showPatchDetails(mockPatch);
+    }
+
+    /**
+     * Generate mock elevation data for testing
+     */
+    generateMockElevationData(rows, cols) {
+        const data = [];
+        for (let i = 0; i < rows; i++) {
+            const row = [];
+            for (let j = 0; j < cols; j++) {
+                // Generate realistic elevation values with some pattern
+                const centerX = cols / 2;
+                const centerY = rows / 2;
+                const distFromCenter = Math.sqrt((i - centerY) ** 2 + (j - centerX) ** 2);
+                const baseElevation = 4.0;
+                const variation = Math.sin(distFromCenter * 0.3) * 2.0 + Math.random() * 0.5;
+                row.push(baseElevation + variation);
+            }
+            data.push(row);
+        }
+        return data;
     }
 }
 

@@ -99,13 +99,30 @@ app.include_router(earth_engine_service.router, prefix=settings.API_V1_STR, tags
 app.include_router(discovery.router, prefix=settings.API_V1_STR, tags=["discovery"])
 app.include_router(websocket.router, tags=["websockets"])
 
-# Mount static files for frontend
+# Explicit homepage route for the discovery interface
+from fastapi.responses import FileResponse
+
+@app.get("/", response_class=FileResponse)
+async def serve_homepage():
+    """Serve the main discovery interface as homepage"""
+    frontend_path = pathlib.Path(__file__).parent.parent.parent / "frontend"
+    index_path = frontend_path / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path), media_type="text/html")
+    else:
+        raise HTTPException(status_code=404, detail="Discovery interface not found")
+
+# Mount static files for frontend assets (CSS, JS, images)
 frontend_path = pathlib.Path(__file__).parent.parent.parent / "frontend"
 if frontend_path.exists():
-    # Mount static files at /static/ path for assets
+    # Mount static files for CSS, JS, images, etc.
+    app.mount("/css", StaticFiles(directory=str(frontend_path / "css")), name="css")
+    app.mount("/js", StaticFiles(directory=str(frontend_path / "js")), name="js")
+    app.mount("/images", StaticFiles(directory=str(frontend_path / "images")), name="images")
+    app.mount("/components", StaticFiles(directory=str(frontend_path / "components")), name="components")
+    app.mount("/services", StaticFiles(directory=str(frontend_path / "services")), name="services")
+    # Mount all static files at /static/ for backward compatibility
     app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
-    # Mount frontend at root path for HTML files - this will serve index.html for "/"
-    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 
 # Startup event
 @app.on_event("startup")

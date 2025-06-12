@@ -429,7 +429,7 @@ class MapVisualization {
                     </div>
                 </div>
                 <div class="popup-actions">
-                    <button onclick="window.discoveryApp.showPatchDetails('${patch.patch_id}')" class="btn-small">
+                    <button onclick="window.unifiedApp.showPatchDetails('${patch.patch_id}')" class="btn-small">
                         View Details
                     </button>
                 </div>

@@ -193,6 +193,10 @@ class StatusManager {
                     this.handlePatchResult(data);
                     break;
                     
+                case 'patch_elevation_loaded':
+                    this.handlePatchElevationLoaded(data);
+                    break;
+                    
                 case 'session_progress':
                 case 'progress_update':
                     this.handleProgressUpdate(data);
@@ -219,6 +223,10 @@ class StatusManager {
                     this.handleKernelReady(data);
                     break;
                     
+                case 'patch_elevation_loaded':
+                    this.handlePatchElevationLoaded(data);
+                    break;
+                    
                 default:
                     console.warn('⚠️ Unknown message type:', data.type);
                     this.triggerCallback('unknownMessage', data);
@@ -239,6 +247,13 @@ class StatusManager {
         this.updateState({
             session: session,
             scanning: true,
+            progress: {
+                current: 0,
+                total: session.total_patches || 0,
+                percentage: 0,
+                rate: 0,
+                eta: null
+            },
             statistics: {
                 ...this.state.statistics,
                 scanStartTime: Date.now(),
@@ -262,6 +277,14 @@ class StatusManager {
      */
     handlePatchLoaded(data) {
         this.triggerCallback('patchLoaded', data);
+    }
+    
+    /**
+     * Handle patch elevation loaded updates
+     */
+    handlePatchElevationLoaded(data) {
+        console.log('📊 Patch elevation loaded:', data.patch_id, data.elevation_stats);
+        this.triggerCallback('patchElevationLoaded', data);
     }
     
     /**
@@ -389,6 +412,15 @@ class StatusManager {
     handleKernelReady(data) {
         console.log('📦 Kernel ready:', data);
         this.triggerCallback('kernelReady', data);
+    }
+    
+    /**
+     * Handle patch elevation loaded messages
+     */
+    handlePatchElevationLoaded(data) {
+        console.log('📏 Patch elevation loaded:', data.patch_id);
+        // Update patch data with elevation statistics if we have the patch stored
+        this.triggerCallback('patchElevationLoaded', data);
     }
     
     /**
@@ -548,7 +580,27 @@ class StatusManager {
         const timeDiff = now - this.state.statistics.scanStartTime;
         
         if (timeDiff > 0 && this.state.statistics.totalPatches > 0) {
-            this.state.progress.rate = (this.state.statistics.totalPatches / timeDiff) * 1000; // patches per second
+            const newRate = (this.state.statistics.totalPatches / timeDiff) * 1000; // patches per second
+            
+            // Update progress with current patch count and recalculate percentage
+            const progress = { ...this.state.progress };
+            progress.rate = newRate;
+            progress.current = this.state.statistics.totalPatches;
+            
+            // Recalculate percentage if we have a total
+            if (progress.total > 0) {
+                progress.percentage = (progress.current / progress.total) * 100;
+                
+                // Calculate ETA
+                if (progress.rate > 0 && progress.current < progress.total) {
+                    const remainingPatches = progress.total - progress.current;
+                    progress.eta = Math.ceil(remainingPatches / progress.rate);
+                } else {
+                    progress.eta = null;
+                }
+            }
+            
+            this.updateState({ progress });
         }
     }
     
