@@ -344,6 +344,12 @@
             grid-column: 1 / -1;
         }
         
+        .button-grid .btn:nth-child(4) {
+            grid-column: 1 / -1;
+            font-size: 12px;
+            padding: 6px 12px;
+        }
+        
         .discovery-status {
             padding: 12px 16px;
             background: rgba(37, 37, 37, 0.8);
@@ -748,6 +754,7 @@
                         <button class="btn btn-primary" id="startScanBtn">Start Scan</button>
                         <button class="btn btn-stop" id="stopScanBtn" disabled>Stop</button>
                         <button class="btn btn-secondary" id="clearResultsBtn">Clear</button>
+
                     </div>
                 </div>
                 
@@ -1275,9 +1282,9 @@
                     fillOpacity: patch.is_positive ? 0.7 : 0.3
                 }).addTo(this.map);
                 
-                // Add popup with patch info
+                // Add popup with extended patch info including mini visualizations
                 rectangle.bindPopup(`
-                    <div class="patch-popup">
+                    <div class="patch-popup extended">
                         <h4>Patch ${patch.patch_id}</h4>
                         <div class="popup-content">
                             <div class="info-row">
@@ -1299,13 +1306,29 @@
                                 </span>
                             </div>
                         </div>
-                        <div class="popup-actions">
-                            <button onclick="window.unifiedApp.showPatchDetails('${patch.patch_id}')" class="btn-small">
-                                View Details
-                            </button>
+                        
+                        <!-- Mini Elevation Visualization -->
+                        <div class="popup-visualization">
+                            <div class="mini-elevation-grid" id="miniElevationGrid_${patch.patch_id}">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                            <div class="mini-histogram" id="miniHistogram_${patch.patch_id}">
+                                <canvas width="150" height="80"></canvas>
+                            </div>
                         </div>
                     </div>
-                `);
+                `, {
+                    maxWidth: 400,
+                    minWidth: 350
+                });
+                
+                // Add click handler to show mini visualizations in popup
+                rectangle.on('click', () => {
+                    // Small delay to ensure popup is rendered
+                    setTimeout(() => {
+                        this.showMiniVisualizationInPopup(patch);
+                    }, 100);
+                });
                 
                 patch.mapElement = rectangle;
             }
@@ -1615,6 +1638,157 @@
                     console.error('❌ Patch visualization system not initialized');
                 }
             }
+            
+            showMiniVisualizationInPopup(patch) {
+                // Populate mini elevation grid
+                this.populateMiniElevationGrid(patch);
+                
+                // Populate mini histogram
+                this.populateMiniHistogram(patch);
+            }
+            
+            populateMiniElevationGrid(patch) {
+                const gridElement = document.getElementById(`miniElevationGrid_${patch.patch_id}`);
+                if (!gridElement || !patch.elevation_data) return;
+                
+                const data = patch.elevation_data;
+                const rows = data.length;
+                const cols = data[0]?.length || 0;
+                
+                if (rows === 0 || cols === 0) return;
+                
+                // Determine optimal sample size based on available data resolution
+                // For AHN4 data (typically 80x80 pixels at 0.5m resolution), we can show more detail
+                // Match the 21x21 kernel size used by the detection algorithm when possible
+                let sampleSize = 8; // Default fallback
+                
+                if (rows >= 60 && cols >= 60) {
+                    sampleSize = 21; // Full kernel resolution for high-res data
+                } else if (rows >= 32 && cols >= 32) {
+                    sampleSize = 16; // Medium resolution
+                } else if (rows >= 16 && cols >= 16) {
+                    sampleSize = 12; // Low-medium resolution
+                }
+                
+                // Update CSS grid to match the sample size
+                gridElement.style.gridTemplateColumns = `repeat(${sampleSize}, 1fr)`;
+                
+                const rowStep = Math.max(1, Math.floor(rows / sampleSize));
+                const colStep = Math.max(1, Math.floor(cols / sampleSize));
+                
+                const stats = patch.elevation_stats || this.calculateElevationStats(data);
+                const min = stats.min;
+                const max = stats.max;
+                const range = max - min;
+                
+                gridElement.innerHTML = '';
+                
+                // Add grid info as a data attribute for debugging
+                gridElement.setAttribute('data-grid-info', `${sampleSize}x${sampleSize} (from ${rows}x${cols})`);
+                
+                for (let i = 0; i < sampleSize; i++) {
+                    for (let j = 0; j < sampleSize; j++) {
+                        const rowIdx = Math.min(i * rowStep, rows - 1);
+                        const colIdx = Math.min(j * colStep, cols - 1);
+                        const value = data[rowIdx][colIdx];
+                        
+                        if (value !== null && value !== undefined && !isNaN(value)) {
+                            const normalized = range > 0 ? (value - min) / range : 0;
+                            
+                            const cell = document.createElement('div');
+                            cell.className = 'mini-elevation-cell';
+                            cell.style.backgroundColor = this.getElevationColor(normalized);
+                            cell.title = `${value.toFixed(1)}m @ [${rowIdx},${colIdx}]`;
+                            
+                            gridElement.appendChild(cell);
+                        }
+                    }
+                }
+                
+                console.log(`🔍 Mini grid created: ${sampleSize}x${sampleSize} from ${rows}x${cols} source data`);
+            }
+            
+            populateMiniHistogram(patch) {
+                const histogramElement = document.getElementById(`miniHistogram_${patch.patch_id}`);
+                const canvas = histogramElement?.querySelector('canvas');
+                if (!canvas || !patch.elevation_data) return;
+                
+                const ctx = canvas.getContext('2d');
+                const width = canvas.width;
+                const height = canvas.height;
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, width, height);
+                
+                // Flatten elevation data
+                const elevationValues = patch.elevation_data
+                    .flat()
+                    .filter(v => v !== null && v !== undefined && !isNaN(v));
+                
+                if (elevationValues.length === 0) return;
+                
+                const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
+                const numBins = 8; // Fewer bins for mini chart
+                const binWidth = (stats.max - stats.min) / numBins;
+                
+                // Create histogram
+                const bins = Array(numBins).fill(0);
+                elevationValues.forEach(value => {
+                    const binIndex = Math.min(Math.floor((value - stats.min) / binWidth), numBins - 1);
+                    if (binIndex >= 0) bins[binIndex]++;
+                });
+                
+                const maxCount = Math.max(...bins);
+                if (maxCount === 0) return;
+                
+                // Draw mini histogram
+                const barWidth = width / numBins;
+                const padding = 2;
+                
+                ctx.fillStyle = '#00ff88';
+                ctx.strokeStyle = '#00ff88';
+                ctx.lineWidth = 1;
+                
+                bins.forEach((count, i) => {
+                    const barHeight = (count / maxCount) * (height - padding * 2);
+                    const x = i * barWidth;
+                    const y = height - barHeight - padding;
+                    
+                    ctx.fillRect(x + 1, y, barWidth - 2, barHeight);
+                });
+            }
+            
+            calculateElevationStats(data) {
+                const flatData = data.flat().filter(v => v !== null && v !== undefined && !isNaN(v));
+                
+                if (flatData.length === 0) {
+                    return { min: 0, max: 0, mean: 0, std: 0 };
+                }
+
+                const min = Math.min(...flatData);
+                const max = Math.max(...flatData);
+                const mean = flatData.reduce((a, b) => a + b, 0) / flatData.length;
+                const variance = flatData.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / flatData.length;
+                const std = Math.sqrt(variance);
+
+                return { min, max, mean, std };
+            }
+            
+            getElevationColor(normalized) {
+                // Simple terrain color scale for mini view
+                const colors = [
+                    [70, 130, 180],   // Blue (low)
+                    [100, 200, 100],  // Green
+                    [255, 255, 100],  // Yellow
+                    [255, 150, 50],   // Orange
+                    [200, 50, 50]     // Red (high)
+                ];
+                
+                const index = Math.floor(normalized * (colors.length - 1));
+                const color = colors[Math.min(index, colors.length - 1)];
+                
+                return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+            }
         }
         
         // Google OAuth callbacks
@@ -1646,49 +1820,6 @@
                 content.style.display = 'none';
                 toggleIcon.textContent = '▶';
                 controlGroup.classList.add('collapsed');
-            }
-        };
-
-        // Test function for patch visualization
-        window.testPatchVisualization = function() {
-            console.log('🧪 Test button clicked!');
-            console.log('🧪 window.unifiedApp exists:', !!window.unifiedApp);
-            console.log('🧪 window.patchViz exists:', !!window.patchViz);
-            console.log('🧪 unifiedApp.patchViz exists:', !!(window.unifiedApp && window.unifiedApp.patchViz));
-            
-            // Try multiple ways to access the visualization
-            if (window.patchViz) {
-                console.log('✅ Using window.patchViz');
-                window.patchViz.testVisualization();
-            } else if (window.unifiedApp && window.unifiedApp.patchViz) {
-                console.log('✅ Using unifiedApp.patchViz');
-                window.unifiedApp.patchViz.testVisualization();
-            } else {
-                console.error('❌ No patch visualization system found!');
-                // Manual modal test
-                console.log('🔧 Testing modal manually...');
-                const modal = document.getElementById('patchGrid');
-                if (modal) {
-                    console.log('✅ Modal element found');
-                    modal.style.display = 'flex';
-                    modal.innerHTML = `
-                        <div class="patch-modal-content">
-                            <div class="patch-modal-header">
-                                <h3>Test Modal</h3>
-                                <button class="close-btn" onclick="document.getElementById('patchGrid').style.display='none'">×</button>
-                            </div>
-                            <div class="patch-modal-body">
-                                <div style="padding: 20px; text-align: center; color: #00ff88;">
-                                    <h4>🧪 Modal Test Successful!</h4>
-                                    <p>The modal is working correctly.</p>
-                                    <p>Issue might be with patch visualization system initialization.</p>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    console.error('❌ Modal element not found!');
-                }
             }
         };
 
@@ -1734,41 +1865,41 @@
 
     </script>
 
-    <!-- Patch Details Modal -->
+    <!-- Patch Details Modal - Compact Version -->
     <div id="patchGrid" class="patch-details-modal" style="display: none;">
-        <div class="patch-modal-content">
+        <div class="patch-modal-content compact">
             <div class="patch-modal-header">
-                <h3>Patch Details</h3>
+                <h3>Patch Analysis</h3>
                 <button class="close-btn" onclick="window.patchViz?.hidePatchDetails()">×</button>
             </div>
             
-            <div class="patch-modal-body">
-                <!-- Patch Information Panel -->
-                <div id="patchInfoPanel" class="patch-info-section">
+            <div class="patch-modal-body compact">
+                <!-- Patch Information Panel - Compact -->
+                <div id="patchInfoPanel" class="patch-info-section compact">
                     <!-- Content will be dynamically populated -->
                 </div>
                 
-                <!-- Main Content Grid: Elevation Image + Histogram -->
-                <div class="dual-visualization-container">
-                    <!-- Elevation Grid Visualization -->
-                    <div class="elevation-visualization-section">
-                        <h4>Elevation Data Visualization</h4>
-                        <div id="elevationGrid" class="elevation-grid">
+                <!-- Compact Visualization Grid -->
+                <div class="compact-visualization-container">
+                    <!-- Elevation Grid Visualization - Mini -->
+                    <div class="elevation-visualization-section mini">
+                        <h5>Elevation Pattern</h5>
+                        <div id="elevationGrid" class="elevation-grid mini">
                             <!-- Elevation grid cells will be dynamically populated -->
                         </div>
                     </div>
                     
-                    <!-- Elevation Histogram -->
-                    <div class="histogram-visualization-section">
-                        <h4>Elevation Histogram</h4>
-                        <div id="elevationChart" class="elevation-chart-container">
-                            <canvas id="elevationHistogramCanvas" width="400" height="300"></canvas>
+                    <!-- Elevation Histogram - Mini -->
+                    <div class="histogram-visualization-section mini">
+                        <h5>Elevation Distribution</h5>
+                        <div id="elevationChart" class="elevation-chart-container mini">
+                            <canvas id="elevationHistogramCanvas" width="250" height="180"></canvas>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Detection Analysis -->
-                <div id="detectionAnalysis" class="detection-analysis-section">
+                <!-- Compact Detection Analysis -->
+                <div id="detectionAnalysis" class="detection-analysis-section compact">
                     <!-- Detection analysis content will be dynamically populated -->
                 </div>
             </div>

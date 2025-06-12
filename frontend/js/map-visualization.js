@@ -392,9 +392,21 @@ class MapVisualization {
     createPatchPopup(patch) {
         const detection = patch.detection_result || {};
         const stats = patch.elevation_stats || {};
+        const rows = patch.elevation_data?.length || 0;
+        const cols = patch.elevation_data?.[0]?.length || 0;
+        
+        // Determine grid resolution that will be displayed
+        let displayGridSize = 8; // default
+        if (rows >= 60 && cols >= 60) {
+            displayGridSize = 21; // High resolution - matches detection kernel
+        } else if (rows >= 32 && cols >= 32) {
+            displayGridSize = 16; // Medium resolution
+        } else if (rows >= 16 && cols >= 16) {
+            displayGridSize = 12; // Low-medium resolution
+        }
         
         return `
-            <div class="patch-popup">
+            <div class="patch-popup extended">
                 <h4>Patch ${patch.patch_id}</h4>
                 <div class="popup-content">
                     <div class="info-row">
@@ -424,14 +436,23 @@ class MapVisualization {
                         <span>${stats.min?.toFixed(1) || '--'}m - ${stats.max?.toFixed(1) || '--'}m</span>
                     </div>
                     <div class="info-row">
+                        <span>Data Resolution:</span>
+                        <span>${rows}×${cols} → ${displayGridSize}×${displayGridSize} ${displayGridSize === 21 ? '(Kernel Match!)' : 'display'}</span>
+                    </div>
+                    <div class="info-row">
                         <span>Timestamp:</span>
                         <span>${new Date(patch.timestamp).toLocaleTimeString()}</span>
                     </div>
                 </div>
-                <div class="popup-actions">
-                    <button onclick="window.unifiedApp.showPatchDetails('${patch.patch_id}')" class="btn-small">
-                        View Details
-                    </button>
+                
+                <!-- Mini Elevation Visualization -->
+                <div class="popup-visualization">
+                    <div class="mini-elevation-grid" id="miniElevationGrid_${patch.patch_id}">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                    <div class="mini-histogram" id="miniHistogram_${patch.patch_id}">
+                        <canvas width="150" height="80"></canvas>
+                    </div>
                 </div>
             </div>
         `;

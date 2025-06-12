@@ -161,8 +161,9 @@ class PatchVisualization {
             return;
         }
 
-        // Limit grid size for performance but show more detail than before
-        const maxGridSize = 25;
+        // Limit grid size for performance - adjust for compact mode
+        const isCompact = elevationGrid.classList.contains('mini');
+        const maxGridSize = isCompact ? 16 : 25;  // Smaller grid for compact mode
         const displayRows = Math.min(rows, maxGridSize);
         const displayCols = Math.min(cols, maxGridSize);
 
@@ -173,27 +174,29 @@ class PatchVisualization {
         const max = stats.max;
         const range = max - min;
 
-        // Add grid header with patch info and detection status
-        const headerInfo = document.createElement('div');
-        headerInfo.className = 'elevation-grid-header';
-        headerInfo.innerHTML = `
-            <div class="grid-title">
-                <h4>Patch ${patch.patch_id} - LiDAR Elevation Data</h4>
-                <div class="detection-status ${patch.is_positive ? 'positive' : 'negative'}">
-                    ${patch.is_positive ? '🎯 DETECTION' : '❌ NO DETECTION'}
-                    ${patch.confidence ? `(${(patch.confidence * 100).toFixed(1)}% confidence)` : ''}
+        // Add grid header with patch info and detection status - compact version
+        if (!isCompact) {
+            const headerInfo = document.createElement('div');
+            headerInfo.className = 'elevation-grid-header';
+            headerInfo.innerHTML = `
+                <div class="grid-title">
+                    <h4>Patch ${patch.patch_id} - LiDAR Elevation Data</h4>
+                    <div class="detection-status ${patch.is_positive ? 'positive' : 'negative'}">
+                        ${patch.is_positive ? '🎯 DETECTION' : '❌ NO DETECTION'}
+                        ${patch.confidence ? `(${(patch.confidence * 100).toFixed(1)}% confidence)` : ''}
+                    </div>
                 </div>
-            </div>
-            <div class="elevation-legend">
-                <span class="legend-label">Elevation Range:</span>
-                <div class="legend-bar">
-                    <span class="legend-min">${min.toFixed(1)}m</span>
-                    <div class="legend-gradient"></div>
-                    <span class="legend-max">${max.toFixed(1)}m</span>
+                <div class="elevation-legend">
+                    <span class="legend-label">Elevation Range:</span>
+                    <div class="legend-bar">
+                        <span class="legend-min">${min.toFixed(1)}m</span>
+                        <div class="legend-gradient"></div>
+                        <span class="legend-max">${max.toFixed(1)}m</span>
+                    </div>
                 </div>
-            </div>
-        `;
-        elevationGrid.parentElement.insertBefore(headerInfo, elevationGrid);
+            `;
+            elevationGrid.parentElement.insertBefore(headerInfo, elevationGrid);
+        }
 
         // Sample data if needed
         const rowStep = Math.max(1, Math.floor(rows / displayRows));
@@ -316,10 +319,20 @@ class PatchVisualization {
             chartContainer.appendChild(canvas);
         }
 
-        // Set canvas dimensions explicitly
+        // Set canvas dimensions explicitly - adjust for compact layout
         const containerRect = chartContainer.getBoundingClientRect();
-        canvas.width = Math.max(400, containerRect.width - 40);
-        canvas.height = Math.max(250, containerRect.height - 40);
+        const isCompact = chartContainer.classList.contains('mini');
+        
+        if (isCompact) {
+            // Compact mode - smaller dimensions
+            canvas.width = Math.max(250, containerRect.width - 20);
+            canvas.height = Math.max(180, containerRect.height - 20);
+        } else {
+            // Full mode - larger dimensions
+            canvas.width = Math.max(400, containerRect.width - 40);
+            canvas.height = Math.max(250, containerRect.height - 40);
+        }
+        
         canvas.style.width = `${canvas.width}px`;
         canvas.style.height = `${canvas.height}px`;
 
@@ -548,62 +561,87 @@ class PatchVisualization {
 
         const detection = patch.detection_result || {};
         const stats = patch.elevation_stats || {};
+        const isCompact = analysisContainer.classList.contains('compact');
 
-        const analysisHTML = `
-            <div class="analysis-section">
-                <h4>Detection Analysis</h4>
-                <div class="analysis-grid">
-                    <div class="metric">
-                        <label>φ⁰ Resonance:</label>
-                        <span class="value ${this.getScoreClass(detection.phi0)}">${detection.phi0?.toFixed(3) || '--'}</span>
-                    </div>
-                    <div class="metric">
-                        <label>ψ⁰ Attractors:</label>
-                        <span class="value ${this.getScoreClass(detection.psi0)}">${detection.psi0?.toFixed(3) || '--'}</span>
-                    </div>
-                    <div class="metric">
-                        <label>Confidence:</label>
-                        <span class="value ${this.getConfidenceClass(patch.confidence)}">${(patch.confidence * 100).toFixed(1)}%</span>
-                    </div>
-                    <div class="metric">
-                        <label>Structure Type:</label>
-                        <span class="value">${detection.structure_type || 'Unknown'}</span>
-                    </div>
-                </div>
-                
-                <h5>Elevation Statistics</h5>
-                <div class="stats-grid">
-                    <div class="stat">
-                        <label>Range:</label>
-                        <span>${stats.min?.toFixed(2) || '--'}m - ${stats.max?.toFixed(2) || '--'}m</span>
-                    </div>
-                    <div class="stat">
-                        <label>Mean:</label>
-                        <span>${stats.mean?.toFixed(2) || '--'}m</span>
-                    </div>
-                    <div class="stat">
-                        <label>Std Dev:</label>
-                        <span>${stats.std?.toFixed(2) || '--'}m</span>
+        if (isCompact) {
+            // Compact analysis - show only key metrics
+            const analysisHTML = `
+                <div class="analysis-section">
+                    <h4>Detection Metrics</h4>
+                    <div class="analysis-grid">
+                        <div class="metric">
+                            <label>φ⁰ Score:</label>
+                            <span class="value ${this.getScoreClass(detection.phi0)}">${detection.phi0?.toFixed(3) || '--'}</span>
+                        </div>
+                        <div class="metric">
+                            <label>ψ⁰ Score:</label>
+                            <span class="value ${this.getScoreClass(detection.psi0)}">${detection.psi0?.toFixed(3) || '--'}</span>
+                        </div>
+                        <div class="metric">
+                            <label>Confidence:</label>
+                            <span class="value ${this.getConfidenceClass(patch.confidence)}">${(patch.confidence * 100).toFixed(1)}%</span>
+                        </div>
                     </div>
                 </div>
+            `;
+        } else {
+            // Full analysis - original detailed version
+            const analysisHTML = `
+                <div class="analysis-section">
+                    <h4>Detection Analysis</h4>
+                    <div class="analysis-grid">
+                        <div class="metric">
+                            <label>φ⁰ Resonance:</label>
+                            <span class="value ${this.getScoreClass(detection.phi0)}">${detection.phi0?.toFixed(3) || '--'}</span>
+                        </div>
+                        <div class="metric">
+                            <label>ψ⁰ Attractors:</label>
+                            <span class="value ${this.getScoreClass(detection.psi0)}">${detection.psi0?.toFixed(3) || '--'}</span>
+                        </div>
+                        <div class="metric">
+                            <label>Confidence:</label>
+                            <span class="value ${this.getConfidenceClass(patch.confidence)}">${(patch.confidence * 100).toFixed(1)}%</span>
+                        </div>
+                        <div class="metric">
+                            <label>Structure Type:</label>
+                            <span class="value">${detection.structure_type || 'Unknown'}</span>
+                        </div>
+                    </div>
+                    
+                    <h5>Elevation Statistics</h5>
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <label>Range:</label>
+                            <span>${stats.min?.toFixed(2) || '--'}m - ${stats.max?.toFixed(2) || '--'}m</span>
+                        </div>
+                        <div class="stat">
+                            <label>Mean:</label>
+                            <span>${stats.mean?.toFixed(2) || '--'}m</span>
+                        </div>
+                        <div class="stat">
+                            <label>Std Dev:</label>
+                            <span>${stats.std?.toFixed(2) || '--'}m</span>
+                        </div>
+                    </div>
 
-                <h5>Processing Info</h5>
-                <div class="info-grid">
-                    <div class="info">
-                        <label>Timestamp:</label>
-                        <span>${new Date(patch.timestamp).toLocaleString()}</span>
-                    </div>
-                    <div class="info">
-                        <label>Patch ID:</label>
-                        <span>${patch.patch_id}</span>
-                    </div>
-                    <div class="info">
-                        <label>Session ID:</label>
-                        <span>${patch.session_id}</span>
+                    <h5>Processing Info</h5>
+                    <div class="info-grid">
+                        <div class="info">
+                            <label>Timestamp:</label>
+                            <span>${new Date(patch.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div class="info">
+                            <label>Patch ID:</label>
+                            <span>${patch.patch_id}</span>
+                        </div>
+                        <div class="info">
+                            <label>Session ID:</label>
+                            <span>${patch.session_id}</span>
+                        </div>
                     </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
 
         analysisContainer.innerHTML = analysisHTML;
     }
@@ -636,28 +674,53 @@ class PatchVisualization {
         const infoPanel = document.getElementById('patchInfoPanel');
         if (!infoPanel) return;
 
-        const panelHTML = `
-            <div class="patch-info-header">
-                <h3>Patch ${patch.patch_id}</h3>
-                <div class="status-badge ${patch.is_positive ? 'positive' : 'negative'}">
-                    ${patch.is_positive ? 'DETECTION' : 'NO DETECTION'}
+        const isCompact = infoPanel.classList.contains('compact');
+        
+        if (isCompact) {
+            // Compact layout - more condensed information
+            const panelHTML = `
+                <div class="patch-info-compact">
+                    <div class="info-row">
+                        <strong>Patch ${patch.patch_id}</strong>
+                        <span class="status-badge ${patch.is_positive ? 'positive' : 'negative'}">
+                            ${patch.is_positive ? '✓ DETECTION' : '✗ NO DETECTION'}
+                        </span>
+                    </div>
+                    <div class="info-row">
+                        <span>📍 ${patch.lat.toFixed(4)}, ${patch.lon.toFixed(4)}</span>
+                        <span>🎯 ${((patch.confidence || 0) * 100).toFixed(1)}% confidence</span>
+                    </div>
+                    <div class="info-row">
+                        <span>φ⁰: ${patch.detection_result?.phi0?.toFixed(3) || '--'}</span>
+                        <span>ψ⁰: ${patch.detection_result?.psi0?.toFixed(3) || '--'}</span>
+                    </div>
                 </div>
-            </div>
-            <div class="patch-coordinates">
-                <span>📍 ${patch.lat.toFixed(6)}, ${patch.lon.toFixed(6)}</span>
-            </div>
-            <div class="patch-actions">
-                <button onclick="window.patchViz.exportPatchData('${patch.patch_id}')" class="btn-small">
-                    📊 Export Data
-                </button>
-                <button onclick="window.patchViz.viewIn3D('${patch.patch_id}')" class="btn-small">
-                    🎯 View in 3D
-                </button>
-                <button onclick="window.patchViz.compareWithSimilar('${patch.patch_id}')" class="btn-small">
-                    🔍 Compare
-                </button>
-            </div>
-        `;
+            `;
+        } else {
+            // Full layout - original detailed information
+            const panelHTML = `
+                <div class="patch-info-header">
+                    <h3>Patch ${patch.patch_id}</h3>
+                    <div class="status-badge ${patch.is_positive ? 'positive' : 'negative'}">
+                        ${patch.is_positive ? 'DETECTION' : 'NO DETECTION'}
+                    </div>
+                </div>
+                <div class="patch-coordinates">
+                    <span>📍 ${patch.lat.toFixed(6)}, ${patch.lon.toFixed(6)}</span>
+                </div>
+                <div class="patch-actions">
+                    <button onclick="window.patchViz.exportPatchData('${patch.patch_id}')" class="btn-small">
+                        📊 Export Data
+                    </button>
+                    <button onclick="window.patchViz.viewIn3D('${patch.patch_id}')" class="btn-small">
+                        🎯 View in 3D
+                    </button>
+                    <button onclick="window.patchViz.compareWithSimilar('${patch.patch_id}')" class="btn-small">
+                        🔍 Compare
+                    </button>
+                </div>
+            `;
+        }
 
         infoPanel.innerHTML = panelHTML;
     }
