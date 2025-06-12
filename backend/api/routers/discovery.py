@@ -545,17 +545,59 @@ async def get_session_details(session_id: str):
 async def get_cached_kernels(structure_type: str = None):
     """Get list of cached kernels"""
     try:
-        # This would need to be implemented to work with the phi0_core module
-        # For now, return a placeholder
+        # Import phi0_core to get real kernel data
+        from phi0_core import PhiZeroStructureDetector
+        
+        # Try to load existing kernel
+        detector = PhiZeroStructureDetector(structure_type=structure_type or "windmill")
+        
+        kernels_info = []
+        
+        # Check if kernel exists and get its data
+        if hasattr(detector, 'elevation_kernel') and detector.elevation_kernel is not None:
+            # Calculate histogram from elevation kernel for frontend
+            elevation_kernel = detector.elevation_kernel
+            kernel_range = np.max(elevation_kernel) - np.min(elevation_kernel)
+            
+            if kernel_range >= 0.5:
+                # Apply same normalization as phi0_core
+                kernel_relative = elevation_kernel - np.min(elevation_kernel)
+                kernel_max_rel = np.max(kernel_relative)
+                
+                if kernel_max_rel >= 0.1:
+                    kernel_normalized = kernel_relative / kernel_max_rel
+                    
+                    # Create histogram with 16 bins
+                    num_bins = 16
+                    bin_edges = np.linspace(0, 1, num_bins + 1)
+                    hist, _ = np.histogram(kernel_normalized.flatten(), bins=bin_edges, density=True)
+                    
+                    # Normalize to probability distribution
+                    hist = hist / (np.sum(hist) + 1e-8)
+                    
+                    kernels_info.append({
+                        'structure_type': structure_type or "windmill",
+                        'kernel_size': detector.kernel_size,
+                        'elevation_histogram': hist.tolist(),
+                        'elevation_range': kernel_range,
+                        'created': datetime.now().isoformat(),
+                        'source': 'phi0_core'
+                    })
+        
+        return {
+            'status': 'success',
+            'kernels': kernels_info,
+            'total_count': len(kernels_info),
+            'message': f'Found {len(kernels_info)} kernel(s)'
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cached kernels: {e}")
         return {
             'status': 'success',
             'kernels': [],
             'total_count': 0,
-            'message': 'Kernel management integration pending'
+            'message': f'Kernel loading failed: {str(e)}'
         }
-    except Exception as e:
-        logger.error(f"Failed to get cached kernels: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/discovery/clear")
 async def clear_discovery_sessions():

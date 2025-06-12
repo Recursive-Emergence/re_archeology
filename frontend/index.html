@@ -904,8 +904,7 @@
     <!-- Enhanced Status Management -->
     <script src="js/status-manager.js"></script>
     <script src="js/status-ui-manager.js"></script>
-    <!-- Patch Visualization -->
-    <script src="js/patch-visualization.js"></script>
+    <!-- Patch Visualization -->        <script src="js/patch-visualization.js?v=13.0"></script>
     
     <!-- Main Application -->
     <script>
@@ -1282,51 +1281,64 @@
                     fillOpacity: patch.is_positive ? 0.7 : 0.3
                 }).addTo(this.map);
                 
-                // Add popup with extended patch info including mini visualizations
+                // Add popup with professional analyzer-style visualization
                 rectangle.bindPopup(`
-                    <div class="patch-popup extended">
-                        <h4>Patch ${patch.patch_id}</h4>
-                        <div class="popup-content">
-                            <div class="info-row">
-                                <span>φ⁰ Score:</span>
-                                <span>${patch.detection_result?.phi0?.toFixed(3) || 'N/A'}</span>
-                            </div>
-                            <div class="info-row">
-                                <span>ψ⁰ Score:</span>
-                                <span>${patch.detection_result?.psi0?.toFixed(3) || 'N/A'}</span>
-                            </div>
-                            <div class="info-row">
-                                <span>Confidence:</span>
-                                <span>${((patch.confidence || 0) * 100).toFixed(1)}%</span>
-                            </div>
-                            <div class="info-row">
-                                <span>Detection:</span>
-                                <span class="${patch.is_positive ? 'positive' : 'negative'}">
-                                    ${patch.is_positive ? 'Positive' : 'Negative'}
-                                </span>
+                    <div class="patch-popup professional" style="width: 400px;">
+                        <div class="popup-header" style="background: #252525; padding: 12px; margin: -20px -20px 15px -20px; border-radius: 8px 8px 0 0;">
+                            <h4 style="color: #00ff88; margin: 0; font-size: 14px;">Patch ${patch.patch_id} Analysis</h4>
+                            <div style="color: #ccc; font-size: 11px; margin-top: 4px;">
+                                📍 ${patch.lat.toFixed(4)}, ${patch.lon.toFixed(4)} • 
+                                Score: <span style="color: ${this.getScoreColor(patch.confidence || 0)}">${((patch.confidence || 0) * 100).toFixed(1)}%</span>
                             </div>
                         </div>
                         
-                        <!-- Mini Elevation Visualization -->
-                        <div class="popup-visualization">
-                            <div class="mini-elevation-grid" id="miniElevationGrid_${patch.patch_id}">
-                                <!-- Will be populated by JavaScript -->
+                        <div class="popup-metrics" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px;">
+                            <div style="background: #1a1a1a; padding: 8px; border-radius: 4px; border-left: 3px solid #00ff88;">
+                                <div style="color: #ccc; font-size: 10px;">φ⁰ SCORE</div>
+                                <div style="color: #fff; font-size: 12px; font-weight: bold;">${patch.detection_result?.phi0?.toFixed(3) || 'N/A'}</div>
                             </div>
-                            <div class="mini-histogram" id="miniHistogram_${patch.patch_id}">
-                                <canvas width="150" height="80"></canvas>
+                            <div style="background: #1a1a1a; padding: 8px; border-radius: 4px; border-left: 3px solid #ff9f40;">
+                                <div style="color: #ccc; font-size: 10px;">ψ⁰ SCORE</div>
+                                <div style="color: #fff; font-size: 12px; font-weight: bold;">${patch.detection_result?.psi0?.toFixed(3) || 'N/A'}</div>
                             </div>
+                        </div>
+                        
+                        <div class="popup-visualization" style="display: flex; gap: 15px;">
+                            <!-- Elevation Heatmap -->
+                            <div style="flex: 1;">
+                                <h6 style="color: #ccc; margin: 0 0 8px 0; font-size: 11px; text-align: center;">Elevation Pattern</h6>
+                                <div id="miniElevationGrid_${patch.patch_id}" class="mini-elevation-grid professional" 
+                                     style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 1px; width: 120px; height: 120px; margin: 0 auto;">
+                                    <!-- Will be populated by JavaScript -->
+                                </div>
+                            </div>
+                            
+                            <!-- Professional Histogram -->
+                            <div style="flex: 1;">
+                                <h6 style="color: #ccc; margin: 0 0 8px 0; font-size: 11px; text-align: center;">Elevation Distribution</h6>
+                                <div id="miniHistogram_${patch.patch_id}" style="width: 180px; height: 120px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; position: relative;">
+                                    <canvas width="180" height="120" style="display: block;"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="popup-status" style="margin-top: 15px; text-align: center; padding: 8px; background: ${patch.is_positive ? 'rgba(0, 255, 136, 0.1)' : 'rgba(102, 102, 102, 0.1)'}; border-radius: 4px;">
+                            <span style="color: ${patch.is_positive ? '#00ff88' : '#666'}; font-size: 12px; font-weight: bold;">
+                                ${patch.is_positive ? '🎯 POSITIVE DETECTION' : '❌ NEGATIVE'}
+                            </span>
                         </div>
                     </div>
                 `, {
-                    maxWidth: 400,
-                    minWidth: 350
+                    maxWidth: 450,
+                    minWidth: 420,
+                    className: 'professional-popup'
                 });
                 
-                // Add click handler to show mini visualizations in popup
+                // Add click handler to show professional visualizations in popup ONLY
                 rectangle.on('click', () => {
                     // Small delay to ensure popup is rendered
                     setTimeout(() => {
-                        this.showMiniVisualizationInPopup(patch);
+                        this.showProfessionalVisualizationInPopup(patch);
                     }, 100);
                 });
                 
@@ -1358,6 +1370,170 @@
                 if (confidence >= 0.6) return '#ffaa00';
                 if (confidence >= 0.4) return '#ffff00';
                 return '#00ff88';
+            }
+            
+            getScoreColor(score) {
+                if (score >= 0.7) return '#00ff88'; // Green
+                if (score >= 0.4) return '#ffaa00'; // Orange
+                return '#ff4444'; // Red
+            }
+            
+            showProfessionalVisualizationInPopup(patch) {
+                console.log('🎨 Creating professional popup visualization for patch:', patch.patch_id);
+                
+                // Populate professional elevation grid
+                this.populateProfessionalElevationGrid(patch);
+                
+                // Populate professional histogram with Chart.js
+                this.populateProfessionalHistogram(patch);
+            }
+            
+            populateProfessionalElevationGrid(patch) {
+                const gridElement = document.getElementById(`miniElevationGrid_${patch.patch_id}`);
+                if (!gridElement || !patch.elevation_data) return;
+                
+                const data = patch.elevation_data;
+                const rows = data.length;
+                const cols = data[0]?.length || 0;
+                
+                if (rows === 0 || cols === 0) return;
+                
+                // Use 12x12 grid for professional look
+                const sampleSize = 12;
+                const rowStep = Math.max(1, Math.floor(rows / sampleSize));
+                const colStep = Math.max(1, Math.floor(cols / sampleSize));
+                
+                const stats = patch.elevation_stats || this.calculateElevationStats(data);
+                const min = stats.min;
+                const max = stats.max;
+                const range = max - min;
+                
+                gridElement.innerHTML = '';
+                
+                for (let i = 0; i < sampleSize; i++) {
+                    for (let j = 0; j < sampleSize; j++) {
+                        const rowIdx = Math.min(i * rowStep, rows - 1);
+                        const colIdx = Math.min(j * colStep, cols - 1);
+                        const value = data[rowIdx][colIdx];
+                        
+                        if (value !== null && value !== undefined && !isNaN(value)) {
+                            const normalized = range > 0 ? (value - min) / range : 0;
+                            
+                            const cell = document.createElement('div');
+                            cell.style.cssText = `
+                                background-color: ${this.getElevationColor(normalized)};
+                                border-radius: 1px;
+                                transition: transform 0.2s ease;
+                            `;
+                            cell.title = `${value.toFixed(1)}m`;
+                            cell.onmouseover = () => cell.style.transform = 'scale(1.2)';
+                            cell.onmouseout = () => cell.style.transform = 'scale(1)';
+                            
+                            gridElement.appendChild(cell);
+                        }
+                    }
+                }
+            }
+            
+            populateProfessionalHistogram(patch) {
+                const histogramElement = document.getElementById(`miniHistogram_${patch.patch_id}`);
+                const canvas = histogramElement?.querySelector('canvas');
+                if (!canvas || !patch.elevation_data) return;
+                
+                // Check if Chart.js is available
+                if (typeof Chart === 'undefined') {
+                    console.warn('Chart.js not available, using canvas fallback');
+                    this.drawCanvasHistogram(canvas, patch);
+                    return;
+                }
+                
+                // Calculate histogram data
+                const histogramData = this.calculateSimpleHistogramData(patch);
+                
+                const ctx = canvas.getContext('2d');
+                
+                // Create professional Chart.js histogram
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: histogramData.binLabels,
+                        datasets: [{
+                            label: 'Local',
+                            data: histogramData.localDensity,
+                            backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        }, {
+                            label: 'Expected',
+                            data: histogramData.kernelDensity,
+                            backgroundColor: 'rgba(255, 159, 64, 0.7)',
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                                labels: {
+                                    color: '#ccc',
+                                    font: { size: 10 }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: { color: '#ccc', font: { size: 8 } },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                            },
+                            y: {
+                                ticks: { color: '#ccc', font: { size: 8 } },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+            
+            calculateSimpleHistogramData(patch) {
+                const elevationValues = patch.elevation_data
+                    .flat()
+                    .filter(v => v !== null && v !== undefined && !isNaN(v));
+                
+                const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
+                const numBins = 8;
+                const binWidth = (stats.max - stats.min) / numBins;
+                
+                const localBins = Array(numBins).fill(0);
+                elevationValues.forEach(value => {
+                    const binIndex = Math.min(Math.floor((value - stats.min) / binWidth), numBins - 1);
+                    if (binIndex >= 0) localBins[binIndex]++;
+                });
+                
+                const totalCount = elevationValues.length;
+                const localDensity = localBins.map(count => count / totalCount);
+                
+                // Generate expected windmill pattern
+                const kernelDensity = Array(numBins).fill(0);
+                for (let i = 0; i < numBins; i++) {
+                    const normalized = i / (numBins - 1);
+                    if (normalized < 0.3) kernelDensity[i] = 0.05;
+                    else if (normalized < 0.7) kernelDensity[i] = 0.2;
+                    else kernelDensity[i] = 0.1;
+                }
+                
+                return {
+                    localDensity,
+                    kernelDensity,
+                    binLabels: localBins.map((_, i) => {
+                        const start = stats.min + i * binWidth;
+                        return `${start.toFixed(1)}m`;
+                    })
+                };
             }
             
             // Chat functionality
@@ -1865,45 +2041,9 @@
 
     </script>
 
-    <!-- Patch Details Modal - Compact Version -->
-    <div id="patchGrid" class="patch-details-modal" style="display: none;">
-        <div class="patch-modal-content compact">
-            <div class="patch-modal-header">
-                <h3>Patch Analysis</h3>
-                <button class="close-btn" onclick="window.patchViz?.hidePatchDetails()">×</button>
-            </div>
-            
-            <div class="patch-modal-body compact">
-                <!-- Patch Information Panel - Compact -->
-                <div id="patchInfoPanel" class="patch-info-section compact">
-                    <!-- Content will be dynamically populated -->
-                </div>
-                
-                <!-- Compact Visualization Grid -->
-                <div class="compact-visualization-container">
-                    <!-- Elevation Grid Visualization - Mini -->
-                    <div class="elevation-visualization-section mini">
-                        <h5>Elevation Pattern</h5>
-                        <div id="elevationGrid" class="elevation-grid mini">
-                            <!-- Elevation grid cells will be dynamically populated -->
-                        </div>
-                    </div>
-                    
-                    <!-- Elevation Histogram - Mini -->
-                    <div class="histogram-visualization-section mini">
-                        <h5>Elevation Distribution</h5>
-                        <div id="elevationChart" class="elevation-chart-container mini">
-                            <canvas id="elevationHistogramCanvas" width="250" height="180"></canvas>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Compact Detection Analysis -->
-                <div id="detectionAnalysis" class="detection-analysis-section compact">
-                    <!-- Detection analysis content will be dynamically populated -->
-                </div>
-            </div>
-        </div>
+    <!-- Patch Details Modal - DISABLED (using popup instead) -->
+    <div id="patchGrid" class="patch-details-modal" style="display: none !important; visibility: hidden !important;">
+        <!-- Modal content disabled - using professional popup instead -->
     </div>
 
     <!-- Chart.js Library for Histogram -->

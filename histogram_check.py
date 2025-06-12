@@ -218,9 +218,10 @@ def debug_kernel_construction(detector, training_patches):
         raw_average = np.mean(all_elevations, axis=0)
         print(f"Step 1 - Raw average: shape={raw_average.shape}, range={np.max(raw_average)-np.min(raw_average):.2f}m")
         
-        # Step 2: Apply G2 symmetrization 
-        symmetrized = detector._apply_g2_symmetrization(raw_average)
-        print(f"Step 2 - After G2 symmetrization: range={np.max(symmetrized)-np.min(symmetrized):.2f}m")
+        # Step 2: In the current implementation, no G2 symmetrization is applied to elevation kernel
+        # The elevation kernel is simply the mean of all training elevation patches
+        symmetrized = raw_average  # No additional symmetrization applied
+        print(f"Step 2 - Final elevation kernel (no symmetrization): range={np.max(symmetrized)-np.min(symmetrized):.2f}m")
         
         # Compare histograms
         print(f"\nHistogram comparison:")
@@ -252,7 +253,7 @@ def debug_kernel_construction(detector, training_patches):
                     print(f"    Raw elevation range: {np.min(raw_elev):.2f} to {np.max(raw_elev):.2f}m")
                     print(f"    Raw elevation std: {np.std(raw_elev):.2f}m")
                     
-                    # Compare raw vs symmetrized
+                    # Compare raw vs final kernel
                     raw_relative = raw_elev - np.min(raw_elev)
                     raw_normalized = raw_relative / np.max(raw_relative)
                     raw_hist, _ = np.histogram(raw_normalized.flatten(), bins=bin_edges, density=True)
