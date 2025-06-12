@@ -211,6 +211,10 @@ class StatusManager {
                     this.handleSessionStopped(data);
                     break;
                     
+                case 'sessions_cleared':
+                    this.handleSessionsCleared(data);
+                    break;
+                    
                 case 'kernel_ready':
                     this.handleKernelReady(data);
                     break;
@@ -347,6 +351,36 @@ class StatusManager {
         
         this.stopProgressTracking();
         this.triggerCallback('sessionStopped', data);
+    }
+
+    /**
+     * Handle sessions cleared
+     */
+    handleSessionsCleared(data) {
+        console.log('🧹 All sessions cleared:', data);
+        
+        this.updateState({
+            scanning: false,
+            session: null,
+            progress: {
+                current: 0,
+                total: 0,
+                percentage: 0,
+                rate: 0,
+                eta: null
+            },
+            statistics: {
+                totalPatches: 0,
+                positiveDetections: 0,
+                highConfidenceDetections: 0,
+                averageConfidence: 0,
+                scanStartTime: null,
+                lastUpdateTime: null
+            }
+        });
+        
+        this.stopProgressTracking();
+        this.triggerCallback('sessionsCleared', data);
     }
     
     /**
@@ -712,6 +746,7 @@ class StatusManager {
      */
     disconnect() {
         console.log('🔌 Disconnecting WebSocket...');
+        console.trace('🔍 WebSocket disconnect called from:'); // Add stack trace
         
         // Clear all timeouts
         this.retryTimeouts.forEach(timeout => clearTimeout(timeout));
@@ -763,6 +798,16 @@ class StatusManager {
         return await this.api.forceRetrain();
     }
     
+    /**
+     * Clear all discovery sessions
+     */
+    async clearSessions() {
+        if (!this.api) {
+            this.api = new DiscoveryAPI();
+        }
+        return await this.api.clearSessions();
+    }
+
     /**
      * Reset all state
      */

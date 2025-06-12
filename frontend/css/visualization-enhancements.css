@@ -4,6 +4,16 @@
     transition: all 0.2s ease;
     cursor: pointer;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    min-height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.elevation-cell.enhanced {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 0; /* Hide text by default */
 }
 
 .elevation-cell:hover {
@@ -11,6 +21,98 @@
     border-color: #00ff88;
     z-index: 10;
     box-shadow: 0 2px 8px rgba(0, 255, 136, 0.3);
+    font-size: 10px; /* Show text on hover */
+}
+
+.elevation-indicator {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 3px;
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: 1px;
+    pointer-events: none;
+}
+
+.elevation-grid-header {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    border: 1px solid #404040;
+}
+
+.grid-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.grid-title h4 {
+    color: #00ff88;
+    margin: 0;
+    font-size: 16px;
+}
+
+.detection-status {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+.detection-status.positive {
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+    border: 1px solid #00ff88;
+}
+
+.detection-status.negative {
+    background: rgba(136, 136, 136, 0.2);
+    color: #888;
+    border: 1px solid #888;
+}
+
+.elevation-legend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.legend-label {
+    color: #ccc;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.legend-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.legend-gradient {
+    height: 16px;
+    flex: 1;
+    background: linear-gradient(to right, 
+        rgb(70, 130, 180), 
+        rgb(100, 180, 120), 
+        rgb(180, 200, 120), 
+        rgb(200, 180, 100), 
+        rgb(180, 120, 80), 
+        rgb(140, 100, 80)
+    );
+    border-radius: 8px;
+    border: 1px solid #404040;
+}
+
+.legend-min, .legend-max {
+    color: #aaa;
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
 }
 
 .patch-popup {

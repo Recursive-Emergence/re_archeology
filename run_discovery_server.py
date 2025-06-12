@@ -16,16 +16,16 @@ sys.path.append('/media/im3/plus/lab4/RE/re_archaeology/backend')
 if __name__ == "__main__":
     print("🏛️ Starting Windmill Discovery API Server")
     print("=" * 50)
-    print("🌐 WebSocket: ws://localhost:8000/ws")
-    print("🌐 API: http://localhost:8000")
-    print("🌐 Frontend: http://localhost:8000/frontend")
+    print("🌐 WebSocket: ws://localhost:8080/ws")
+    print("🌐 API: http://localhost:8080")
+    print("🌐 Frontend: http://localhost:8080/frontend")
     print("=" * 50)
     
     # Start the FastAPI server
     uvicorn.run(
-        "discovery_api:app",
+        "backend.api.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8080,
         reload=True,
         log_level="info"
     )

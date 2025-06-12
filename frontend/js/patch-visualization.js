@@ -78,7 +78,7 @@ class PatchVisualization {
     }
 
     /**
-     * Display elevation data as a colored grid
+     * Display elevation data as a colored grid with enhanced visualization
      */
     displayElevationGrid(patch) {
         const gridContainer = document.getElementById('patchGrid');
@@ -102,8 +102,8 @@ class PatchVisualization {
             return;
         }
 
-        // Limit grid size for performance
-        const maxGridSize = 20;
+        // Limit grid size for performance but show more detail than before
+        const maxGridSize = 25;
         const displayRows = Math.min(rows, maxGridSize);
         const displayCols = Math.min(cols, maxGridSize);
 
@@ -113,6 +113,28 @@ class PatchVisualization {
         const min = stats.min;
         const max = stats.max;
         const range = max - min;
+
+        // Add grid header with patch info and detection status
+        const headerInfo = document.createElement('div');
+        headerInfo.className = 'elevation-grid-header';
+        headerInfo.innerHTML = `
+            <div class="grid-title">
+                <h4>Patch ${patch.patch_id} - LiDAR Elevation Data</h4>
+                <div class="detection-status ${patch.is_positive ? 'positive' : 'negative'}">
+                    ${patch.is_positive ? '🎯 DETECTION' : '❌ NO DETECTION'}
+                    ${patch.confidence ? `(${(patch.confidence * 100).toFixed(1)}% confidence)` : ''}
+                </div>
+            </div>
+            <div class="elevation-legend">
+                <span class="legend-label">Elevation Range:</span>
+                <div class="legend-bar">
+                    <span class="legend-min">${min.toFixed(1)}m</span>
+                    <div class="legend-gradient"></div>
+                    <span class="legend-max">${max.toFixed(1)}m</span>
+                </div>
+            </div>
+        `;
+        elevationGrid.parentElement.insertBefore(headerInfo, elevationGrid);
 
         // Sample data if needed
         const rowStep = Math.max(1, Math.floor(rows / displayRows));
@@ -129,11 +151,18 @@ class PatchVisualization {
                 const normalized = range > 0 ? (value - min) / range : 0;
                 
                 const cell = document.createElement('div');
-                cell.className = 'elevation-cell';
-                cell.textContent = value.toFixed(1);
+                cell.className = 'elevation-cell enhanced';
+                
+                // Show elevation value only on hover to reduce clutter
                 cell.style.backgroundColor = this.getElevationColor(normalized);
                 cell.style.color = normalized > 0.5 ? '#fff' : '#000';
-                cell.title = `Elevation: ${value.toFixed(2)}m\nPosition: [${rowIdx}, ${colIdx}]`;
+                cell.title = `Elevation: ${value.toFixed(2)}m\nPosition: [${rowIdx}, ${colIdx}]\nNormalized: ${normalized.toFixed(3)}`;
+                
+                // Add subtle elevation indicator
+                const elevationIndicator = document.createElement('div');
+                elevationIndicator.className = 'elevation-indicator';
+                elevationIndicator.style.height = `${Math.max(2, normalized * 100)}%`;
+                cell.appendChild(elevationIndicator);
                 
                 // Add click handler for cell details
                 cell.onclick = () => this.showCellDetails(value, rowIdx, colIdx);

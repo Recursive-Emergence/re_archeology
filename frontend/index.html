@@ -373,6 +373,21 @@
             100% { background-position: -200% 0; }
         }
         
+        .scan-animation {
+            animation: scanPulse 1.5s ease-out forwards;
+        }
+        
+        @keyframes scanPulse {
+            0% {
+                transform: scale(0.5);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+        
         /* Chat Panel (Right) - from main_chat.css */
         .chat-panel {
             width: var(--chat-panel-width);
@@ -639,7 +654,7 @@
                         </div>
                         <div class="input-group">
                             <label>Patch Size (m)</label>
-                            <input type="number" id="patchSize" value="64" step="16" min="32" max="256">
+                            <input type="number" id="patchSize" value="40" step="16" min="32" max="256">
                         </div>
                     </div>
                     
@@ -903,10 +918,34 @@
                 // Initialize the map
                 this.map = L.map('map').setView([52.4751, 4.8156], 13);
                 
-                // Add base layer
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
+                // Add base layer (satellite)
+                this.satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri'
                 }).addTo(this.map);
+                
+                // Add street layer (initially hidden)
+                this.streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                });
+                
+                // Add LiDAR elevation overlay for Netherlands region
+                this.lidarLayer = L.tileLayer('https://service.pdok.nl/rce/ahn/wmts/ahn4_05m_dsm/EPSG:3857/{z}/{x}/{y}.png', {
+                    attribution: 'AHN4 LiDAR &copy; PDOK',
+                    opacity: 0.6,
+                    maxZoom: 16
+                });
+                
+                // Add layer control
+                const baseLayers = {
+                    'Satellite': this.satelliteLayer,
+                    'Street Map': this.streetLayer
+                };
+                
+                const overlayLayers = {
+                    'LiDAR Elevation (AHN4)': this.lidarLayer
+                };
+                
+                L.control.layers(baseLayers, overlayLayers).addTo(this.map);
                 
                 // Add scan area circle
                 this.scanAreaCircle = L.circle([52.4751, 4.8156], {
@@ -969,6 +1008,11 @@
                 
                 this.statusManager.on('patchResult', (patch) => {
                     this.handlePatchUpdate(patch);
+                    
+                    // Show scan animation if enabled
+                    if (document.getElementById('showScanAnimation')?.checked) {
+                        this.showScanAnimation(patch.lat, patch.lon);
+                    }
                 });
             }
             
@@ -991,8 +1035,12 @@
             
             async startScan() {
                 if (this.isScanning || !this.statusManager.isConnected()) {
+                    console.warn('Cannot start scan: already scanning or not connected');
                     return;
                 }
+                
+                // Clear any previous results
+                this.clearResults();
                 
                 const config = {
                     center_lat: parseFloat(document.getElementById('centerLat').value),
@@ -1005,9 +1053,11 @@
                 };
                 
                 try {
+                    console.log('🚀 Starting new discovery session with config:', config);
                     await this.statusManager.startDiscovery(config);
                 } catch (error) {
                     console.error('Failed to start scan:', error);
+                    alert('Failed to start scan: ' + error.message);
                 }
             }
             
@@ -1023,8 +1073,17 @@
                 }
             }
             
-            clearResults() {
-                // Remove all patch layers
+            async clearResults() {
+                try {
+                    // Clear backend sessions if connected
+                    if (this.statusManager.isConnected()) {
+                        await this.statusManager.clearSessions();
+                    }
+                } catch (error) {
+                    console.warn('Failed to clear backend sessions:', error);
+                }
+                
+                // Remove all patch layers from map
                 this.patches.forEach(patch => {
                     if (patch.mapElement) {
                         this.map.removeLayer(patch.mapElement);
@@ -1033,10 +1092,51 @@
                 
                 this.patches.clear();
                 
+                // Reset session state
+                this.currentSession = null;
+                this.isScanning = false;
+                
+                // Reset UI state
+                document.getElementById('sessionStatus').textContent = 'Idle';
+                document.getElementById('progressOverlay').style.display = 'none';
+                document.getElementById('startScanBtn').disabled = false;
+                document.getElementById('stopScanBtn').disabled = true;
+                
                 // Reset counters
                 document.getElementById('processedPatches').textContent = '0';
                 document.getElementById('totalDetections').textContent = '0';
                 document.getElementById('highConfidenceDetections').textContent = '0';
+                
+                // Hide any patch details
+                const patchGrid = document.getElementById('patchGrid');
+                if (patchGrid) {
+                    patchGrid.style.display = 'none';
+                }
+                
+                // Only reset status manager state without disconnecting WebSocket
+                // This prevents WebSocket disconnection during active discovery sessions
+                this.statusManager.updateState({
+                    session: null,
+                    scanning: false,
+                    progress: {
+                        current: 0,
+                        total: 0,
+                        percentage: 0,
+                        rate: 0,
+                        eta: null
+                    },
+                    statistics: {
+                        totalPatches: 0,
+                        positiveDetections: 0,
+                        highConfidenceDetections: 0,
+                        averageConfidence: 0,
+                        scanStartTime: null,
+                        lastUpdateTime: null
+                    },
+                    errors: []
+                });
+                
+                console.log('✅ Session cleared and UI reset (WebSocket connection preserved)');
             }
             
             handlePatchUpdate(patch) {
@@ -1077,9 +1177,13 @@
             }
             
             getPatchBounds(patch) {
-                const patchSizeKm = (parseInt(document.getElementById('patchSize').value) || 64) / 1000;
-                const latOffset = patchSizeKm / 111; // Approximate degrees
-                const lonOffset = patchSizeKm / (111 * Math.cos(patch.lat * Math.PI / 180));
+                // Use the actual patch size from the patch data, or fall back to UI setting
+                const patchSizeM = patch.patch_size_m || parseInt(document.getElementById('patchSize').value) || 40;
+                const patchSizeKm = patchSizeM / 1000;
+                
+                // Convert patch size to degrees (more accurate calculation)
+                const latOffset = patchSizeKm / 111.32; // 1 degree latitude = ~111.32 km
+                const lonOffset = patchSizeKm / (111.32 * Math.cos(patch.lat * Math.PI / 180));
                 
                 return [
                     [patch.lat - latOffset/2, patch.lon - lonOffset/2],
@@ -1229,7 +1333,7 @@
                         avatarElement.src = avatarUrl;
                         avatarElement.onerror = () => {
                             console.warn('Failed to load avatar, using fallback');
-                            avatarElement.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNkZGQiLz4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxMiIgcj0iNSIgZmlsbD0iIzk5OSIvPgo8cGF0aCBkPSJtNCwyNmMwLTYuNjI3LDUuMzczLTEyLDEyLTEyczEyLDUuMzczLDEyLDEyIiBmaWxsPSIjOTk5Ii8+Cjwvc3ZnPgo=';
+                            avatarElement.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1zbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNkZGQiLz4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxMiIgcj0iNSIgZmlsbD0iIzk5OSIvPgo8cGF0aCBkPSJtNCwyNmMwLTYuNjI3LDUuMzczLTEyLDEyLTEyczEyLDUuMzczLDEyLDEyIiBmaWxsPSIjOTk5Ii8+Cjwvc3ZnPgo=';
                         };
                     }
                     if (nameElement) nameElement.textContent = this.currentUser.name || '';
@@ -1326,6 +1430,22 @@
                 // Reset to initial state
                 this.clearResults();
                 document.getElementById('sessionStatus').textContent = 'Idle';
+            }
+            
+            showScanAnimation(lat, lon) {
+                // Create a temporary scanning circle animation
+                const scanCircle = L.circle([lat, lon], {
+                    color: '#00ff88',
+                    fillColor: 'transparent',
+                    weight: 2,
+                    radius: 30,
+                    className: 'scan-animation'
+                }).addTo(this.map);
+                
+                // Remove after 1.5 seconds
+                setTimeout(() => {
+                    this.map.removeLayer(scanCircle);
+                }, 1500);
             }
         }
         

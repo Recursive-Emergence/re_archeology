@@ -15,15 +15,37 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Initialize Earth Engine if credentials are available
+earth_engine_available = False
 try:
     import ee
-    if os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+    from backend.utils.config import get_settings
+    
+    # Check if service account credentials are configured
+    settings = get_settings()
+    if settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY and settings.GOOGLE_EE_PROJECT_ID:
+        if os.path.exists(settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY):
+            credentials = ee.ServiceAccountCredentials(
+                email=None,  # Will be read from JSON file
+                key_file=settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY
+            )
+            ee.Initialize(credentials, project=settings.GOOGLE_EE_PROJECT_ID)
+            earth_engine_available = True
+            logger.info("✅ Google Earth Engine initialized with service account")
+        else:
+            logger.warning(f"⚠️ Earth Engine service account key file not found: {settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY}")
+    elif os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
         ee.Initialize()
-        logger.info("✅ Google Earth Engine initialized successfully")
+        earth_engine_available = True
+        logger.info("✅ Google Earth Engine initialized with application credentials")
     else:
-        logger.warning("⚠️ GOOGLE_APPLICATION_CREDENTIALS not set, Earth Engine features may not work")
+        logger.warning("⚠️ No Earth Engine credentials configured")
 except Exception as e:
     logger.warning(f"⚠️ Earth Engine initialization failed: {e}")
+
+if earth_engine_available:
+    logger.info("Earth Engine available for AHN LiDAR data")
+else:
+    logger.warning("Earth Engine not available - some features may be limited")
 
 from backend.core.neo4j_database import neo4j_db
 from backend.utils.config import settings

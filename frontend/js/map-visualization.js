@@ -200,7 +200,7 @@ class MapVisualization {
     }
 
     /**
-     * Add a patch to the map
+     * Add a patch to the map with elevation data visualization
      */
     addPatch(patch) {
         const patchLayer = this.layers.get('patches');
@@ -208,15 +208,19 @@ class MapVisualization {
         // Calculate patch bounds
         const bounds = this.calculatePatchBounds(patch);
         
-        // Determine patch color
-        const color = this.getPatchColor(patch);
+        // Determine border color based on detection results
+        const borderColor = this.getPatchColor(patch);
         
-        // Create rectangle
+        // Determine fill based on elevation data
+        const fillStyle = this.getPatchFillStyle(patch);
+        
+        // Create rectangle with elevation fill and detection border
         const rectangle = L.rectangle(bounds, {
-            color: color,
-            weight: 1,
-            fillColor: color,
-            fillOpacity: patch.is_positive ? 0.7 : 0.3,
+            color: borderColor,
+            weight: patch.is_positive ? 3 : 1, // Thicker border for detections
+            fillColor: fillStyle.color,
+            fillOpacity: fillStyle.opacity,
+            fillPattern: fillStyle.pattern,
             className: `patch ${patch.is_positive ? 'positive' : 'negative'}`
         });
 
@@ -226,16 +230,16 @@ class MapVisualization {
         // Add hover effects
         rectangle.on('mouseover', (e) => {
             rectangle.setStyle({
-                weight: 3,
-                fillOpacity: patch.is_positive ? 0.9 : 0.5
+                weight: patch.is_positive ? 5 : 3,
+                fillOpacity: Math.min(fillStyle.opacity + 0.2, 1.0)
             });
             this.showPatchTooltip(e, patch);
         });
 
         rectangle.on('mouseout', () => {
             rectangle.setStyle({
-                weight: 1,
-                fillOpacity: patch.is_positive ? 0.7 : 0.3
+                weight: patch.is_positive ? 3 : 1,
+                fillOpacity: fillStyle.opacity
             });
             this.hideTooltip();
         });
@@ -256,16 +260,111 @@ class MapVisualization {
     }
 
     /**
+     * Get fill style based on elevation data
+     */
+    getPatchFillStyle(patch) {
+        if (!patch.elevation_data || !Array.isArray(patch.elevation_data)) {
+            // No elevation data - use neutral fill
+            return {
+                color: '#666666',
+                opacity: 0.3,
+                pattern: null
+            };
+        }
+
+        // Calculate elevation statistics
+        const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
+        
+        if (stats.range === 0) {
+            // Flat terrain - use single color
+            return {
+                color: this.getElevationColor(0.5), // Middle elevation color
+                opacity: 0.6,
+                pattern: null
+            };
+        }
+
+        // Use elevation range to determine visualization
+        const normalizedMean = stats.range > 0 ? (stats.mean - stats.min) / stats.range : 0.5;
+        
+        return {
+            color: this.getElevationColor(normalizedMean),
+            opacity: 0.7,
+            pattern: null
+        };
+    }
+
+    /**
+     * Calculate elevation statistics for visualization
+     */
+    calculateElevationStats(data) {
+        const flatData = data.flat().filter(v => v !== null && v !== undefined && !isNaN(v));
+        
+        if (flatData.length === 0) {
+            return { min: 0, max: 0, mean: 0, std: 0, range: 0 };
+        }
+
+        const min = Math.min(...flatData);
+        const max = Math.max(...flatData);
+        const mean = flatData.reduce((a, b) => a + b, 0) / flatData.length;
+        const variance = flatData.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / flatData.length;
+        const std = Math.sqrt(variance);
+        const range = max - min;
+
+        return { min, max, mean, std, range };
+    }
+
+    /**
+     * Get elevation color using terrain color scale
+     */
+    getElevationColor(normalized) {
+        // Use a terrain-like color scale
+        const colors = [
+            { pos: 0.0, color: [70, 130, 180] },     // Steel blue (low)
+            { pos: 0.2, color: [100, 180, 120] },    // Light green
+            { pos: 0.4, color: [180, 200, 120] },    // Yellow-green
+            { pos: 0.6, color: [200, 180, 100] },    // Sandy brown
+            { pos: 0.8, color: [180, 120, 80] },     // Brown
+            { pos: 1.0, color: [140, 100, 80] }      // Dark brown (high)
+        ];
+
+        // Find the two colors to interpolate between
+        let lowerColor = colors[0];
+        let upperColor = colors[colors.length - 1];
+
+        for (let i = 0; i < colors.length - 1; i++) {
+            if (normalized >= colors[i].pos && normalized <= colors[i + 1].pos) {
+                lowerColor = colors[i];
+                upperColor = colors[i + 1];
+                break;
+            }
+        }
+
+        // Interpolate between the two colors
+        const range = upperColor.pos - lowerColor.pos;
+        const factor = range === 0 ? 0 : (normalized - lowerColor.pos) / range;
+
+        const r = Math.round(lowerColor.color[0] + factor * (upperColor.color[0] - lowerColor.color[0]));
+        const g = Math.round(lowerColor.color[1] + factor * (upperColor.color[1] - lowerColor.color[1]));
+        const b = Math.round(lowerColor.color[2] + factor * (upperColor.color[2] - lowerColor.color[2]));
+
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    /**
      * Calculate patch bounds from coordinates and size
+     * Fixed to eliminate gaps between adjacent patches
      */
     calculatePatchBounds(patch) {
         const patchSize = patch.patch_size || 40; // default 40m
         const halfSize = patchSize / 2;
         
-        // Convert meters to degrees (rough approximation)
+        // Convert meters to degrees with more accurate calculation
         const latDelta = halfSize / 111000; // ~111km per degree latitude
         const lonDelta = halfSize / (111000 * Math.cos(patch.lat * Math.PI / 180));
         
+        // Ensure patches are adjacent by using exact boundaries
+        // The patch coordinates represent the center, so we create exact boundaries
         return [
             [patch.lat - latDelta, patch.lon - lonDelta],
             [patch.lat + latDelta, patch.lon + lonDelta]
@@ -273,18 +372,18 @@ class MapVisualization {
     }
 
     /**
-     * Determine patch color based on detection results
+     * Determine patch border color based on detection results
      */
     getPatchColor(patch) {
         if (!patch.is_positive) {
-            return '#666666';
+            return '#888888'; // Gray border for no detection
         }
 
         const confidence = patch.confidence || 0;
-        if (confidence >= 0.8) return '#ff4444'; // High confidence - red
-        if (confidence >= 0.6) return '#ffaa00'; // Medium confidence - orange
-        if (confidence >= 0.4) return '#ffff00'; // Low confidence - yellow
-        return '#666666'; // Very low confidence - gray
+        if (confidence >= 0.8) return '#FF0000'; // Bright red for high confidence
+        if (confidence >= 0.6) return '#FF6600'; // Orange for medium confidence  
+        if (confidence >= 0.4) return '#FFAA00'; // Yellow-orange for low confidence
+        return '#CCCCCC'; // Light gray for very low confidence
     }
 
     /**

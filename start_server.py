@@ -4,6 +4,10 @@ Custom server startup script to force uvicorn to use the correct host and port
 """
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file first
+load_dotenv()
 
 # Add the current directory to Python path
 # Handle both local development and Docker container environments

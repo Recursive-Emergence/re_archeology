@@ -299,6 +299,28 @@ class DiscoveryAPI {
     }
 
     /**
+     * Clear all discovery sessions and reset state
+     */
+    async clearSessions() {
+        const apiBase = window.AppConfig ? window.AppConfig.apiBase : '/api/v1';
+        
+        try {
+            const response = await fetch(`${apiBase}/discovery/clear`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to clear sessions: ${response.statusText}`);
+            }
+            
+            return response.json();
+        } catch (error) {
+            console.error('Failed to clear discovery sessions:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Get list of cached kernels
      */
     async listKernels() {
