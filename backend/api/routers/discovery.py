@@ -20,12 +20,27 @@ import ee
 
 from backend.api.routers.auth import get_current_user_optional
 
-# Import the ElevationPatch class from phi0_core
+# Import the ElevationPatch class from phi0_core (in root directory)
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-from phi0_core import ElevationPatch
+import os
+# Add the root directory to Python path to import phi0_core
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
-logger = logging.getLogger(__name__)
+try:
+    from phi0_core import ElevationPatch
+    logger = logging.getLogger(__name__)
+    logger.info("✅ Successfully imported ElevationPatch from phi0_core")
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.error(f"❌ Failed to import phi0_core: {e}")
+    logger.error(f"Python path: {sys.path}")
+    logger.error(f"Root directory: {root_dir}")
+    # Create a placeholder class to prevent startup failure
+    class ElevationPatch:
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError("phi0_core module not available")
 # Temporarily enable debug logging to diagnose WebSocket issues
 logger.setLevel(logging.DEBUG)
 

@@ -57,10 +57,6 @@ class Settings(BaseSettings):
     # CORS and Frontend configuration
     FRONTEND_ORIGINS: str = "http://localhost:8080"
     
-    # WebSocket and Redis configuration
-    REDIS_URL: str = "redis://localhost:6379/0"
-    WEBSOCKET_REDIS_URL: str = "redis://localhost:6379/1"
-    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Override with environment variables
@@ -90,10 +86,6 @@ class Settings(BaseSettings):
         
         # Frontend CORS settings
         self.FRONTEND_ORIGINS = os.environ.get("FRONTEND_ORIGINS", self.FRONTEND_ORIGINS)
-        
-        # Redis settings
-        self.REDIS_URL = os.environ.get("REDIS_URL", self.REDIS_URL)
-        self.WEBSOCKET_REDIS_URL = os.environ.get("WEBSOCKET_REDIS_URL", self.WEBSOCKET_REDIS_URL)
 
     class Config:
         case_sensitive = True

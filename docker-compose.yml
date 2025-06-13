@@ -6,8 +6,6 @@ services:
       context: .
       dockerfile: Dockerfile.slim
       target: production
-    depends_on:
-      - redis
     ports:
       - "8080:8080"
     env_file:
@@ -29,9 +27,6 @@ services:
       
       # Note: Google OAuth, JWT, and OpenAI configurations are loaded from .env file
       # Do not override them here to allow .env values to take precedence
-      
-      # WebSocket Configuration
-      - WEBSOCKET_REDIS_URL=redis://redis:6379/1
       
     volumes:
       # Mount source code for development
@@ -74,21 +69,11 @@ services:
     # Restart policy
     restart: unless-stopped
 
-# Redis service for WebSocket support
-  redis:
-    image: redis:6-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
 # Networks for better isolation
 networks:
   default:
     name: re-archaeology-network
 
-# Volumes
+# Volumes for data persistence (Redis removed as not needed)
 volumes:
-  redis_data:
-    driver: local
+  # Redis volume removed - not using Redis in Cloud Run deployment

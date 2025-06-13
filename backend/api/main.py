@@ -107,14 +107,44 @@ async def serve_homepage():
     """Serve the main discovery interface as homepage"""
     frontend_path = pathlib.Path(__file__).parent.parent.parent / "frontend"
     index_path = frontend_path / "index.html"
+    logger.info(f"🏠 Serving homepage request:")
+    logger.info(f"   Frontend path: {frontend_path}")
+    logger.info(f"   Index path: {index_path}")
+    logger.info(f"   Index exists: {index_path.exists()}")
+    
     if index_path.exists():
         return FileResponse(str(index_path), media_type="text/html")
     else:
+        # Try alternative paths for Docker environment
+        alternative_paths = [
+            pathlib.Path("/app/frontend/index.html"),
+            pathlib.Path("./frontend/index.html"),
+            pathlib.Path("frontend/index.html")
+        ]
+        for alt_path in alternative_paths:
+            logger.info(f"   Checking alternative index: {alt_path} - exists: {alt_path.exists()}")
+            if alt_path.exists():
+                logger.info(f"✅ Using alternative index path: {alt_path}")
+                return FileResponse(str(alt_path), media_type="text/html")
+        
+        logger.error("❌ No valid index.html found in any location")
         raise HTTPException(status_code=404, detail="Discovery interface not found")
 
 # Mount static files for frontend assets (CSS, JS, images)
 frontend_path = pathlib.Path(__file__).parent.parent.parent / "frontend"
+logger.info(f"🔍 Frontend path resolution:")
+logger.info(f"   Current file: {__file__}")
+logger.info(f"   Calculated frontend path: {frontend_path}")
+logger.info(f"   Frontend path exists: {frontend_path.exists()}")
+logger.info(f"   Frontend path absolute: {frontend_path.absolute()}")
+
 if frontend_path.exists():
+    # Log subdirectories for debugging
+    subdirs = ["css", "js", "images", "components", "services"]
+    for subdir in subdirs:
+        subpath = frontend_path / subdir
+        logger.info(f"   {subdir} path exists: {subpath.exists()} - {subpath}")
+    
     # Mount static files for CSS, JS, images, etc.
     app.mount("/css", StaticFiles(directory=str(frontend_path / "css")), name="css")
     app.mount("/js", StaticFiles(directory=str(frontend_path / "js")), name="js")
@@ -123,6 +153,27 @@ if frontend_path.exists():
     app.mount("/services", StaticFiles(directory=str(frontend_path / "services")), name="services")
     # Mount all static files at /static/ for backward compatibility
     app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
+    logger.info("✅ Static file mounts configured successfully")
+else:
+    logger.error(f"❌ Frontend path does not exist: {frontend_path}")
+    # Try alternative paths for Docker environment
+    alternative_paths = [
+        pathlib.Path("/app/frontend"),
+        pathlib.Path("./frontend"),
+        pathlib.Path("frontend")
+    ]
+    for alt_path in alternative_paths:
+        logger.info(f"   Checking alternative: {alt_path} - exists: {alt_path.exists()}")
+        if alt_path.exists():
+            logger.info(f"✅ Using alternative frontend path: {alt_path}")
+            frontend_path = alt_path
+            app.mount("/css", StaticFiles(directory=str(frontend_path / "css")), name="css")
+            app.mount("/js", StaticFiles(directory=str(frontend_path / "js")), name="js")
+            app.mount("/images", StaticFiles(directory=str(frontend_path / "images")), name="images")
+            app.mount("/components", StaticFiles(directory=str(frontend_path / "components")), name="components")
+            app.mount("/services", StaticFiles(directory=str(frontend_path / "services")), name="services")
+            app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
+            break
 
 # Startup event
 @app.on_event("startup")

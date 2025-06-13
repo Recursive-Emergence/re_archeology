@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
+# Copy requirements and install Python dependencies (using minimal Cloud Run requirements)
+COPY requirements.cloudrun.txt .
 # Install pip dependencies with optimized caching and cleanup
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --user -r requirements.txt && \
+    pip install --no-cache-dir --user -r requirements.cloudrun.txt && \
     # Clean up after pip to reduce image size
     find /root/.local -name "*.pyc" -delete && \
     find /root/.local -name "__pycache__" -delete && \
@@ -44,8 +44,9 @@ ENV PATH=/home/app/.local/bin:$PATH
 COPY --chown=1000:1000 backend/ ./backend/
 COPY --chown=1000:1000 frontend/ ./frontend/
 COPY --chown=1000:1000 start_server.py ./start_server.py
-COPY --chown=1000:1000 .env ./.env
-COPY --chown=1000:1000 sage-striker-294302-cbcab4a5e094.json ./sage-striker-294302-cbcab4a5e094.json
+COPY --chown=1000:1000 phi0_core.py ./phi0_core.py
+COPY --chown=1000:1000 .env.cloudrun ./.env
+COPY --chown=1000:1000 sage-striker-294302-b89a8b7e205b.json ./sage-striker-294302-b89a8b7e205b.json
 
 # Create app user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 app \

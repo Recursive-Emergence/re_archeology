@@ -2,92 +2,125 @@
 
 # RE-Archaeology Framework - Cloud Run Deployment Script
 # ======================================================
+# Updated to match current system configuration with start_server.py
+#
+# Requirements Strategy:
+# - requirements.txt: Full development environment (~6GB)
+# - requirements.cloudrun.txt: Minimal production environment (~2GB)
+#   * Includes essential scipy for phi0_core.py
+#   * Excludes heavy packages like pandas, matplotlib, geopandas
+#   * Optimized for Cloud Run memory and startup time
 
 set -e  # Exit on any error
 
-# Load environment variables from .env file
-if [ -f .env ]; then
-    echo "📋 Loading environment variables from .env file..."
-    export $(grep -v '^#' .env | grep -v '^$' | xargs)
-else
-    echo "❌ Error: .env file not found. Please create one with your actual credentials"
-    echo "   Copy .env.example to .env and fill in your values"
-    exit 1
-fi
-
 # Configuration
 PROJECT_ID="sage-striker-294302"
-REGION="us-central1"
+REGION="us-east1"
 SERVICE_NAME="re-archaeology-framework"
 IMAGE_TAG="latest"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}:${IMAGE_TAG}"
+
+# Validate required files exist
+echo "🔍 Validating required files for deployment..."
+REQUIRED_FILES=(
+    "start_server.py"
+    "backend/api/main.py"
+    "Dockerfile"
+    ".env.cloudrun"
+    "requirements.cloudrun.txt"
+    "sage-striker-294302-b89a8b7e205b.json"
+    "phi0_core.py"
+)
+
+for file in "${REQUIRED_FILES[@]}"; do
+    if [ ! -f "$file" ]; then
+        echo "❌ Error: Required file not found: $file"
+        exit 1
+    fi
+done
+
+echo "✅ All required files found"
+
+# Validate scipy dependencies in requirements.cloudrun.txt
+echo "🔬 Validating scipy dependencies in Cloud Run requirements..."
+if grep -q "scipy==" requirements.cloudrun.txt; then
+    echo "✅ scipy found in requirements.cloudrun.txt"
+else
+    echo "❌ Error: scipy missing from requirements.cloudrun.txt"
+    echo "   This is required for phi0_core.py functionality"
+    exit 1
+fi
+
+# Run scipy compatibility test
+echo "🧪 Running scipy compatibility test..."
+if python3 test_scipy_deployment.py; then
+    echo "✅ Scipy deployment test passed"
+else
+    echo "❌ Scipy deployment test failed"
+    echo "   Please check scipy dependencies before deploying"
+    exit 1
+fi
 
 echo "🚀 Starting deployment to Google Cloud Run..."
 echo "================================================"
 echo "Project ID: ${PROJECT_ID}"
 echo "Region: ${REGION}"
 echo "Service Name: ${SERVICE_NAME}"
-echo "Image Tag: ${IMAGE_TAG}"
-echo "Full Image Name: ${IMAGE_NAME}"
-echo "Port: 8080 (Cloud Run standard)"
-echo ""
-echo "⚠️  Note: Make sure you're authenticated with 'gcloud auth login'"
+echo "Image Name: ${IMAGE_NAME}"
+echo "Entry Point: start_server.py"
 echo ""
 
-# Check if gcloud is installed and authenticated
+# Check prerequisites
+echo "🔧 Checking prerequisites..."
+
 if ! command -v gcloud &> /dev/null; then
     echo "❌ Error: gcloud CLI is not installed. Please install it first."
     echo "   Visit: https://cloud.google.com/sdk/docs/install"
     exit 1
 fi
 
-# Check if user is authenticated
 if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | grep -q "@"; then
     echo "❌ Error: Not authenticated with gcloud. Please run 'gcloud auth login'"
     exit 1
 fi
 
-# Check if Docker is running
 if ! docker info >/dev/null 2>&1; then
     echo "❌ Error: Docker is not running. Please start Docker first."
     exit 1
 fi
 
-# Set the project
-echo "📋 Setting GCP project..."
+echo "✅ All prerequisites met"
+
+# Set the project and enable required APIs
+echo "📋 Setting GCP project and enabling APIs..."
 gcloud config set project ${PROJECT_ID}
 
-# Enable required APIs
-echo "🔧 Enabling required APIs..."
-gcloud services enable cloudbuild.googleapis.com
-gcloud services enable run.googleapis.com
-gcloud services enable containerregistry.googleapis.com
+gcloud services enable cloudbuild.googleapis.com --quiet
+gcloud services enable run.googleapis.com --quiet
+gcloud services enable containerregistry.googleapis.com --quiet
 
-# Check if we should rebuild or reuse existing image
+# Build and deploy strategy
+SHOULD_REBUILD=false
 if [ "$1" = "--rebuild" ] || [ "$1" = "-r" ]; then
     echo "🔄 Rebuild flag detected, will build new image..."
     SHOULD_REBUILD=true
+elif ! docker image inspect ${IMAGE_NAME} >/dev/null 2>&1; then
+    echo "🏗️  No existing image found, will build new one..."
+    SHOULD_REBUILD=true
 else
-    # Check if image already exists locally
-    if docker image inspect ${IMAGE_NAME} >/dev/null 2>&1; then
-        echo "📦 Found existing image: ${IMAGE_NAME}"
-        echo "   Use --rebuild flag to force rebuilding"
-        SHOULD_REBUILD=false
-    else
-        echo "🏗️  No existing image found, will build new one..."
-        SHOULD_REBUILD=true
-    fi
+    echo "📦 Found existing image: ${IMAGE_NAME}"
+    echo "   Use --rebuild flag to force rebuilding"
 fi
 
-# Clean up any previous builds (only if rebuilding)
 if [ "$SHOULD_REBUILD" = true ]; then
     echo "🧹 Cleaning up previous builds..."
     docker system prune -f 2>/dev/null || true
 
-    # Build the Docker image
-    echo "🏗️  Building Docker image for production..."
-    docker build -f Dockerfile -t ${IMAGE_NAME} . --no-cache --quiet
-    
+    # Build the Docker image using optimized Cloud Run requirements
+    echo "🏗️  Building Docker image with Cloud Run optimized dependencies..."
+    echo "   📋 Using requirements.cloudrun.txt (includes scipy for phi0_core.py)"
+    docker build -f Dockerfile -t ${IMAGE_NAME} . --no-cache
+
     echo "📤 Pushing image to Google Container Registry..."
     docker push ${IMAGE_NAME}
 else
@@ -95,20 +128,23 @@ else
     docker push ${IMAGE_NAME}
 fi
 
-# Deploy to Cloud Run - environment variables loaded from .env file in container
+# Deploy to Cloud Run with optimized configuration
 echo "☁️  Deploying to Cloud Run..."
-echo "   📋 Environment variables will be loaded from .env file in container"
-echo "   🔑 Google EE credentials will be loaded from JSON file in container"
+echo "   📋 Environment: .env.cloudrun (includes scipy-compatible config)"
+echo "   🔑 Credentials: Google service account JSON"
+echo "   🚀 Entry point: start_server.py"
+
 gcloud run deploy ${SERVICE_NAME} \
     --image ${IMAGE_NAME} \
     --platform managed \
     --region ${REGION} \
     --allow-unauthenticated \
-    --memory 1Gi \
-    --cpu 1 \
+    --memory 2Gi \
+    --cpu 2 \
     --timeout 3600 \
     --max-instances 10 \
-    --port 8080
+    --port 8080 \
+    --set-env-vars "GOOGLE_APPLICATION_CREDENTIALS=/app/sage-striker-294302-b89a8b7e205b.json,GOOGLE_CLOUD_PROJECT=sage-striker-294302"
 
 # Get the service URL
 SERVICE_URL=$(gcloud run services describe ${SERVICE_NAME} --region=${REGION} --format="value(status.url)")

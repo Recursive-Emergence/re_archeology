@@ -785,8 +785,10 @@ class StatusUIManager {
      */
     handleStartScan() {
         // This will be called by the main application
-        if (window.discoveryApp && window.discoveryApp.startScan) {
-            window.discoveryApp.startScan();
+        if (window.unifiedApp && window.unifiedApp.startScan) {
+            window.unifiedApp.startScan();
+        } else {
+            console.error('❌ Unified app not found or startScan method not available');
         }
     }
     
@@ -794,8 +796,10 @@ class StatusUIManager {
      * Handle stop scan button click
      */
     handleStopScan() {
-        if (window.discoveryApp && window.discoveryApp.stopScan) {
-            window.discoveryApp.stopScan();
+        if (window.unifiedApp && window.unifiedApp.stopScan) {
+            window.unifiedApp.stopScan();
+        } else {
+            console.error('❌ Unified app not found or stopScan method not available');
         }
     }
     
@@ -803,8 +807,10 @@ class StatusUIManager {
      * Handle clear results button click
      */
     handleClearResults() {
-        if (window.discoveryApp && window.discoveryApp.clearResults) {
-            window.discoveryApp.clearResults();
+        if (window.unifiedApp && window.unifiedApp.clearResults) {
+            window.unifiedApp.clearResults();
+        } else {
+            console.error('❌ Unified app not found or clearResults method not available');
         }
     }
     
