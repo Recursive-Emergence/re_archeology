@@ -144,7 +144,7 @@ gcloud run deploy ${SERVICE_NAME} \
     --timeout 3600 \
     --max-instances 10 \
     --port 8080 \
-    --set-env-vars "GOOGLE_APPLICATION_CREDENTIALS=/app/sage-striker-294302-b89a8b7e205b.json,GOOGLE_CLOUD_PROJECT=sage-striker-294302"
+    --env-vars-file .env.cloudrun.yaml
 
 # Get the service URL
 SERVICE_URL=$(gcloud run services describe ${SERVICE_NAME} --region=${REGION} --format="value(status.url)")

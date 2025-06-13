@@ -8,7 +8,7 @@ import logging
 import uuid
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 
@@ -44,36 +44,8 @@ except ImportError as e:
 # Temporarily enable debug logging to diagnose WebSocket issues
 logger.setLevel(logging.DEBUG)
 
-# Global flag to track Earth Engine initialization
-_ee_initialized = False
-
-def initialize_earth_engine():
-    """Initialize Earth Engine with service account authentication"""
-    global _ee_initialized
-    if _ee_initialized:
-        return True
-        
-    try:
-        # Try service account first (preferred for production)
-        service_account_path = "/media/im3/plus/lab4/RE/re_archaeology/sage-striker-294302-b89a8b7e205b.json"
-        if os.path.exists(service_account_path):
-            credentials = ee.ServiceAccountCredentials(
-                'elevation-pattern-detection@sage-striker-294302.iam.gserviceaccount.com',
-                service_account_path
-            )
-            ee.Initialize(credentials)
-            logger.info("✅ Earth Engine initialized with service account credentials")
-        else:
-            # Fallback to default authentication
-            ee.Initialize()
-            logger.info("✅ Earth Engine initialized with default authentication")
-        
-        _ee_initialized = True
-        return True
-        
-    except Exception as ee_error:
-        logger.error(f"❌ Earth Engine initialization failed: {ee_error}")
-        return False
+# Import shared Earth Engine utilities
+from backend.utils.earth_engine import is_earth_engine_available, get_earth_engine_status
 
 def clean_patch_data(elevation_data: np.ndarray) -> np.ndarray:
     """Replace NaNs with mean of valid values"""
@@ -97,11 +69,9 @@ def load_real_elevation_patch(lat, lon, windmill_name, buffer_radius_m=20, resol
     logger.info(f"  Buffer: {buffer_radius_m}m radius at {resolution_m}m resolution")
     
     try:
-        # Ensure Earth Engine is initialized
-        try:
-            ee.Number(1).getInfo()  # Test if EE is initialized
-        except:
-            initialize_earth_engine()
+        # Ensure Earth Engine is available
+        if not is_earth_engine_available():
+            raise Exception("Earth Engine not available - cannot load elevation data")
         
         center = ee.Geometry.Point([lon, lat])
         polygon = center.buffer(buffer_radius_m).bounds()
@@ -672,11 +642,11 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
     try:
         logger.info(f"Starting discovery session {session.session_id}")
         
-        # Initialize Earth Engine before starting
-        if not initialize_earth_engine():
-            logger.error("Failed to initialize Earth Engine")
+        # Check Earth Engine availability before starting
+        if not is_earth_engine_available():
+            logger.error("Earth Engine not available")
             session.status = 'failed'
-            session.error_message = 'Earth Engine initialization failed'
+            session.error_message = 'Earth Engine not available'
             return
         
         # Small delay to ensure WebSocket connection is stable
@@ -894,3 +864,13 @@ async def get_discovery_status():
     except Exception as e:
         logger.error(f"Failed to get discovery status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/earth-engine/status")
+async def get_earth_engine_status():
+    """Get Earth Engine initialization status for debugging"""
+    status = get_earth_engine_status()
+    return {
+        "earth_engine_status": status,
+        "available": is_earth_engine_available(),
+        "timestamp": datetime.now().isoformat()
+    }

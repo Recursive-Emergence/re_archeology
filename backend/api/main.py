@@ -14,33 +14,10 @@ logger = logging.getLogger(__name__)
 # Load environment variables from .env file
 load_dotenv()
 
-# Initialize Earth Engine if credentials are available
-earth_engine_available = False
-try:
-    import ee
-    from backend.utils.config import get_settings
-    
-    # Check if service account credentials are configured
-    settings = get_settings()
-    if settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY and settings.GOOGLE_EE_PROJECT_ID:
-        if os.path.exists(settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY):
-            credentials = ee.ServiceAccountCredentials(
-                email=None,  # Will be read from JSON file
-                key_file=settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY
-            )
-            ee.Initialize(credentials, project=settings.GOOGLE_EE_PROJECT_ID)
-            earth_engine_available = True
-            logger.info("✅ Google Earth Engine initialized with service account")
-        else:
-            logger.warning(f"⚠️ Earth Engine service account key file not found: {settings.GOOGLE_EE_SERVICE_ACCOUNT_KEY}")
-    elif os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
-        ee.Initialize()
-        earth_engine_available = True
-        logger.info("✅ Google Earth Engine initialized with application credentials")
-    else:
-        logger.warning("⚠️ No Earth Engine credentials configured")
-except Exception as e:
-    logger.warning(f"⚠️ Earth Engine initialization failed: {e}")
+# Initialize Earth Engine using shared module
+from backend.utils.earth_engine import initialize_earth_engine, is_earth_engine_available
+
+earth_engine_available = initialize_earth_engine()
 
 if earth_engine_available:
     logger.info("Earth Engine available for AHN LiDAR data")
