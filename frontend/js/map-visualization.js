@@ -227,6 +227,11 @@ class MapVisualization {
         // Add popup with patch information
         rectangle.bindPopup(this.createPatchPopup(patch));
 
+        // Populate mini elevation grid when popup opens
+        rectangle.on('popupopen', () => {
+            this.populateMiniElevationGrid(patch);
+        });
+
         // Add hover effects
         rectangle.on('mouseover', (e) => {
             rectangle.setStyle({
@@ -318,14 +323,19 @@ class MapVisualization {
      * Get elevation color using terrain color scale
      */
     getElevationColor(normalized) {
-        // Use a terrain-like color scale
+        // Clamp normalized value to [0, 1]
+        normalized = Math.max(0, Math.min(1, normalized));
+        
+        // Matplotlib terrain colormap approximation
         const colors = [
-            { pos: 0.0, color: [70, 130, 180] },     // Steel blue (low)
-            { pos: 0.2, color: [100, 180, 120] },    // Light green
-            { pos: 0.4, color: [180, 200, 120] },    // Yellow-green
-            { pos: 0.6, color: [200, 180, 100] },    // Sandy brown
-            { pos: 0.8, color: [180, 120, 80] },     // Brown
-            { pos: 1.0, color: [140, 100, 80] }      // Dark brown (high)
+            { pos: 0.0, color: [51, 102, 153] },    // Deep blue (water/valleys)
+            { pos: 0.15, color: [68, 119, 170] },   // Blue
+            { pos: 0.3, color: [34, 136, 51] },     // Deep green (lowlands)
+            { pos: 0.45, color: [102, 170, 68] },   // Light green (vegetation)
+            { pos: 0.6, color: [170, 170, 68] },    // Yellow-green (hills)
+            { pos: 0.75, color: [204, 153, 102] },  // Brown (exposed earth)
+            { pos: 0.9, color: [238, 221, 204] },   // Light brown (rocky areas)
+            { pos: 1.0, color: [255, 255, 255] }    // White (peaks)
         ];
 
         // Find the two colors to interpolate between
@@ -624,6 +634,99 @@ class MapVisualization {
         }
         this.layers.clear();
         this.patches.clear();
+    }
+
+    /**
+     * Populate the mini elevation grid in popup with terrain colormap
+     */
+    populateMiniElevationGrid(patch) {
+        const gridId = `miniElevationGrid_${patch.patch_id}`;
+        const gridContainer = document.getElementById(gridId);
+        
+        if (!gridContainer) {
+            console.warn(`Mini elevation grid container ${gridId} not found`);
+            return;
+        }
+
+        if (!patch.elevation_data || !Array.isArray(patch.elevation_data)) {
+            gridContainer.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">No elevation data</div>';
+            return;
+        }
+
+        const data = patch.elevation_data;
+        const rows = data.length;
+        const cols = data[0]?.length || 0;
+
+        if (rows === 0 || cols === 0) {
+            gridContainer.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">Invalid elevation data</div>';
+            return;
+        }
+
+        // Calculate statistics
+        const flatData = data.flat().filter(v => v !== null && v !== undefined && !isNaN(v));
+        const min = Math.min(...flatData);
+        const max = Math.max(...flatData);
+        const range = max - min;
+
+        console.log(`Elevation data: ${rows}x${cols}, range: ${min.toFixed(2)}-${max.toFixed(2)}m`);
+
+        // Improved resolution - use more detail than the old 8x8 grid
+        const maxSize = 20; // Much better than the old 8x8
+        const rowStep = Math.max(1, Math.floor(rows / maxSize));
+        const colStep = Math.max(1, Math.floor(cols / maxSize));
+        const displayRows = Math.ceil(rows / rowStep);
+        const displayCols = Math.ceil(cols / colStep);
+
+        console.log(`Display grid: ${displayRows}x${displayCols} (step: ${rowStep}, ${colStep})`);
+
+        // Create grid HTML
+        const cellSize = Math.min(120 / displayCols, 120 / displayRows); // Max 120px container
+        
+        let gridHTML = `
+            <div style="display: grid; 
+                       grid-template-columns: repeat(${displayCols}, ${cellSize}px); 
+                       grid-template-rows: repeat(${displayRows}, ${cellSize}px); 
+                       gap: 1px; 
+                       background: #333; 
+                       padding: 2px; 
+                       border-radius: 3px;
+                       margin: 5px 0;">
+        `;
+
+        for (let i = 0; i < displayRows; i++) {
+            for (let j = 0; j < displayCols; j++) {
+                const rowIdx = Math.min(i * rowStep, rows - 1);
+                const colIdx = Math.min(j * colStep, cols - 1);
+                const value = data[rowIdx][colIdx];
+                
+                let backgroundColor = '#666'; // Default for invalid data
+                if (value !== null && value !== undefined && !isNaN(value)) {
+                    const normalized = range > 0 ? (value - min) / range : 0;
+                    backgroundColor = this.getElevationColor(normalized);
+                }
+                
+                gridHTML += `
+                    <div style="background-color: ${backgroundColor}; 
+                               width: ${cellSize}px; 
+                               height: ${cellSize}px;"
+                         title="Elevation: ${value?.toFixed(2) || 'N/A'}m">
+                    </div>
+                `;
+            }
+        }
+        
+        gridHTML += '</div>';
+        
+        // Add title with resolution info
+        const titleHTML = `
+            <div style="font-size: 11px; color: #ccc; text-align: center; margin-bottom: 5px;">
+                Elevation Heatmap (${displayRows}×${displayCols}) - Terrain Colors
+            </div>
+        `;
+        
+        gridContainer.innerHTML = titleHTML + gridHTML;
+        
+        console.log('✅ Mini elevation grid populated with terrain colormap');
     }
 }
 

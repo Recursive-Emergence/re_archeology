@@ -221,17 +221,22 @@ class PatchVisualization {
     }
 
     /**
-     * Get color for elevation value (normalized 0-1)
+     * Get color for elevation value (normalized 0-1) using matplotlib's terrain colormap
      */
     getElevationColor(normalized) {
-        // Use a terrain-like color scale
+        // Clamp normalized value to [0, 1]
+        normalized = Math.max(0, Math.min(1, normalized));
+        
+        // Matplotlib terrain colormap approximation
         const colors = [
-            { pos: 0.0, color: [0, 100, 200] },     // Deep blue (low)
-            { pos: 0.2, color: [0, 150, 255] },     // Light blue
-            { pos: 0.4, color: [100, 200, 100] },   // Green
-            { pos: 0.6, color: [255, 255, 100] },   // Yellow
-            { pos: 0.8, color: [255, 150, 50] },    // Orange
-            { pos: 1.0, color: [200, 50, 50] }      // Red (high)
+            { pos: 0.0, color: [51, 102, 153] },    // Deep blue (water/valleys)
+            { pos: 0.15, color: [68, 119, 170] },   // Blue
+            { pos: 0.3, color: [34, 136, 51] },     // Deep green (lowlands)
+            { pos: 0.45, color: [102, 170, 68] },   // Light green (vegetation)
+            { pos: 0.6, color: [170, 170, 68] },    // Yellow-green (hills)
+            { pos: 0.75, color: [204, 153, 102] },  // Brown (exposed earth)
+            { pos: 0.9, color: [238, 221, 204] },   // Light brown (rocky areas)
+            { pos: 1.0, color: [255, 255, 255] }    // White (peaks)
         ];
 
         // Find the two colors to interpolate between
@@ -326,24 +331,26 @@ class PatchVisualization {
             margin-bottom: 10px;
         `;
 
-        // Patch title with score
+        // Patch title with score - using terrain colormap like histogram_check.py
         const heatmapTitle = document.createElement('div');
         heatmapTitle.innerHTML = `
             <h5 style="color: #fff; margin: 0 0 8px 0; text-align: center; font-size: 12px;">
                 ${patch.metadata?.name || patch.patch_id}
                 <br><span style="color: ${this.getScoreColor(score)}; font-size: 10px;">Score: ${score.toFixed(4)}</span>
+                <br><span style="color: #888; font-size: 9px;">Terrain Colormap</span>
             </h5>
         `;
         heatmapSection.appendChild(heatmapTitle);
 
         // Elevation heatmap canvas
         const heatmapCanvas = document.createElement('canvas');
-        heatmapCanvas.width = 120;
-        heatmapCanvas.height = 120;
+        heatmapCanvas.width = 150;  // Increased from 120 to match improved resolution
+        heatmapCanvas.height = 150; // Increased from 120 to match improved resolution
         heatmapCanvas.style.cssText = `
             border: 1px solid #444;
             border-radius: 4px;
             image-rendering: pixelated;
+            background: #f0f8ff;
         `;
         heatmapSection.appendChild(heatmapCanvas);
 
@@ -438,32 +445,75 @@ class PatchVisualization {
         const max = Math.max(...flatData);
         const range = max - min;
 
-        // Sample data to fit canvas
-        const maxSize = 25;
-        const rowStep = Math.max(1, Math.floor(rows / maxSize));
-        const colStep = Math.max(1, Math.floor(cols / maxSize));
-        const displayRows = Math.min(maxSize, rows);
-        const displayCols = Math.min(maxSize, cols);
+        // Adjust canvas size to maintain aspect ratio
+        const aspectRatio = displayCols / displayRows;
+        if (aspectRatio > 1) {
+            canvas.width = 150;
+            canvas.height = Math.round(150 / aspectRatio);
+        } else {
+            canvas.height = 150;
+            canvas.width = Math.round(150 * aspectRatio);
+        }
 
-        const cellWidth = canvas.width / displayCols;
-        const cellHeight = canvas.height / displayRows;
+        console.log(`🎨 Final canvas: ${canvas.width}x${canvas.height}`);
 
-        // Draw heatmap
-        for (let i = 0; i < displayRows; i++) {
-            for (let j = 0; j < displayCols; j++) {
-                const rowIdx = Math.min(i * rowStep, rows - 1);
-                const colIdx = Math.min(j * colStep, cols - 1);
-                const value = elevationData[rowIdx][colIdx];
+        // Create smooth heatmap using ImageData (like matplotlib)
+        const imageData = ctx.createImageData(canvas.width, canvas.height);
+        const pixelData = imageData.data;
+
+        // For each pixel in the canvas, interpolate from elevation data
+        for (let canvasY = 0; canvasY < canvas.height; canvasY++) {
+            for (let canvasX = 0; canvasX < canvas.width; canvasX++) {
+                // Map canvas coordinates to data coordinates
+                const dataX = (canvasX / canvas.width) * cols;
+                const dataY = (canvasY / canvas.height) * rows;
                 
-                if (value === null || value === undefined || isNaN(value)) continue;
-
-                const normalized = range > 0 ? (value - min) / range : 0;
-                const color = this.getElevationColor(normalized);
+                // Bilinear interpolation for smooth heatmap
+                const x0 = Math.floor(dataX);
+                const x1 = Math.min(x0 + 1, cols - 1);
+                const y0 = Math.floor(dataY);
+                const y1 = Math.min(y0 + 1, rows - 1);
                 
-                ctx.fillStyle = color;
-                ctx.fillRect(j * cellWidth, i * cellHeight, cellWidth, cellHeight);
+                const fx = dataX - x0;
+                const fy = dataY - y0;
+                
+                // Get the four surrounding elevation values
+                const v00 = elevationData[y0] && elevationData[y0][x0] !== null ? elevationData[y0][x0] : min;
+                const v01 = elevationData[y0] && elevationData[y0][x1] !== null ? elevationData[y0][x1] : min;
+                const v10 = elevationData[y1] && elevationData[y1][x0] !== null ? elevationData[y1][x0] : min;
+                const v11 = elevationData[y1] && elevationData[y1][x1] !== null ? elevationData[y1][x1] : min;
+                
+                // Bilinear interpolation
+                const interpolatedValue = 
+                    v00 * (1 - fx) * (1 - fy) +
+                    v01 * fx * (1 - fy) +
+                    v10 * (1 - fx) * fy +
+                    v11 * fx * fy;
+                
+                // Normalize and get color
+                const normalized = range > 0 ? (interpolatedValue - min) / range : 0.5;
+                const colorStr = this.getElevationColor(normalized);
+                
+                // Parse RGB values from string like "rgb(51, 102, 153)"
+                const rgbMatch = colorStr.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+                let r = 240, g = 248, b = 255; // Default light blue
+                if (rgbMatch) {
+                    r = parseInt(rgbMatch[1]);
+                    g = parseInt(rgbMatch[2]);
+                    b = parseInt(rgbMatch[3]);
+                }
+                
+                // Set pixel color
+                const pixelIndex = (canvasY * canvas.width + canvasX) * 4;
+                pixelData[pixelIndex] = r;       // Red
+                pixelData[pixelIndex + 1] = g;   // Green
+                pixelData[pixelIndex + 2] = b;   // Blue
+                pixelData[pixelIndex + 3] = 255; // Alpha
             }
         }
+        
+        // Draw the smooth heatmap
+        ctx.putImageData(imageData, 0, 0);
     }
 
     /**
@@ -631,609 +681,6 @@ class PatchVisualization {
         console.log('✅ Chart created and stored successfully');
         console.log('✅ Chart instance:', chart);
         console.log('✅ Total charts stored:', this.charts.size);
-    }
-
-    /**
-     * Get elevation histogram score for a patch
-     */
-    async getElevationHistogramScore(patch) {
-        try {
-            // Try to get real score from detection result
-            if (patch.detection_result?.elevation_histogram_score !== undefined) {
-                return patch.detection_result.elevation_histogram_score;
-            }
-            
-            // Calculate histogram and get score
-            const histogramData = await this.calculateHistogramData(patch);
-            return histogramData.score;
-            
-        } catch (error) {
-            console.warn('⚠️ Could not get elevation histogram score:', error);
-            return 0.1; // Default low score
-        }
-    }
-
-    /**
-     * Get score color like the analyzer
-     */
-    getScoreColor(score) {
-        if (score >= 0.7) return '#00ff88'; // Green
-        if (score >= 0.4) return '#ffaa00'; // Yellow/Orange
-        return '#ff4444'; // Red
-    }
-
-    /**
-     * Calculate histogram data for professional display
-     */
-    async calculateHistogramData(patch) {
-        console.log('🎯 calculateHistogramData called for patch:', patch.patch_id);
-        // Flatten elevation data and filter out invalid values
-        const elevationValues = patch.elevation_data
-            .flat()
-            .filter(v => v !== null && v !== undefined && !isNaN(v));
-
-        if (elevationValues.length === 0) {
-            return { localDensity: [], kernelDensity: [], score: 0.1 };
-        }
-
-        // Calculate statistics
-        const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
-        const elevationRange = stats.max - stats.min;
-        
-        // Apply same normalization as phi0_core histogram scoring
-        let normalizedElevation = [];
-        if (elevationRange >= 0.5) {
-            const relativeElevation = elevationValues.map(v => v - stats.min);
-            const maxRelative = Math.max(...relativeElevation);
-            if (maxRelative >= 0.1) {
-                normalizedElevation = relativeElevation.map(v => v / maxRelative);
-            }
-        }
-        
-        if (normalizedElevation.length === 0) {
-            return { localDensity: [], kernelDensity: [], score: 0.1 };
-        }
-
-        // Create histogram with 16 bins (same as histogram analyzer)
-        const numBins = 16;
-        const binWidth = 1.0 / numBins;
-        
-        // Create bins for local patch
-        const localBins = Array(numBins).fill(0);
-        
-        // Fill local histogram bins
-        normalizedElevation.forEach(value => {
-            const binIndex = Math.min(Math.floor(value / binWidth), numBins - 1);
-            if (binIndex >= 0) {
-                localBins[binIndex]++;
-            }
-        });
-
-        // Normalize to probability distribution (same as histogram analyzer)
-        const totalCount = normalizedElevation.length;
-        const localDensity = localBins.map(count => count / (totalCount + 1e-8));
-
-        // Get kernel data and similarity score
-        const kernelResult = await this.getRealKernelData(localDensity, patch);
-        
-        return {
-            localDensity: localDensity,
-            kernelDensity: kernelResult.kernelDensity,
-            score: kernelResult.score,
-            binLabels: localBins.map((_, i) => {
-                const binStart = i * binWidth;
-                const binEnd = (i + 1) * binWidth;
-                return `${(binStart * 100).toFixed(0)}-${(binEnd * 100).toFixed(0)}%`;
-            })
-        };
-    }
-
-    /**
-     * Draw professional histogram comparison like the analyzer
-     */
-    async drawProfessionalHistogram(canvas, histogramData, score) {
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const { localDensity, kernelDensity, binLabels } = histogramData;
-        
-        if (!localDensity.length || !kernelDensity.length) {
-            // Draw "No data" message
-            ctx.fillStyle = '#666';
-            ctx.font = '12px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('No histogram data', canvas.width / 2, canvas.height / 2);
-            return;
-        }
-
-        // Chart dimensions
-        const padding = { top: 15, bottom: 40, left: 40, right: 20 };
-        const chartWidth = canvas.width - padding.left - padding.right;
-        const chartHeight = canvas.height - padding.top - padding.bottom;
-        
-        // Find max value for scaling
-        const maxValue = Math.max(...localDensity, ...kernelDensity);
-        const barWidth = chartWidth / (localDensity.length * 2); // Two bars per bin
-        
-        // Draw bars
-        for (let i = 0; i < localDensity.length; i++) {
-            const x = padding.left + (i * 2 * barWidth);
-            
-            // Local patch bar (blue)
-            const localHeight = (localDensity[i] / maxValue) * chartHeight;
-            ctx.fillStyle = 'rgba(54, 162, 235, 0.7)';
-            ctx.fillRect(x, padding.top + chartHeight - localHeight, barWidth, localHeight);
-            
-            // Kernel bar (orange)
-            const kernelHeight = (kernelDensity[i] / maxValue) * chartHeight;
-            ctx.fillStyle = 'rgba(255, 159, 64, 0.7)';
-            ctx.fillRect(x + barWidth, padding.top + chartHeight - kernelHeight, barWidth, kernelHeight);
-        }
-        
-        // Draw axes
-        ctx.strokeStyle = '#666';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        // Y-axis
-        ctx.moveTo(padding.left, padding.top);
-        ctx.lineTo(padding.left, padding.top + chartHeight);
-        // X-axis
-        ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
-        ctx.stroke();
-        
-        // Draw legend
-        ctx.font = '10px Arial';
-        ctx.textAlign = 'left';
-        
-        // Local patch legend
-        ctx.fillStyle = 'rgba(54, 162, 235, 0.7)';
-        ctx.fillRect(10, 5, 12, 8);
-        ctx.fillStyle = '#ccc';
-        ctx.fillText('Local', 25, 12);
-        
-        // Kernel legend
-        ctx.fillStyle = 'rgba(255, 159, 64, 0.7)';
-        ctx.fillRect(65, 5, 12, 8);
-        ctx.fillStyle = '#ccc';
-        ctx.fillText('Kernel', 80, 12);
-        
-        // Y-axis labels
-        ctx.fillStyle = '#ccc';
-        ctx.font = '8px Arial';
-        ctx.textAlign = 'right';
-        for (let i = 0; i <= 4; i++) {
-            const y = padding.top + chartHeight - (i / 4) * chartHeight;
-            const value = (maxValue * i / 4).toFixed(3);
-            ctx.fillText(value, padding.left - 5, y + 3);
-        }
-        
-        // X-axis labels (show every 4th bin to avoid crowding)
-        ctx.textAlign = 'center';
-        for (let i = 0; i < binLabels.length; i += 4) {
-            const x = padding.left + (i * 2 * barWidth) + barWidth;
-            ctx.fillText(binLabels[i].split('-')[0] + '%', x, canvas.height - 5);
-        }
-    }
-    async getRealKernelData(localDensity, patch) {
-        try {
-            // Method 1: Use detection scores from patch if available
-            if (patch.detection_result && patch.detection_result.elevation_histogram_score !== undefined) {
-                const score = patch.detection_result.elevation_histogram_score;
-                
-                // Try to get kernel histogram from patch metadata
-                if (patch.detection_result.kernel_histogram) {
-                    return {
-                        kernelDensity: patch.detection_result.kernel_histogram,
-                        score: score
-                    };
-                }
-                
-                // Generate approximate kernel density based on windmill pattern
-                const kernelDensity = this.generateWindmillKernelPattern(localDensity.length);
-                return { kernelDensity, score };
-            }
-            
-            // Method 2: Try to get kernel data from API
-            try {
-                if (window.discoveryAPI) {
-                    const kernelData = await this.fetchKernelFromAPI();
-                    if (kernelData && kernelData.elevation_histogram) {
-                        const score = this.calculateHistogramSimilarity(localDensity, kernelData.elevation_histogram);
-                        return {
-                            kernelDensity: kernelData.elevation_histogram,
-                            score: score
-                        };
-                    }
-                }
-            } catch (apiError) {
-                // Silently continue to fallback
-            }
-            
-            // Method 3: Calculate similarity using windmill pattern and estimate score
-            const kernelDensity = this.generateWindmillKernelPattern(localDensity.length);
-            const score = this.calculateWindmillPatternScore(localDensity, patch);
-            
-            return { kernelDensity, score };
-            
-        } catch (error) {
-            console.error('❌ Error getting kernel data:', error);
-            // Fallback: flat distribution with low score
-            const kernelDensity = Array(localDensity.length).fill(1.0 / localDensity.length);
-            return { kernelDensity, score: 0.1 };
-        }
-    }
-
-    /**
-     * Fetch kernel data from API
-     */
-    async fetchKernelFromAPI() {
-        try {
-            const response = await fetch('/api/v1/discovery/kernels?structure_type=windmill');
-            if (!response.ok) {
-                throw new Error(`API response: ${response.status}`);
-            }
-            const data = await response.json();
-            
-            // Look for active windmill kernel
-            if (data.kernels && data.kernels.length > 0) {
-                const windmillKernel = data.kernels.find(k => k.structure_type === 'windmill');
-                return windmillKernel;
-            }
-            
-            return null;
-        } catch (error) {
-            return null;
-        }
-    }
-
-    /**
-     * Generate realistic windmill elevation histogram pattern
-     */
-    generateWindmillKernelPattern(numBins) {
-        // Windmills typically show:
-        // - High values in center (mound)
-        // - Gradual decrease towards edges
-        // - Some noise but generally smooth distribution
-        
-        const kernelDensity = Array(numBins).fill(0);
-        
-        // Create mound-like distribution typical of windmill sites
-        for (let i = 0; i < numBins; i++) {
-            const normalized = i / (numBins - 1); // 0 to 1
-            
-            // Windmill pattern: higher density in middle-high elevation bins
-            // Peak around 60-80% elevation, tapering off
-            let density;
-            if (normalized < 0.3) {
-                // Low elevation - minimal density
-                density = 0.02 + 0.01 * normalized;
-            } else if (normalized < 0.6) {
-                // Rising to peak
-                density = 0.03 + 0.12 * (normalized - 0.3) / 0.3;
-            } else if (normalized < 0.8) {
-                // Peak region - highest density
-                density = 0.15 + 0.05 * Math.sin(Math.PI * (normalized - 0.6) / 0.2);
-            } else {
-                // High elevation - decreasing
-                density = 0.08 * (1.0 - normalized) / 0.2;
-            }
-            
-            kernelDensity[i] = Math.max(0.01, density); // Ensure minimum density
-        }
-        
-        // Normalize to probability distribution
-        const total = kernelDensity.reduce((a, b) => a + b, 0);
-        return kernelDensity.map(d => d / total);
-    }
-
-    /**
-     * Calculate similarity score using cosine similarity
-     */
-    calculateHistogramSimilarity(localDensity, kernelDensity) {
-        if (!localDensity || !kernelDensity || localDensity.length !== kernelDensity.length) {
-            return 0.0;
-        }
-        
-        // Cosine similarity (same as phi0_core)
-        const localNorm = Math.sqrt(localDensity.reduce((sum, val) => sum + val * val, 0));
-        const kernelNorm = Math.sqrt(kernelDensity.reduce((sum, val) => sum + val * val, 0));
-        
-        if (localNorm < 1e-8 || kernelNorm < 1e-8) {
-            return 0.0;
-        }
-        
-        const dotProduct = localDensity.reduce((sum, val, i) => sum + val * kernelDensity[i], 0);
-        const similarity = dotProduct / (localNorm * kernelNorm);
-        
-        return Math.max(0.0, Math.min(1.0, similarity));
-    }
-
-    /**
-     * Calculate windmill pattern score based on elevation characteristics
-     */
-    calculateWindmillPatternScore(localDensity, patch) {
-        // Use available detection scores if present
-        if (patch.detection_result) {
-            if (patch.detection_result.elevation_histogram_score !== undefined) {
-                return patch.detection_result.elevation_histogram_score;
-            }
-            if (patch.detection_result.phi0 !== undefined) {
-                // Use phi0 score as approximation
-                return patch.detection_result.phi0;
-            }
-        }
-        
-        // Fall back to confidence score
-        if (patch.confidence !== undefined) {
-            return patch.confidence;
-        }
-        
-        // Estimate based on elevation pattern characteristics
-        const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
-        const elevationRange = stats.max - stats.min;
-        
-        // Windmills typically have good elevation variation (1-10m range)
-        let rangeScore = 0;
-        if (elevationRange >= 2.0 && elevationRange <= 10.0) {
-            rangeScore = 0.8;
-        } else if (elevationRange >= 1.0 && elevationRange <= 15.0) {
-            rangeScore = 0.6;
-        } else if (elevationRange >= 0.5) {
-            rangeScore = 0.3;
-        }
-        
-        // Check for mound-like pattern in histogram
-        const peakBin = localDensity.indexOf(Math.max(...localDensity));
-        const isMiddlePeak = peakBin > localDensity.length * 0.3 && peakBin < localDensity.length * 0.8;
-        const patternScore = isMiddlePeak ? 0.3 : 0.1;
-        
-        return Math.min(1.0, rangeScore + patternScore);
-    }
-
-    /**
-     * Add statistics overlay to chart container
-     */
-    addStatisticsOverlay(container, stats, count) {
-        const existingOverlay = container.querySelector('.stats-overlay');
-        if (existingOverlay) {
-            existingOverlay.remove();
-        }
-
-        const overlay = document.createElement('div');
-        overlay.className = 'stats-overlay';
-        overlay.style.cssText = `
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid #00ff88;
-            border-radius: 4px;
-            padding: 8px;
-            font-size: 11px;
-            color: #ccc;
-            pointer-events: none;
-        `;
-        
-        overlay.innerHTML = `
-            <div><strong>Statistics:</strong></div>
-            <div>Count: ${count}</div>
-            <div>Min: ${stats.min.toFixed(2)}m</div>
-            <div>Max: ${stats.max.toFixed(2)}m</div>
-            <div>Mean: ${stats.mean.toFixed(2)}m</div>
-            <div>Std: ${stats.std.toFixed(2)}m</div>
-        `;
-
-        container.appendChild(overlay);
-    }
-
-    /**
-     * Display detection analysis information
-     */
-    displayDetectionAnalysis(patch) {
-        const analysisContainer = document.getElementById('detectionAnalysis');
-        if (!analysisContainer) return;
-
-        const detection = patch.detection_result || {};
-        const stats = patch.elevation_stats || {};
-        const isCompact = analysisContainer.classList.contains('compact');
-
-        if (isCompact) {
-            // Compact analysis - show only key metrics
-            const analysisHTML = `
-                <div class="analysis-section">
-                    <h4>Detection Metrics</h4>
-                    <div class="analysis-grid">
-                        <div class="metric">
-                            <label>φ⁰ Score:</label>
-                            <span class="value ${this.getScoreClass(detection.phi0)}">${detection.phi0?.toFixed(3) || '--'}</span>
-                        </div>
-                        <div class="metric">
-                            <label>ψ⁰ Score:</label>
-                            <span class="value ${this.getScoreClass(detection.psi0)}">${detection.psi0?.toFixed(3) || '--'}</span>
-                        </div>
-                        <div class="metric">
-                            <label>Confidence:</label>
-                            <span class="value ${this.getConfidenceClass(patch.confidence)}">${(patch.confidence * 100).toFixed(1)}%</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else {
-            // Full analysis - original detailed version
-            const analysisHTML = `
-                <div class="analysis-section">
-                    <h4>Detection Analysis</h4>
-                    <div class="analysis-grid">
-                        <div class="metric">
-                            <label>φ⁰ Resonance:</label>
-                            <span class="value ${this.getScoreClass(detection.phi0)}">${detection.phi0?.toFixed(3) || '--'}</span>
-                        </div>
-                        <div class="metric">
-                            <label>ψ⁰ Attractors:</label>
-                            <span class="value ${this.getScoreClass(detection.psi0)}">${detection.psi0?.toFixed(3) || '--'}</span>
-                        </div>
-                        <div class="metric">
-                            <label>Confidence:</label>
-                            <span class="value ${this.getConfidenceClass(patch.confidence)}">${(patch.confidence * 100).toFixed(1)}%</span>
-                        </div>
-                        <div class="metric">
-                            <label>Structure Type:</label>
-                            <span class="value">${detection.structure_type || 'Unknown'}</span>
-                        </div>
-                    </div>
-                    
-                    <h5>Elevation Statistics</h5>
-                    <div class="stats-grid">
-                        <div class="stat">
-                            <label>Range:</label>
-                            <span>${stats.min?.toFixed(2) || '--'}m - ${stats.max?.toFixed(2) || '--'}m</span>
-                        </div>
-                        <div class="stat">
-                            <label>Mean:</label>
-                            <span>${stats.mean?.toFixed(2) || '--'}m</span>
-                        </div>
-                        <div class="stat">
-                            <label>Std Dev:</label>
-                            <span>${stats.std?.toFixed(2) || '--'}m</span>
-                        </div>
-                    </div>
-
-                    <h5>Processing Info</h5>
-                    <div class="info-grid">
-                        <div class="info">
-                            <label>Timestamp:</label>
-                            <span>${new Date(patch.timestamp).toLocaleString()}</span>
-                        </div>
-                        <div class="info">
-                            <label>Patch ID:</label>
-                            <span>${patch.patch_id}</span>
-                        </div>
-                        <div class="info">
-                            <label>Session ID:</label>
-                            <span>${patch.session_id}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        analysisContainer.innerHTML = analysisHTML;
-    }
-
-    /**
-     * Get CSS class for score values
-     */
-    getScoreClass(score) {
-        if (!score) return 'score-unknown';
-        if (score >= 0.7) return 'score-high';
-        if (score >= 0.4) return 'score-medium';
-        return 'score-low';
-    }
-
-    /**
-     * Get CSS class for confidence values
-     */
-    getConfidenceClass(confidence) {
-        if (!confidence) return 'confidence-unknown';
-        if (confidence >= 0.8) return 'confidence-high';
-        if (confidence >= 0.6) return 'confidence-medium';
-        if (confidence >= 0.4) return 'confidence-low';
-        return 'confidence-very-low';
-    }
-
-    /**
-     * Update patch information panel
-     */
-    updatePatchInfoPanel(patch) {
-        const infoPanel = document.getElementById('patchInfoPanel');
-        if (!infoPanel) return;
-
-        const isCompact = infoPanel.classList.contains('compact');
-        
-        if (isCompact) {
-            // Compact layout - more condensed information
-            const panelHTML = `
-                <div class="patch-info-compact">
-                    <div class="info-row">
-                        <strong>Patch ${patch.patch_id}</strong>
-                        <span class="status-badge ${patch.is_positive ? 'positive' : 'negative'}">
-                            ${patch.is_positive ? '✓ DETECTION' : '✗ NO DETECTION'}
-                        </span>
-                    </div>
-                    <div class="info-row">
-                        <span>📍 ${patch.lat.toFixed(4)}, ${patch.lon.toFixed(4)}</span>
-                        <span>🎯 ${((patch.confidence || 0) * 100).toFixed(1)}% confidence</span>
-                    </div>
-                    <div class="info-row">
-                        <span>φ⁰: ${patch.detection_result?.phi0?.toFixed(3) || '--'}</span>
-                        <span>ψ⁰: ${patch.detection_result?.psi0?.toFixed(3) || '--'}</span>
-                    </div>
-                </div>
-            `;
-        } else {
-            // Full layout - original detailed information
-            const panelHTML = `
-                <div class="patch-info-header">
-                    <h3>Patch ${patch.patch_id}</h3>
-                    <div class="status-badge ${patch.is_positive ? 'positive' : 'negative'}">
-                        ${patch.is_positive ? 'DETECTION' : 'NO DETECTION'}
-                    </div>
-                </div>
-                <div class="patch-coordinates">
-                    <span>📍 ${patch.lat.toFixed(6)}, ${patch.lon.toFixed(6)}</span>
-                </div>
-                <div class="patch-actions">
-                    <button onclick="window.patchViz.exportPatchData('${patch.patch_id}')" class="btn-small">
-                        📊 Export Data
-                    </button>
-                    <button onclick="window.patchViz.viewIn3D('${patch.patch_id}')" class="btn-small">
-                        🎯 View in 3D
-                    </button>
-                    <button onclick="window.patchViz.compareWithSimilar('${patch.patch_id}')" class="btn-small">
-                        🔍 Compare
-                    </button>
-                </div>
-            `;
-        }
-
-        infoPanel.innerHTML = panelHTML;
-    }
-
-    /**
-     * Show details for a specific elevation cell
-     */
-    showCellDetails(value, row, col) {
-        const modal = document.createElement('div');
-        modal.className = 'cell-details-modal';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <h4>Cell Details</h4>
-                <div class="cell-info">
-                    <div class="info-row">
-                        <span>Position:</span>
-                        <span>[${row}, ${col}]</span>
-                    </div>
-                    <div class="info-row">
-                        <span>Elevation:</span>
-                        <span>${value.toFixed(3)}m</span>
-                    </div>
-                    <div class="info-row">
-                        <span>Patch:</span>
-                        <span>${this.currentPatch?.patch_id || 'Unknown'}</span>
-                    </div>
-                </div>
-                <button onclick="this.parentElement.parentElement.remove()" class="btn-small">Close</button>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        // Auto-close after 3 seconds
-        setTimeout(() => {
-            if (modal.parentElement) {
-                modal.remove();
-            }
-        }, 3000);
     }
 
     /**

@@ -904,7 +904,7 @@
     <!-- Enhanced Status Management -->
     <script src="js/status-manager.js"></script>
     <script src="js/status-ui-manager.js"></script>
-    <!-- Patch Visualization -->        <script src="js/patch-visualization.js?v=13.0"></script>
+    <!-- Patch Visualization -->        <script src="js/patch-visualization.js?v=13.2"></script>
     
     <!-- Main Application -->
     <script>
@@ -1308,8 +1308,8 @@
                             <div style="flex: 1;">
                                 <h6 style="color: #ccc; margin: 0 0 8px 0; font-size: 11px; text-align: center;">Elevation Pattern</h6>
                                 <div id="miniElevationGrid_${patch.patch_id}" class="mini-elevation-grid professional" 
-                                     style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 1px; width: 120px; height: 120px; margin: 0 auto;">
-                                    <!-- Will be populated by JavaScript -->
+                                     style="display: flex; flex-direction: column; align-items: center; width: 120px; margin: 0 auto;">
+                                    <!-- Will be populated with canvas heatmap by JavaScript -->
                                 </div>
                             </div>
                             
@@ -1398,41 +1398,108 @@
                 
                 if (rows === 0 || cols === 0) return;
                 
-                // Use 12x12 grid for professional look
-                const sampleSize = 12;
-                const rowStep = Math.max(1, Math.floor(rows / sampleSize));
-                const colStep = Math.max(1, Math.floor(cols / sampleSize));
+                // Create canvas for smooth heatmap (like matplotlib)
+                const canvas = document.createElement('canvas');
+                const targetSize = 120; // Target display size
+                canvas.width = targetSize;
+                canvas.height = targetSize;
+                canvas.style.cssText = `
+                    border: 1px solid #444;
+                    border-radius: 4px;
+                    image-rendering: auto; /* Smooth interpolation */
+                    background: #f0f8ff;
+                `;
                 
+                const ctx = canvas.getContext('2d');
+                
+                // Calculate statistics
                 const stats = patch.elevation_stats || this.calculateElevationStats(data);
                 const min = stats.min;
                 const max = stats.max;
                 const range = max - min;
                 
-                gridElement.innerHTML = '';
+                console.log(`Creating heatmap: ${rows}x${cols} data, range: ${min.toFixed(2)}-${max.toFixed(2)}m`);
                 
-                for (let i = 0; i < sampleSize; i++) {
-                    for (let j = 0; j < sampleSize; j++) {
-                        const rowIdx = Math.min(i * rowStep, rows - 1);
-                        const colIdx = Math.min(j * colStep, cols - 1);
-                        const value = data[rowIdx][colIdx];
-                        
-                        if (value !== null && value !== undefined && !isNaN(value)) {
-                            const normalized = range > 0 ? (value - min) / range : 0;
+                if (range === 0) {
+                    // Flat terrain - single color
+                    ctx.fillStyle = this.getElevationColor(0.5);
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                } else {
+                    // Create smooth heatmap using canvas scaling
+                    // First, create a high-resolution version
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = cols;
+                    tempCanvas.height = rows;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    
+                    // Create ImageData for direct pixel manipulation
+                    const imageData = tempCtx.createImageData(cols, rows);
+                    const pixelData = imageData.data;
+                    
+                    // Fill pixel data with elevation colors
+                    for (let i = 0; i < rows; i++) {
+                        for (let j = 0; j < cols; j++) {
+                            const value = data[i][j];
+                            let r = 240, g = 248, b = 255; // Default light blue
                             
-                            const cell = document.createElement('div');
-                            cell.style.cssText = `
-                                background-color: ${this.getElevationColor(normalized)};
-                                border-radius: 1px;
-                                transition: transform 0.2s ease;
-                            `;
-                            cell.title = `${value.toFixed(1)}m`;
-                            cell.onmouseover = () => cell.style.transform = 'scale(1.2)';
-                            cell.onmouseout = () => cell.style.transform = 'scale(1)';
+                            if (value !== null && value !== undefined && !isNaN(value)) {
+                                const normalized = (value - min) / range;
+                                const colorStr = this.getElevationColor(normalized);
+                                
+                                // Parse RGB values from string like "rgb(51, 102, 153)"
+                                const rgbMatch = colorStr.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+                                if (rgbMatch) {
+                                    r = parseInt(rgbMatch[1]);
+                                    g = parseInt(rgbMatch[2]);
+                                    b = parseInt(rgbMatch[3]);
+                                }
+                            }
                             
-                            gridElement.appendChild(cell);
+                            const pixelIndex = (i * cols + j) * 4;
+                            pixelData[pixelIndex] = r;     // Red
+                            pixelData[pixelIndex + 1] = g; // Green
+                            pixelData[pixelIndex + 2] = b; // Blue
+                            pixelData[pixelIndex + 3] = 255; // Alpha
                         }
                     }
+                    
+                    // Put the image data to temp canvas
+                    tempCtx.putImageData(imageData, 0, 0);
+                    
+                    // Scale and draw to final canvas with smooth interpolation
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(tempCanvas, 0, 0, cols, rows, 0, 0, canvas.width, canvas.height);
                 }
+                
+                // Clear grid and add canvas
+                gridElement.innerHTML = '';
+                
+                // Add title
+                const title = document.createElement('div');
+                title.style.cssText = `
+                    font-size: 11px; 
+                    color: #ccc; 
+                    text-align: center; 
+                    margin-bottom: 5px;
+                    font-weight: bold;
+                `;
+                title.textContent = `Elevation Heatmap (${rows}×${cols}) - Terrain Colors`;
+                gridElement.appendChild(title);
+                
+                // Add the canvas
+                gridElement.appendChild(canvas);
+                
+                // Add elevation range info
+                const rangeInfo = document.createElement('div');
+                rangeInfo.style.cssText = `
+                    font-size: 10px; 
+                    color: #999; 
+                    text-align: center; 
+                    margin-top: 3px;
+                `;
+                rangeInfo.textContent = `${min.toFixed(1)}m - ${max.toFixed(1)}m`;
+                gridElement.appendChild(rangeInfo);
             }
             
             populateProfessionalHistogram(patch) {
@@ -1951,19 +2018,42 @@
             }
             
             getElevationColor(normalized) {
-                // Simple terrain color scale for mini view
+                // Matplotlib terrain colormap approximation
+                normalized = Math.max(0, Math.min(1, normalized));
+                
+                // Matplotlib terrain colormap approximation
                 const colors = [
-                    [70, 130, 180],   // Blue (low)
-                    [100, 200, 100],  // Green
-                    [255, 255, 100],  // Yellow
-                    [255, 150, 50],   // Orange
-                    [200, 50, 50]     // Red (high)
+                    { pos: 0.0, color: [51, 102, 153] },    // Deep blue (water/valleys)
+                    { pos: 0.15, color: [68, 119, 170] },   // Blue
+                    { pos: 0.3, color: [34, 136, 51] },     // Deep green (lowlands)
+                    { pos: 0.45, color: [102, 170, 68] },   // Light green (vegetation)
+                    { pos: 0.6, color: [170, 170, 68] },    // Yellow-green (hills)
+                    { pos: 0.75, color: [204, 153, 102] },  // Brown (exposed earth)
+                    { pos: 0.9, color: [238, 221, 204] },   // Light brown (rocky areas)
+                    { pos: 1.0, color: [255, 255, 255] }    // White (peaks)
                 ];
-                
-                const index = Math.floor(normalized * (colors.length - 1));
-                const color = colors[Math.min(index, colors.length - 1)];
-                
-                return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+
+                // Find the two colors to interpolate between
+                let lowerColor = colors[0];
+                let upperColor = colors[colors.length - 1];
+
+                for (let i = 0; i < colors.length - 1; i++) {
+                    if (normalized >= colors[i].pos && normalized <= colors[i + 1].pos) {
+                        lowerColor = colors[i];
+                        upperColor = colors[i + 1];
+                        break;
+                    }
+                }
+
+                // Interpolate between the two colors
+                const range = upperColor.pos - lowerColor.pos;
+                const factor = range === 0 ? 0 : (normalized - lowerColor.pos) / range;
+
+                const r = Math.round(lowerColor.color[0] + factor * (upperColor.color[0] - lowerColor.color[0]));
+                const g = Math.round(lowerColor.color[1] + factor * (upperColor.color[1] - lowerColor.color[1]));
+                const b = Math.round(lowerColor.color[2] + factor * (upperColor.color[2] - lowerColor.color[2]));
+
+                return `rgb(${r}, ${g}, ${b})`;
             }
         }
         
