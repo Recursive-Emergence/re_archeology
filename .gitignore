@@ -1,6 +1,12 @@
 .env
-.env.*
+.env.local
+.env.production
+.env.development
+.env.cloudrun
 *.env
+!.env.example
+!.env.template
+!.env.*.template
 archive/
 backup/
 docs/
