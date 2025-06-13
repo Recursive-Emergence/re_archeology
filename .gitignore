@@ -1,4 +1,6 @@
 .env
+.env.*
+*.env
 archive/
 backup/
 docs/
@@ -197,3 +199,4 @@ htmlcov/
 
 
 sage*.json
+.env.cloudrun
