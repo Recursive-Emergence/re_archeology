@@ -7,20 +7,14 @@ with parallel feature module execution and recursive aggregation.
 
 import numpy as np
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-import sys
-import os
-
-import numpy as np
-import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import warnings
 
 from .aggregator import RecursiveDetectionAggregator, AggregationResult, StreamingDetectionAggregator, StreamingAggregationResult
 from .modules import feature_registry, FeatureResult
+from .detector_profile import DetectorProfile, DetectorProfileManager, StructureType
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -59,20 +53,27 @@ class G2StructureDetector:
     G₂-level structure detector with recursive geometric reasoning.
     
     Combines φ⁰ core detection with parallel feature module execution
-    and recursive refinement capabilities.
+    and recursive refinement capabilities. Now supports profile-driven configuration.
     """
     
     def __init__(self, 
-                 resolution_m: float = 0.5,
-                 structure_radius_m: float = 8.0,
-                 structure_type: str = "windmill",
-                 max_workers: int = 5,
-                 enable_refinement: bool = True,
-                 max_refinement_attempts: int = 2):
+                 profile: Optional[DetectorProfile] = None,
+                 profile_name: Optional[str] = None,
+                 # Legacy parameters for backward compatibility (deprecated)
+                 resolution_m: Optional[float] = None,
+                 structure_radius_m: Optional[float] = None,
+                 structure_type: Optional[str] = None,
+                 max_workers: Optional[int] = None,
+                 enable_refinement: Optional[bool] = None,
+                 max_refinement_attempts: Optional[int] = None):
         """
-        Initialize G₂ detector - completely independent of phi0_core
+        Initialize G₂ detector with profile-driven configuration
         
         Args:
+            profile: DetectorProfile object with complete configuration
+            profile_name: Name of template profile to load
+            
+            # Legacy parameters (deprecated, use profile instead):
             resolution_m: Resolution in meters per pixel
             structure_radius_m: Expected structure radius in meters
             structure_type: Type of structure to detect
@@ -80,45 +81,144 @@ class G2StructureDetector:
             enable_refinement: Whether to enable recursive refinement
             max_refinement_attempts: Maximum number of refinement attempts
         """
-        # Core G₂ parameters - no phi0_core dependency
-        self.resolution_m = resolution_m
-        self.structure_radius_m = structure_radius_m
-        self.structure_type = structure_type
-        self.detection_threshold = 0.5  # Independent threshold
+        # Initialize profile manager
+        self.profile_manager = DetectorProfileManager()
         
-        # G₂ specific parameters
-        self.max_workers = max_workers
-        self.enable_refinement = enable_refinement
-        self.max_refinement_attempts = max_refinement_attempts
+        # Handle profile resolution with three initialization modes
+        self.profile = self._resolve_profile(
+            profile, profile_name, 
+            resolution_m, structure_radius_m, structure_type, 
+            max_workers, enable_refinement, max_refinement_attempts
+        )
         
-        # Initialize feature modules using registry
-        module_weights = {
-            "histogram": 1.5,           # Highest weight - core histogram matching
-            "volume": 1.3,              # Second highest - volumetric analysis
-            "dropoff": 1.2,             # Third - edge sharpness
-            "compactness": 1.1,         # Fourth - shape analysis
-            "entropy": 1.0,             # Fifth - surface texture
-            "planarity": 0.9            # Lowest - surface planarity
-        }
+        # Extract core parameters from profile
+        self.resolution_m = self.profile.geometry.resolution_m
+        self.structure_radius_m = self.profile.geometry.structure_radius_m
+        self.structure_type = self.profile.structure_type.value
+        self.detection_threshold = self.profile.thresholds.detection_threshold
+        
+        # Extract G₂ specific parameters from profile
+        self.max_workers = self.profile.max_workers
+        self.enable_refinement = self.profile.enable_refinement
+        self.max_refinement_attempts = self.profile.max_refinement_attempts
+        
+        # Initialize feature modules using profile configuration
+        enabled_features = self.profile.get_enabled_features()
+        module_weights = {name: config.weight for name, config in enabled_features.items()}
         
         self.feature_modules = feature_registry.get_all_modules(module_weights)
         
-        # Set parameters for all modules
-        structure_radius_px = int(self.structure_radius_m / resolution_m)
+        # Set parameters for all modules using profile geometry
+        structure_radius_px = self.profile.geometry.get_structure_radius_px()
         for module in self.feature_modules.values():
-            module.set_parameters(resolution_m, structure_radius_px)
+            module.set_parameters(self.resolution_m, structure_radius_px)
         
-        # Initialize aggregator - use streaming version for full functionality
+        # Initialize aggregator using profile thresholds
         self.aggregator = StreamingDetectionAggregator(
-            phi0_weight=0.6, 
-            feature_weight=0.4,
-            early_decision_threshold=0.85,
-            min_modules_for_decision=2
+            base_score=0.5,  # G₂ neutral starting score
+            early_decision_threshold=self.profile.thresholds.early_decision_threshold,
+            min_modules_for_decision=self.profile.thresholds.min_modules_for_decision
         )
         
-        logger.info(f"G₂ detector initialized with {len(self.feature_modules)} feature modules")
+        logger.info(f"G₂ detector initialized with profile '{self.profile.name}' - "
+                   f"{len(self.feature_modules)} feature modules enabled")
     
-    def run_feature_modules_streaming(self, elevation_patch: np.ndarray, 
+    def _resolve_profile(self, 
+                        profile: Optional[DetectorProfile], 
+                        profile_name: Optional[str],
+                        resolution_m: Optional[float],
+                        structure_radius_m: Optional[float], 
+                        structure_type: Optional[str],
+                        max_workers: Optional[int],
+                        enable_refinement: Optional[bool],
+                        max_refinement_attempts: Optional[int]) -> DetectorProfile:
+        """
+        Resolve detector profile using three initialization modes:
+        1. Use provided profile directly
+        2. Load profile by name  
+        3. Create profile from legacy parameters or use default
+        """
+        # Mode 1: Use existing profile
+        if profile is not None:
+            logger.info(f"Using provided profile: '{profile.name}'")
+            return profile
+        
+        # Mode 2: Load profile by name
+        if profile_name is not None:
+            try:
+                profile = self.profile_manager.load_template(f"{profile_name}.json")
+                logger.info(f"Loaded profile template: '{profile_name}'")
+                return profile
+            except FileNotFoundError:
+                logger.warning(f"Profile template '{profile_name}' not found, creating default")
+        
+        # Mode 3: Create from legacy parameters or use default
+        if any(param is not None for param in [resolution_m, structure_radius_m, structure_type]):
+            # Issue deprecation warning for legacy usage
+            warnings.warn(
+                "Using individual parameters is deprecated. "
+                "Please use DetectorProfile for better configuration management.",
+                DeprecationWarning,
+                stacklevel=3
+            )
+            
+            # Create profile from legacy parameters
+            profile = self._create_profile_from_legacy_params(
+                resolution_m, structure_radius_m, structure_type,
+                max_workers, enable_refinement, max_refinement_attempts
+            )
+            logger.info("Created profile from legacy parameters")
+            return profile
+        
+        # No parameters provided - use default amazon_windmill template
+        try:
+            profile = self._create_default_amazon_windmill_profile()
+            logger.info("Using default Amazon Windmill profile")
+            return profile
+        except Exception as e:
+            logger.error(f"Failed to create default profile: {e}")
+            raise RuntimeError("Could not create valid detector profile") from e
+    
+    def _create_profile_from_legacy_params(self,
+                                          resolution_m: Optional[float],
+                                          structure_radius_m: Optional[float], 
+                                          structure_type: Optional[str],
+                                          max_workers: Optional[int],
+                                          enable_refinement: Optional[bool],
+                                          max_refinement_attempts: Optional[int]) -> DetectorProfile:
+        """Create a DetectorProfile from legacy individual parameters"""
+        from .detector_profile import GeometricParameters, DetectionThresholds, FeatureConfiguration
+        
+        # Start with default profile and override with provided parameters
+        profile = self._create_default_amazon_windmill_profile()
+        profile.name = "Legacy Parameter Profile"
+        profile.description = "Created from individual constructor parameters"
+        
+        # Override geometry parameters
+        if resolution_m is not None:
+            profile.geometry.resolution_m = resolution_m
+        if structure_radius_m is not None:
+            profile.geometry.structure_radius_m = structure_radius_m
+            
+        # Override structure type
+        if structure_type is not None:
+            try:
+                profile.structure_type = StructureType(structure_type)
+            except ValueError:
+                logger.warning(f"Unknown structure type '{structure_type}', using GENERIC")
+                profile.structure_type = StructureType.GENERIC
+        
+        # Override execution parameters
+        if max_workers is not None:
+            profile.max_workers = max_workers
+        if enable_refinement is not None:
+            profile.enable_refinement = enable_refinement
+        if max_refinement_attempts is not None:
+            profile.max_refinement_attempts = max_refinement_attempts
+            
+        return profile
+    
+    def run_feature_modules_streaming(self, elevation_patch: np.ndarray,
                                      callback=None) -> Dict[str, FeatureResult]:
         """
         Run feature modules with streaming aggregation - results processed as they complete
@@ -212,54 +312,29 @@ class G2StructureDetector:
         base_score = 0.5
         logger.info(f"G₂ base score: {base_score:.3f} (feature-driven detection)")
         
-        # Step 2: Run feature modules in parallel
+        # Step 2: Run feature modules in parallel  
         feature_results = self.run_feature_modules_parallel(elevation_patch.elevation_data)
         
-        # Step 3: Aggregate evidence
-        self.aggregator.set_phi0_score(base_score)
+        # Step 3: Set up streaming aggregator and add evidence
+        self.aggregator.set_expected_modules(len(self.feature_modules))
         
         for name, result in feature_results.items():
             if name in self.feature_modules:
                 weight = self.feature_modules[name].weight
                 self.aggregator.add_evidence(name, result, weight)
         
-        aggregation_result = self.aggregator.aggregate()
+        # Use streaming aggregation (compatible with both streaming and batch modes)
+        aggregation_result = self.aggregator.aggregate_streaming()
         logger.info(f"Initial aggregation: score={aggregation_result.final_score:.3f}, confidence={aggregation_result.confidence:.3f}")
         
         # Step 4: Recursive refinement if enabled and needed
         refinement_attempts = 0
         refinement_history = [aggregation_result]
         
-        if self.enable_refinement and self.aggregator.should_refine(aggregation_result):
-            logger.info("Ambiguous result detected, attempting recursive refinement")
-            
-            for attempt in range(self.max_refinement_attempts):
-                refinement_attempts += 1
-                
-                # Get refinement strategy
-                strategy = self.aggregator.suggest_refinement_strategy(aggregation_result)
-                logger.info(f"Refinement attempt {attempt + 1}: {strategy['reasons']}")
-                
-                # Apply refinement strategy (simplified for skeleton)
-                # In a full implementation, this would modify detection parameters
-                # and re-run detection with adjusted settings
-                
-                # For now, we'll simulate refinement by slightly adjusting the aggregation
-                # This is a placeholder for actual refinement logic
-                refined_result = self._simulate_refinement(aggregation_result, strategy)
-                
-                if refined_result:
-                    refinement_history.append(refined_result)
-                    
-                    # Check if refinement improved confidence
-                    if refined_result.confidence > aggregation_result.confidence + 0.1:
-                        aggregation_result = refined_result
-                        logger.info(f"Refinement improved confidence to {refined_result.confidence:.3f}")
-                        break
-                    elif not self.aggregator.should_refine(refined_result):
-                        aggregation_result = refined_result
-                        logger.info("Refinement resolved ambiguity")
-                        break
+        # Note: StreamingDetectionAggregator may not support refinement
+        # This is a placeholder for future enhancement
+        if self.enable_refinement:
+            logger.info("Refinement is enabled but not yet implemented for StreamingDetectionAggregator")
         
         # Step 5: Make final detection decision
         detection_threshold = self.detection_threshold
@@ -505,3 +580,129 @@ class G2StructureDetector:
                     )
         
         return results
+    
+    def _resolve_profile(self, 
+                        profile: Optional[DetectorProfile], 
+                        profile_name: Optional[str],
+                        resolution_m: Optional[float],
+                        structure_radius_m: Optional[float], 
+                        structure_type: Optional[str],
+                        max_workers: Optional[int],
+                        enable_refinement: Optional[bool],
+                        max_refinement_attempts: Optional[int]) -> DetectorProfile:
+        """
+        Resolve detector profile using three initialization modes:
+        1. Use provided profile directly
+        2. Load profile by name  
+        3. Create profile from legacy parameters or use default
+        """
+        # Mode 1: Use existing profile
+        if profile is not None:
+            logger.info(f"Using provided profile: '{profile.name}'")
+            return profile
+        
+        # Mode 2: Load profile by name
+        if profile_name is not None:
+            try:
+                profile = self.profile_manager.load_template(f"{profile_name}.json")
+                logger.info(f"Loaded profile template: '{profile_name}'")
+                return profile
+            except FileNotFoundError:
+                logger.warning(f"Profile template '{profile_name}' not found, creating default")
+        
+        # Mode 3: Create from legacy parameters or use default
+        if any(param is not None for param in [resolution_m, structure_radius_m, structure_type]):
+            # Issue deprecation warning for legacy usage
+            warnings.warn(
+                "Using individual parameters is deprecated. "
+                "Please use DetectorProfile for better configuration management.",
+                DeprecationWarning,
+                stacklevel=3
+            )
+            
+            # Create profile from legacy parameters
+            profile = self._create_profile_from_legacy_params(
+                resolution_m, structure_radius_m, structure_type,
+                max_workers, enable_refinement, max_refinement_attempts
+            )
+            logger.info("Created profile from legacy parameters")
+            return profile
+        
+        # No parameters provided - use default amazon_windmill template
+        try:
+            profile = self._create_default_amazon_windmill_profile()
+            logger.info("Using default Amazon Windmill profile")
+            return profile
+        except Exception as e:
+            logger.error(f"Failed to create default profile: {e}")
+            raise RuntimeError("Could not create valid detector profile") from e
+    
+    def _create_profile_from_legacy_params(self,
+                                          resolution_m: Optional[float],
+                                          structure_radius_m: Optional[float], 
+                                          structure_type: Optional[str],
+                                          max_workers: Optional[int],
+                                          enable_refinement: Optional[bool],
+                                          max_refinement_attempts: Optional[int]) -> DetectorProfile:
+        """Create a DetectorProfile from legacy individual parameters"""
+        from .detector_profile import GeometricParameters, DetectionThresholds, FeatureConfiguration
+        
+        # Start with default profile and override with provided parameters
+        profile = self._create_default_amazon_windmill_profile()
+        profile.name = "Legacy Parameter Profile"
+        profile.description = "Created from individual constructor parameters"
+        
+        # Override geometry parameters
+        if resolution_m is not None:
+            profile.geometry.resolution_m = resolution_m
+        if structure_radius_m is not None:
+            profile.geometry.structure_radius_m = structure_radius_m
+            
+        # Override structure type
+        if structure_type is not None:
+            try:
+                profile.structure_type = StructureType(structure_type)
+            except ValueError:
+                logger.warning(f"Unknown structure type '{structure_type}', using GENERIC")
+                profile.structure_type = StructureType.GENERIC
+        
+        # Override execution parameters
+        if max_workers is not None:
+            profile.max_workers = max_workers
+        if enable_refinement is not None:
+            profile.enable_refinement = enable_refinement
+        if max_refinement_attempts is not None:
+            profile.max_refinement_attempts = max_refinement_attempts
+            
+        return profile
+    
+    def _create_default_amazon_windmill_profile(self) -> DetectorProfile:
+        """Create the default Amazon Windmill detection profile"""
+        from .detector_profile import GeometricParameters, DetectionThresholds, FeatureConfiguration
+        
+        return DetectorProfile(
+            name="Amazon Windmill Default",
+            description="Default profile optimized for windmill detection in Amazonian terrain",
+            structure_type=StructureType.WINDMILL,
+            geometry=GeometricParameters(
+                resolution_m=0.5,
+                structure_radius_m=8.0,
+                patch_size_m=(20.0, 20.0)
+            ),
+            thresholds=DetectionThresholds(
+                detection_threshold=0.5,
+                early_decision_threshold=0.85,
+                min_modules_for_decision=2
+            ),
+            features={
+                "ElevationHistogram": FeatureConfiguration(enabled=True, weight=1.5),
+                "Volume": FeatureConfiguration(enabled=True, weight=1.3),
+                "DropoffSharpness": FeatureConfiguration(enabled=True, weight=1.2),
+                "Compactness": FeatureConfiguration(enabled=True, weight=1.1),
+                "ElevationEntropy": FeatureConfiguration(enabled=True, weight=1.0),
+                "Planarity": FeatureConfiguration(enabled=True, weight=0.9)
+            },
+            max_workers=5,
+            enable_refinement=True,
+            max_refinement_attempts=2
+        )
