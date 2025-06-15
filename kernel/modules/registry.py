@@ -147,6 +147,7 @@ def register_individual_modules():
         from .features.dropoff_module import DropoffSharpnessModule
         from .features.entropy_module import ElevationEntropyModule
         from .features.planarity_module import PlanarityModule
+        from .features.volume_distribution_module import VolumeDistributionModule
         
         # Register individual modules with their default weights
         feature_registry.register("ElevationHistogram", ElevationHistogramModule)
@@ -155,6 +156,7 @@ def register_individual_modules():
         feature_registry.register("DropoffSharpness", DropoffSharpnessModule)
         feature_registry.register("ElevationEntropy", ElevationEntropyModule)
         feature_registry.register("Planarity", PlanarityModule)
+        feature_registry.register("VolumeDistribution", VolumeDistributionModule)
         
         logger.info("Registered individual feature modules")
         

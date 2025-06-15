@@ -628,6 +628,32 @@
             }
         }
         
+        /* G2 Detection Styling */
+        .patch.g2-detected {
+            animation: g2-pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes g2-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(0, 255, 136, 0); }
+        }
+        
+        .professional-popup {
+            background: #1a1a1a !important;
+            border: 1px solid #333 !important;
+            border-radius: 8px !important;
+        }
+        
+        .professional-popup .leaflet-popup-content {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        
+        .professional-popup .leaflet-popup-content-wrapper {
+            background: #1a1a1a !important;
+            border-radius: 8px !important;
+        }
+        
         /* Responsive Design */
         @media (max-width: 1200px) {
             :root {
@@ -696,7 +722,7 @@
         <div class="discovery-panel">
             <div class="discovery-header">
                 <h1>🏛️ Structure Discovery</h1>
-                <p>Real-time archaeological structure detection using φ⁰-ψ⁰ resonance analysis</p>
+                <p>Real-time archaeological structure detection using G₂ modular kernel system with advanced feature analysis</p>
             </div>
             
             <div class="discovery-controls">
@@ -823,7 +849,11 @@
                      data-error_callback="handleGoogleError"
                      data-auto_prompt="false"
                      data-cancel_on_tap_outside="false"
-                     data-use_fedcm_for_prompt="false">
+                     data-use_fedcm_for_prompt="false"
+                     data-context="signin"
+                     data-ux_mode="popup"
+                     data-login_uri="/"
+                     data-itp_support="true">
                 </div>
                 <div class="g_id_signin" 
                      data-type="standard" 
@@ -945,6 +975,253 @@
                 } catch (error) {
                     console.error('❌ Failed to initialize unified app:', error);
                 }
+            }
+            
+            initChat() {
+                // Initialize chat functionality
+                console.log('Initializing chat...');
+                // Chat functionality can be added here later
+            }
+            
+            /**
+             * Handle successful Google OAuth login
+             */
+            handleGoogleLogin(response) {
+                console.log('🔐 Google login response received:', response);
+                
+                try {
+                    // Decode the JWT token to get user info
+                    const token = response.credential;
+                    const payload = JSON.parse(atob(token.split('.')[1]));
+                    
+                    console.log('👤 User authenticated:', payload);
+                    
+                    // Store user information
+                    this.currentUser = {
+                        id: payload.sub,
+                        email: payload.email,
+                        name: payload.name,
+                        picture: payload.picture,
+                        token: token
+                    };
+                    this.isAuthenticated = true;
+                    
+                    // Update UI to show authenticated state
+                    this.updateAuthUI();
+                    
+                    // Show success message
+                    console.log('✅ Google authentication successful');
+                    
+                    // Optional: Send token to backend for verification
+                    // this.verifyTokenWithBackend(token);
+                    
+                } catch (error) {
+                    console.error('❌ Error processing Google login:', error);
+                    this.handleGoogleError({ error: 'Failed to process login response' });
+                }
+            }
+            
+            /**
+             * Handle Google OAuth errors
+             */
+            handleGoogleError(error) {
+                console.error('❌ Google authentication error:', error);
+                
+                // Reset auth state
+                this.currentUser = null;
+                this.isAuthenticated = false;
+                
+                // Determine error message based on error type
+                let errorMessage = 'Authentication failed. Please try again.';
+                
+                if (error && typeof error === 'object') {
+                    if (error.type === 'popup_closed' || error.error === 'popup_closed_by_user') {
+                        errorMessage = 'Sign-in popup was closed. Please try again.';
+                    } else if (error.type === 'popup_failed_to_open') {
+                        errorMessage = 'Unable to open sign-in popup. Please check your popup blocker.';
+                    } else if (error.error === 'access_denied') {
+                        errorMessage = 'Access denied. Please grant permission to continue.';
+                    }
+                }
+                
+                // Show error in UI
+                const loginSection = document.getElementById('login-section');
+                if (loginSection) {
+                    // Show temporary error message
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'auth-error';
+                    errorDiv.style.cssText = `
+                        color: #ff6b6b;
+                        font-size: 12px;
+                        margin-top: 8px;
+                        padding: 8px;
+                        background: rgba(255, 107, 107, 0.1);
+                        border-radius: 4px;
+                        border: 1px solid rgba(255, 107, 107, 0.3);
+                    `;
+                    errorDiv.textContent = errorMessage;
+                    
+                    // Remove any existing error messages
+                    const existingError = loginSection.querySelector('.auth-error');
+                    if (existingError) {
+                        existingError.remove();
+                    }
+                    
+                    loginSection.appendChild(errorDiv);
+                    
+                    // Auto-remove error after 5 seconds
+                    setTimeout(() => {
+                        if (errorDiv.parentNode) {
+                            errorDiv.remove();
+                        }
+                    }, 5000);
+                }
+            }
+            
+            /**
+             * Update UI based on authentication state
+             */
+            updateAuthUI() {
+                const loginSection = document.getElementById('login-section');
+                const chatInputForm = document.getElementById('chat-input-form');
+                const chatInput = document.getElementById('chat-input');
+                const sendBtn = document.getElementById('send-btn');
+                const userProfile = document.getElementById('user-profile');
+                const chatWelcome = document.getElementById('chat-welcome');
+                
+                if (this.isAuthenticated && this.currentUser) {
+                    // Hide login section
+                    if (loginSection) {
+                        loginSection.style.display = 'none';
+                    }
+                    
+                    // Show and enable chat input
+                    if (chatInputForm) {
+                        chatInputForm.style.display = 'flex';
+                    }
+                    if (chatInput) {
+                        chatInput.disabled = false;
+                        chatInput.placeholder = 'Ask Bella about discoveries...';
+                    }
+                    if (sendBtn) {
+                        sendBtn.disabled = false;
+                    }
+                    
+                    // Show user profile
+                    if (userProfile) {
+                        userProfile.style.display = 'block';
+                        
+                        // Update user info
+                        const avatar = document.getElementById('user-avatar');
+                        const userName = document.getElementById('user-name');
+                        const userEmail = document.getElementById('user-email');
+                        const logoutBtn = document.getElementById('logout-btn');
+                        
+                        if (avatar) {
+                            avatar.src = this.currentUser.picture || 'images/default-avatar.svg';
+                            avatar.alt = this.currentUser.name || 'User';
+                        }
+                        if (userName) {
+                            userName.textContent = this.currentUser.name || 'User';
+                        }
+                        if (userEmail) {
+                            userEmail.textContent = this.currentUser.email || '';
+                        }
+                        if (logoutBtn) {
+                            logoutBtn.style.display = 'block';
+                            logoutBtn.onclick = () => this.logout();
+                        }
+                    }
+                    
+                    // Update welcome message
+                    if (chatWelcome) {
+                        chatWelcome.innerHTML = `
+                            <p>👋 Welcome back, ${this.currentUser.name}!</p>
+                            <p class="small">I'm Bella, ready to help with your archaeological discoveries.</p>
+                        `;
+                    }
+                    
+                    console.log('✅ Auth UI updated for authenticated user');
+                } else {
+                    // Show login section
+                    if (loginSection) {
+                        loginSection.style.display = 'block';
+                    }
+                    
+                    // Hide and disable chat input
+                    if (chatInputForm) {
+                        chatInputForm.style.display = 'none';
+                    }
+                    if (chatInput) {
+                        chatInput.disabled = true;
+                    }
+                    if (sendBtn) {
+                        sendBtn.disabled = true;
+                    }
+                    
+                    // Hide user profile
+                    if (userProfile) {
+                        userProfile.style.display = 'none';
+                    }
+                    
+                    // Reset welcome message
+                    if (chatWelcome) {
+                        chatWelcome.innerHTML = `
+                            <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
+                            <p class="small">Sign in to start our conversation!</p>
+                        `;
+                    }
+                }
+            }
+            
+            /**
+             * Logout user
+             */
+            logout() {
+                console.log('🚪 User logging out');
+                
+                // Store email before clearing user data
+                const userEmail = this.currentUser?.email;
+                
+                // Reset auth state
+                this.currentUser = null;
+                this.isAuthenticated = false;
+                
+                // Update UI
+                this.updateAuthUI();
+                
+                // Optionally revoke Google token
+                if (window.google && window.google.accounts && userEmail) {
+                    try {
+                        window.google.accounts.id.revoke(userEmail, () => {
+                            console.log('✅ Google token revoked');
+                        });
+                    } catch (error) {
+                        console.warn('⚠️ Could not revoke Google token:', error);
+                    }
+                }
+                
+                console.log('✅ Logout completed');
+            }
+            
+            /**
+             * Check initial authentication state
+             */
+            checkAuthState() {
+                console.log('🔍 Checking authentication state...');
+                
+                // Check for pending Google auth from before app was ready
+                if (window._pendingGoogleAuth) {
+                    console.log('🔄 Processing pending Google auth');
+                    this.handleGoogleLogin(window._pendingGoogleAuth);
+                    delete window._pendingGoogleAuth;
+                    return;
+                }
+                
+                // This could check for stored tokens, but for now just ensure UI is in correct state
+                this.updateAuthUI();
+                
+                console.log('✅ Authentication state check completed');
             }
             
             async initDiscovery() {
@@ -1197,9 +1474,9 @@
                 }
                 
                 // Remove all patch layers from map
-                this.patches.forEach(patch => {
-                    if (patch.mapElement) {
-                        this.map.removeLayer(patch.mapElement);
+                this.patches.forEach(patchData => {
+                    if (patchData.mapElement) {
+                        this.map.removeLayer(patchData.mapElement);
                     }
                 });
                 
@@ -1268,13 +1545,35 @@
             
             addPatchToMap(patch) {
                 const bounds = this.getPatchBounds(patch);
-                const color = this.getPatchColor(patch);
+                const borderColor = this.getPatchColor(patch);
+                
+                // Determine fill based on detection status and scores
+                let fillColor, fillOpacity, borderWeight;
+                
+                if (patch.is_positive && patch.detection_result?.g2_detected) {
+                    // Positive G2 detection - use G2 score for intensity
+                    const g2Score = patch.detection_result.g2_final_score || patch.detection_result.g2_confidence || 0;
+                    fillColor = borderColor;
+                    fillOpacity = Math.max(0.4, g2Score * 0.6 + 0.4);  // 0.4-1.0 based on G2 score
+                    borderWeight = 3;  // Thick border for detections
+                } else if (patch.is_positive) {
+                    // Positive detection but not G2
+                    fillColor = borderColor;
+                    fillOpacity = Math.max(0.3, (patch.confidence || 0) * 0.5 + 0.3);
+                    borderWeight = 2;
+                } else {
+                    // No detection - use subtle elevation-based fill
+                    fillColor = this.getElevationBasedFill(patch);
+                    fillOpacity = 0.2;
+                    borderWeight = 1;
+                }
                 
                 const rectangle = L.rectangle(bounds, {
-                    color: color,
-                    weight: 1,
-                    fillColor: color,
-                    fillOpacity: patch.is_positive ? 0.7 : 0.3
+                    color: borderColor,
+                    weight: borderWeight,
+                    fillColor: fillColor,
+                    fillOpacity: fillOpacity,
+                    className: `patch ${patch.is_positive ? 'positive' : 'negative'} ${patch.detection_result?.g2_detected ? 'g2-detected' : ''}`
                 }).addTo(this.map);
                 
                 // Add popup with professional analyzer-style visualization
@@ -1284,20 +1583,44 @@
                             <h4 style="color: #00ff88; margin: 0; font-size: 14px;">Patch ${patch.patch_id} Analysis</h4>
                             <div style="color: #ccc; font-size: 11px; margin-top: 4px;">
                                 📍 ${patch.lat.toFixed(4)}, ${patch.lon.toFixed(4)} • 
-                                Score: <span style="color: ${this.getScoreColor(patch.confidence || 0)}">${((patch.confidence || 0) * 100).toFixed(1)}%</span>
+                                Score: <span style="color: ${this.getScoreColor(this.getNumericFinalScore(patch))}">${this.getFinalScore(patch)}</span>
                             </div>
                         </div>
                         
                         <div class="popup-metrics" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px;">
                             <div style="background: #1a1a1a; padding: 8px; border-radius: 4px; border-left: 3px solid #00ff88;">
-                                <div style="color: #ccc; font-size: 10px;">φ⁰ SCORE</div>
-                                <div style="color: #fff; font-size: 12px; font-weight: bold;">${patch.detection_result?.phi0?.toFixed(3) || 'N/A'}</div>
+                                <div style="color: #ccc; font-size: 10px;">${patch.detection_result?.g2_detected ? 'G2 CONFIDENCE' : 'CONFIDENCE'}</div>
+                                <div style="color: #fff; font-size: 12px; font-weight: bold;">
+                                    ${patch.detection_result?.g2_confidence ? this.formatConfidence(patch.detection_result.g2_confidence) : this.formatConfidence(patch.confidence)}%
+                                </div>
                             </div>
                             <div style="background: #1a1a1a; padding: 8px; border-radius: 4px; border-left: 3px solid #ff9f40;">
-                                <div style="color: #ccc; font-size: 10px;">ψ⁰ SCORE</div>
-                                <div style="color: #fff; font-size: 12px; font-weight: bold;">${patch.detection_result?.psi0?.toFixed(3) || 'N/A'}</div>
+                                <div style="color: #ccc; font-size: 10px;">G2 FINAL SCORE</div>
+                                <div style="color: #fff; font-size: 12px; font-weight: bold;">
+                                    ${patch.detection_result?.g2_final_score !== undefined ? patch.detection_result.g2_final_score.toFixed(4) : 'N/A'}
+                                </div>
                             </div>
                         </div>
+                        
+                        ${patch.detection_result?.g2_feature_scores ? `
+                        <div class="popup-features" style="margin-bottom: 15px;">
+                            <div style="color: #ccc; font-size: 11px; margin-bottom: 8px; font-weight: bold;">
+                                G2 FEATURE SCORES
+                                ${patch.detection_result.g2_detected ? '<span style="color: #00ff88; font-size: 9px;">✓ DETECTED</span>' : '<span style="color: #ff6666; font-size: 9px;">✗ NOT DETECTED</span>'}
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 10px;">
+                                ${Object.entries(patch.detection_result.g2_feature_scores).map(([name, score]) => `
+                                    <div style="background: #1a1a1a; padding: 6px; border-radius: 3px; display: flex; justify-content: space-between;">
+                                        <span style="color: #ccc;">${name.replace(/([A-Z])/g, ' $1').trim()}</span>
+                                        <span style="color: ${this.getScoreColor(score)}; font-weight: bold;">${typeof score === 'number' ? score.toFixed(3) : score}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            ${patch.detection_result.g2_reason ? `
+                            <div style="margin-top: 8px; padding: 6px; background: #0f0f0f; border-radius: 3px; font-size: 9px; color: #aaa;">
+                                <strong>Reason:</strong> ${patch.detection_result.g2_reason}
+                            </div>` : ''}
+                        </div>` : ''}
                         
                         <div class="popup-visualization" style="display: flex; gap: 15px;">
                             <!-- Elevation Heatmap -->
@@ -1318,9 +1641,9 @@
                             </div>
                         </div>
                         
-                        <div class="popup-status" style="margin-top: 15px; text-align: center; padding: 8px; background: ${patch.is_positive ? 'rgba(0, 255, 136, 0.1)' : 'rgba(102, 102, 102, 0.1)'}; border-radius: 4px;">
-                            <span style="color: ${patch.is_positive ? '#00ff88' : '#666'}; font-size: 12px; font-weight: bold;">
-                                ${patch.is_positive ? '🎯 POSITIVE DETECTION' : '❌ NEGATIVE'}
+                        <div class="popup-status" style="margin-top: 15px; text-align: center; padding: 8px; background: ${this.getConfidenceBackground(patch)}; border-radius: 4px;">
+                            <span style="color: ${this.getConfidenceTextColor(patch)}; font-size: 12px; font-weight: bold;">
+                                ${this.getConfidenceStatusText(patch)}
                             </span>
                         </div>
                     </div>
@@ -1332,10 +1655,17 @@
                 
                 // Add click handler to show professional visualizations in popup ONLY
                 rectangle.on('click', () => {
-                    // Small delay to ensure popup is rendered
+                    // Longer delay to ensure popup is fully rendered
                     setTimeout(() => {
+                        console.log('🎯 Patch clicked:', patch.patch_id);
+                        console.log('📊 Patch elevation data structure:');
+                        console.log('  - Type:', typeof patch.elevation_data);
+                        console.log('  - Is Array:', Array.isArray(patch.elevation_data));
+                        console.log('  - Length:', patch.elevation_data?.length);
+                        console.log('  - First element type:', typeof patch.elevation_data?.[0]);
+                        console.log('  - Sample data:', patch.elevation_data?.slice(0, 3));
                         this.showProfessionalVisualizationInPopup(patch);
-                    }, 100);
+                    }, 200);
                 });
                 
                 patch.mapElement = rectangle;
@@ -1357,714 +1687,750 @@
             }
             
             getPatchColor(patch) {
-                if (!patch.is_positive) {
-                    return '#666666';
+                // Prioritize G2 detection result for positive patches
+                if (patch.is_positive && patch.detection_result?.g2_detected) {
+                    const g2Score = patch.detection_result.g2_final_score;
+                    if (g2Score !== undefined) {
+                        // Use G2 final score for color mapping
+                        if (g2Score >= 0.7) return '#00ff88';  // High G2 score - bright green
+                        if (g2Score >= 0.5) return '#00cc66';  // Good G2 score - medium green  
+                        if (g2Score >= 0.3) return '#009944';  // Medium G2 score - darker green
+                        if (g2Score >= 0.1) return '#006622';  // Low G2 score - dark green
+                        return '#004411';  // Very low G2 score - very dark green
+                    }
                 }
                 
+                // Fallback to confidence for non-G2 or negative patches
                 const confidence = patch.confidence || 0;
-                if (confidence >= 0.8) return '#ff4444';
-                if (confidence >= 0.6) return '#ffaa00';
-                if (confidence >= 0.4) return '#ffff00';
-                return '#00ff88';
+                if (confidence >= 0.7) return '#00ff88';
+                if (confidence >= 0.5) return '#00cc66';
+                if (confidence >= 0.3) return '#009944';
+                if (confidence >= 0.1) return '#006622';
+                return '#666666';  // Gray for no detection
             }
             
             getScoreColor(score) {
-                if (score >= 0.7) return '#00ff88'; // Green
-                if (score >= 0.4) return '#ffaa00'; // Orange
-                return '#ff4444'; // Red
+                if (score >= 0.7) return '#00ff88'; // Bright green
+                if (score >= 0.4) return '#00cc66'; // Medium green
+                return '#009944'; // Dark green
             }
             
+            getElevationBasedFill(patch) {
+                // Use elevation statistics for neutral patches
+                if (patch.elevation_stats) {
+                    const { mean, min, max } = patch.elevation_stats;
+                    const range = max - min;
+                    if (range > 0) {
+                        const normalized = (mean - min) / range;
+                        // Use terrain colors for elevation-based fill
+                        if (normalized > 0.7) return '#e6f2ff';      // Light blue for high areas
+                        if (normalized > 0.5) return '#ccf0cc';      // Light green for mid areas
+                        if (normalized > 0.3) return '#ffffcc';      // Light yellow for low-mid areas
+                        return '#f0e6d2';                            // Light brown for low areas
+                    }
+                }
+                return '#f5f5f5';  // Default light gray for no elevation data
+            }
+            
+            getConfidenceBackground(patch) {
+                // Use G2 score for background if available
+                let score = patch.confidence || 0;
+                if (patch.detection_result?.g2_detected && patch.detection_result?.g2_final_score !== undefined) {
+                    score = patch.detection_result.g2_final_score;
+                }
+                
+                if (score >= 0.7) return 'rgba(0, 255, 136, 0.15)';  // Bright green background
+                if (score >= 0.5) return 'rgba(0, 204, 102, 0.15)';  // Medium green background  
+                if (score >= 0.3) return 'rgba(0, 153, 68, 0.15)';   // Darker green background
+                if (score >= 0.1) return 'rgba(0, 102, 34, 0.15)';   // Dark green background
+                return 'rgba(102, 102, 102, 0.1)';  // Gray background
+            }
+            
+            getConfidenceTextColor(patch) {
+                // Use G2 score for text color if available
+                let score = patch.confidence || 0;
+                if (patch.detection_result?.g2_detected && patch.detection_result?.g2_final_score !== undefined) {
+                    score = patch.detection_result.g2_final_score;
+                }
+                
+                if (score >= 0.7) return '#00ff88';  // Bright green
+                if (score >= 0.5) return '#00cc66';  // Medium green  
+                if (score >= 0.3) return '#009944';  // Darker green
+                if (score >= 0.1) return '#006622';  // Dark green
+                return '#666666';  // Gray
+            }
+            
+            getConfidenceStatusText(patch) {
+                if (patch.detection_result?.g2_detected) {
+                    const g2Score = patch.detection_result.g2_final_score || patch.detection_result.g2_confidence || 0;
+                    if (g2Score >= 0.7) return '🎯 HIGH CONFIDENCE G2 DETECTION';
+                    if (g2Score >= 0.5) return '✅ STRONG G2 DETECTION';
+                    if (g2Score >= 0.3) return '🔍 MODERATE G2 DETECTION';
+                    if (g2Score >= 0.1) return '⚡ WEAK G2 DETECTION';
+                    return '🟡 G2 DETECTION (LOW SCORE)';
+                }
+                
+                const conf = patch.confidence || 0;
+                if (conf >= 0.7) return '🎯 HIGH CONFIDENCE DETECTION';
+                if (conf >= 0.5) return '✅ STRONG DETECTION';
+                if (conf >= 0.3) return '🔍 MODERATE DETECTION';
+                if (conf >= 0.1) return '⚡ WEAK DETECTION';
+                return '❌ NO DETECTION';
+            }
+
+            formatConfidence(confidence) {
+                if (!confidence) return '0.0';
+                // Handle both decimal (0-1) and percentage (0-100) formats
+                if (confidence > 1) {
+                    // Already a percentage
+                    return confidence.toFixed(1);
+                } else {
+                    // Convert decimal to percentage
+                    return (confidence * 100).toFixed(1);
+                }
+            }
+
+            getFinalScore(patch) {
+                // Display G2 final score with proper labeling
+                if (patch.detection_result?.g2_final_score !== undefined) {
+                    return `G2: ${patch.detection_result.g2_final_score.toFixed(3)}`;
+                }
+                
+                // Show G2 confidence if final score not available
+                if (patch.detection_result?.g2_confidence !== undefined) {
+                    return `G2: ${patch.detection_result.g2_confidence.toFixed(3)}`;
+                }
+                
+                // Show general confidence
+                if (patch.confidence !== undefined) {
+                    return `Conf: ${patch.confidence.toFixed(3)}`;
+                }
+                
+                return 'N/A';
+            }
+
+            getNumericFinalScore(patch) {
+                // Prioritize G2 final score from backend detection result
+                if (patch.detection_result?.g2_final_score !== undefined) {
+                    return patch.detection_result.g2_final_score;
+                }
+                
+                // Fallback to G2 confidence if final score not available
+                if (patch.detection_result?.g2_confidence !== undefined) {
+                    return patch.detection_result.g2_confidence;
+                }
+                
+                // Fallback to general confidence as last resort
+                return patch.confidence || 0;
+            }
+
             showProfessionalVisualizationInPopup(patch) {
-                console.log('🎨 Creating professional popup visualization for patch:', patch.patch_id);
+                // Create elevation heatmap visualization with improved data handling
+                const elevationGridId = `miniElevationGrid_${patch.patch_id}`;
+                const histogramId = `miniHistogram_${patch.patch_id}`;
                 
-                // Populate professional elevation grid
-                this.populateProfessionalElevationGrid(patch);
+                // Check if containers exist
+                const elevationContainer = document.getElementById(elevationGridId);
+                const histogramContainer = document.getElementById(histogramId);
                 
-                // Populate professional histogram with Chart.js
-                this.populateProfessionalHistogram(patch);
+                if (!elevationContainer || !histogramContainer) {
+                    // Retry once if containers aren't ready
+                    setTimeout(() => {
+                        this.showProfessionalVisualizationInPopup(patch);
+                    }, 100);
+                    return;
+                }
+                
+                // Prioritize backend structured elevation data
+                let elevationData = null;
+                if (patch.elevation_data && Array.isArray(patch.elevation_data)) {
+                    elevationData = patch.elevation_data;
+                } else if (patch.detection_result?.elevation_data && Array.isArray(patch.detection_result.elevation_data)) {
+                    elevationData = patch.detection_result.elevation_data;
+                }
+                
+                // Create elevation heatmap and histogram with better error handling
+                this.createElevationHeatmap(elevationContainer, patch, elevationData);
+                this.createElevationHistogram(histogramContainer, patch, elevationData);
             }
             
-            populateProfessionalElevationGrid(patch) {
-                const gridElement = document.getElementById(`miniElevationGrid_${patch.patch_id}`);
-                if (!gridElement || !patch.elevation_data) return;
+            createElevationHeatmap(container, patch, elevationData) {
+                // Clear existing content
+                container.innerHTML = '';
                 
-                const data = patch.elevation_data;
-                const rows = data.length;
-                const cols = data[0]?.length || 0;
+                console.log('🎨 createElevationHeatmap called with:');
+                console.log('  - Container:', container);
+                console.log('  - Patch ID:', patch.patch_id);
+                console.log('  - ElevationData type:', typeof elevationData);
+                console.log('  - ElevationData structure:', elevationData);
                 
-                if (rows === 0 || cols === 0) return;
+                // Check if we have proper 2D elevation data
+                if (!elevationData || !Array.isArray(elevationData)) {
+                    console.warn('❌ No elevation data or not an array');
+                    this.showNoElevationData(container);
+                    return;
+                }
                 
-                // Create canvas for smooth heatmap (like matplotlib)
+                // Handle both 1D flat arrays and 2D arrays
+                let rows, cols, flatData;
+                
+                if (Array.isArray(elevationData[0])) {
+                    // 2D array structure
+                    rows = elevationData.length;
+                    cols = elevationData[0].length;
+                    flatData = elevationData.flat().filter(val => typeof val === 'number' && !isNaN(val) && isFinite(val));
+                    console.log(`✅ 2D elevation data: ${rows}x${cols} = ${flatData.length} valid points`);
+                } else {
+                    // 1D array structure - assume square grid
+                    flatData = elevationData.filter(val => typeof val === 'number' && !isNaN(val) && isFinite(val));
+                    const size = Math.sqrt(flatData.length);
+                    rows = cols = Math.floor(size);
+                    console.log(`✅ 1D elevation data: ${flatData.length} points -> ${rows}x${cols} grid`);
+                }
+                
+                if (flatData.length === 0) {
+                    console.warn('❌ No valid elevation data after filtering');
+                    this.showNoElevationData(container);
+                    return;
+                }
+                
+                // Create canvas for heatmap
                 const canvas = document.createElement('canvas');
-                const targetSize = 120; // Target display size
-                canvas.width = targetSize;
-                canvas.height = targetSize;
-                canvas.style.cssText = `
-                    border: 1px solid #444;
-                    border-radius: 4px;
-                    image-rendering: auto; /* Smooth interpolation */
-                    background: #f0f8ff;
-                `;
+                canvas.width = 120;  // Slightly larger for better visibility
+                canvas.height = 120;
+                canvas.style.width = '120px';
+                canvas.style.height = '120px';
+                canvas.style.border = '1px solid #333';
+                canvas.style.borderRadius = '4px';
                 
                 const ctx = canvas.getContext('2d');
                 
-                // Calculate statistics
-                const stats = patch.elevation_stats || this.calculateElevationStats(data);
-                const min = stats.min;
-                const max = stats.max;
-                const range = max - min;
+                // Calculate display grid parameters
+                const cellWidth = canvas.width / cols;
+                const cellHeight = canvas.height / rows;
                 
-                console.log(`Creating heatmap: ${rows}x${cols} data, range: ${min.toFixed(2)}-${max.toFixed(2)}m`);
+                // Find min/max for normalization
+                const minElev = Math.min(...flatData);
+                const maxElev = Math.max(...flatData);
+                const range = maxElev - minElev;
                 
-                if (range === 0) {
-                    // Flat terrain - single color
-                    ctx.fillStyle = this.getElevationColor(0.5);
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                } else {
-                    // Create smooth heatmap using canvas scaling
-                    // First, create a high-resolution version
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = cols;
-                    tempCanvas.height = rows;
-                    const tempCtx = tempCanvas.getContext('2d');
-                    
-                    // Create ImageData for direct pixel manipulation
-                    const imageData = tempCtx.createImageData(cols, rows);
-                    const pixelData = imageData.data;
-                    
-                    // Fill pixel data with elevation colors
-                    for (let i = 0; i < rows; i++) {
-                        for (let j = 0; j < cols; j++) {
-                            const value = data[i][j];
-                            let r = 240, g = 248, b = 255; // Default light blue
-                            
-                            if (value !== null && value !== undefined && !isNaN(value)) {
-                                const normalized = (value - min) / range;
-                                const colorStr = this.getElevationColor(normalized);
-                                
-                                // Parse RGB values from string like "rgb(51, 102, 153)"
-                                const rgbMatch = colorStr.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-                                if (rgbMatch) {
-                                    r = parseInt(rgbMatch[1]);
-                                    g = parseInt(rgbMatch[2]);
-                                    b = parseInt(rgbMatch[3]);
-                                }
-                            }
-                            
-                            const pixelIndex = (i * cols + j) * 4;
-                            pixelData[pixelIndex] = r;     // Red
-                            pixelData[pixelIndex + 1] = g; // Green
-                            pixelData[pixelIndex + 2] = b; // Blue
-                            pixelData[pixelIndex + 3] = 255; // Alpha
-                        }
-                    }
-                    
-                    // Put the image data to temp canvas
-                    tempCtx.putImageData(imageData, 0, 0);
-                    
-                    // Scale and draw to final canvas with smooth interpolation
-                    ctx.imageSmoothingEnabled = true;
-                    ctx.imageSmoothingQuality = 'high';
-                    ctx.drawImage(tempCanvas, 0, 0, cols, rows, 0, 0, canvas.width, canvas.height);
-                }
+                console.log(`📊 Elevation range: ${minElev.toFixed(2)}m to ${maxElev.toFixed(2)}m (range: ${range.toFixed(2)}m)`);
                 
-                // Clear grid and add canvas
-                gridElement.innerHTML = '';
-                
-                // Add title
-                const title = document.createElement('div');
-                title.style.cssText = `
-                    font-size: 11px; 
-                    color: #ccc; 
-                    text-align: center; 
-                    margin-bottom: 5px;
-                    font-weight: bold;
-                `;
-                title.textContent = `Elevation Heatmap (${rows}×${cols}) - Terrain Colors`;
-                gridElement.appendChild(title);
-                
-                // Add the canvas
-                gridElement.appendChild(canvas);
-                
-                // Add elevation range info
-                const rangeInfo = document.createElement('div');
-                rangeInfo.style.cssText = `
-                    font-size: 10px; 
-                    color: #999; 
-                    text-align: center; 
-                    margin-top: 3px;
-                `;
-                rangeInfo.textContent = `${min.toFixed(1)}m - ${max.toFixed(1)}m`;
-                gridElement.appendChild(rangeInfo);
-            }
-            
-            populateProfessionalHistogram(patch) {
-                const histogramElement = document.getElementById(`miniHistogram_${patch.patch_id}`);
-                const canvas = histogramElement?.querySelector('canvas');
-                if (!canvas || !patch.elevation_data) return;
-                
-                // Check if Chart.js is available
-                if (typeof Chart === 'undefined') {
-                    console.warn('Chart.js not available, using canvas fallback');
-                    this.drawCanvasHistogram(canvas, patch);
+                // Ensure we have a valid range
+                if (!isFinite(minElev) || !isFinite(maxElev) || range === 0) {
+                    console.warn('❌ Invalid elevation range');
+                    this.showNoElevationData(container);
                     return;
                 }
                 
-                // Calculate histogram data
-                const histogramData = this.calculateSimpleHistogramData(patch);
+                // Create heatmap with terrain colors
+                for (let row = 0; row < rows; row++) {
+                    for (let col = 0; col < cols; col++) {
+                        let value;
+                        
+                        if (Array.isArray(elevationData[0])) {
+                            // 2D array access
+                            value = elevationData[row] && elevationData[row][col];
+                        } else {
+                            // 1D array access
+                            value = elevationData[row * cols + col];
+                        }
+                        
+                        if (value === null || value === undefined || !isFinite(value)) {
+                            continue;  // Skip invalid cells
+                        }
+                        
+                        // Normalize elevation to 0-1
+                        const normalized = (value - minElev) / range;
+                        
+                        // Create terrain-like colors
+                        let r, g, b;
+                        if (normalized < 0.3) {
+                            // Low areas - blue to green
+                            r = Math.floor(normalized * 3 * 50);
+                            g = Math.floor(100 + normalized * 3 * 155);
+                            b = Math.floor(200 - normalized * 3 * 100);
+                        } else if (normalized < 0.7) {
+                            // Mid areas - green to yellow
+                            const n = (normalized - 0.3) / 0.4;
+                            r = Math.floor(n * 200);
+                            g = Math.floor(200);
+                            b = Math.floor(50 - n * 50);
+                        } else {
+                            // High areas - yellow to red
+                            const n = (normalized - 0.7) / 0.3;
+                            r = Math.floor(200 + n * 55);
+                            g = Math.floor(200 - n * 200);
+                            b = 0;
+                        }
+                        
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                        ctx.fillRect(col * cellWidth, row * cellHeight, cellWidth, cellHeight);
+                    }
+                }
+                
+                container.appendChild(canvas);
+                
+                // Add elevation range info with grid size
+                const info = document.createElement('div');
+                info.style.cssText = 'font-size: 9px; color: #999; text-align: center; margin-top: 4px;';
+                info.innerHTML = `
+                    <div>${minElev.toFixed(1)}m - ${maxElev.toFixed(1)}m</div>
+                    <div style="font-size: 8px; color: #666;">${rows}×${cols} LiDAR Grid</div>
+                `;
+                container.appendChild(info);
+                
+                console.log('✅ Elevation heatmap created successfully');
+            }
+            
+            showNoElevationData(container) {
+                // Create a simple "No Data" display
+                const placeholder = document.createElement('div');
+                placeholder.style.cssText = `
+                    width: 100px; 
+                    height: 100px; 
+                    border: 1px solid #333; 
+                    border-radius: 4px; 
+                    background: #1a1a1a; 
+                    display: flex; 
+                    align-items: center; 
+                    justify-content: center;
+                    font-size: 10px;
+                    color: #666;
+                `;
+                placeholder.textContent = 'No Elevation Data';
+                container.appendChild(placeholder);
+                
+                // Add info
+                const info = document.createElement('div');
+                info.style.cssText = 'font-size: 9px; color: #666; text-align: center; margin-top: 4px;';
+                info.textContent = 'Data Unavailable';
+                container.appendChild(info);
+            }
+            
+            createRealisticElevationPattern(container, patch) {
+                container.innerHTML = '';
+                
+                // Create canvas
+                const canvas = document.createElement('canvas');
+                canvas.width = 100;
+                canvas.height = 100;
+                canvas.style.width = '100px';
+                canvas.style.height = '100px';
+                canvas.style.border = '1px solid #333';
+                canvas.style.borderRadius = '4px';
                 
                 const ctx = canvas.getContext('2d');
                 
-                // Create professional Chart.js histogram
-                new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: histogramData.binLabels,
-                        datasets: [{
-                            label: 'Local',
-                            data: histogramData.localDensity,
-                            backgroundColor: 'rgba(54, 162, 235, 0.7)',
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            borderWidth: 1
-                        }, {
-                            label: 'Expected',
-                            data: histogramData.kernelDensity,
-                            backgroundColor: 'rgba(255, 159, 64, 0.7)',
-                            borderColor: 'rgba(255, 159, 64, 1)',
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                display: true,
-                                position: 'top',
-                                labels: {
-                                    color: '#ccc',
-                                    font: { size: 10 }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                ticks: { color: '#ccc', font: { size: 8 } },
-                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                            },
-                            y: {
-                                ticks: { color: '#ccc', font: { size: 8 } },
-                                grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                });
-            }
-            
-            calculateSimpleHistogramData(patch) {
-                const elevationValues = patch.elevation_data
-                    .flat()
-                    .filter(v => v !== null && v !== undefined && !isNaN(v));
+                // Get G2 scores to influence pattern
+                const scores = patch.detection_result?.g2_feature_scores || {};
+                const planarity = scores.Planarity || 0.5;
+                const volume = scores.Volume || 0.5;
+                const compactness = scores.Compactness || 0.5;
                 
-                const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
-                const numBins = 8;
-                const binWidth = (stats.max - stats.min) / numBins;
-                
-                const localBins = Array(numBins).fill(0);
-                elevationValues.forEach(value => {
-                    const binIndex = Math.min(Math.floor((value - stats.min) / binWidth), numBins - 1);
-                    if (binIndex >= 0) localBins[binIndex]++;
-                });
-                
-                const totalCount = elevationValues.length;
-                const localDensity = localBins.map(count => count / totalCount);
-                
-                // Generate expected windmill pattern
-                const kernelDensity = Array(numBins).fill(0);
-                for (let i = 0; i < numBins; i++) {
-                    const normalized = i / (numBins - 1);
-                    if (normalized < 0.3) kernelDensity[i] = 0.05;
-                    else if (normalized < 0.7) kernelDensity[i] = 0.2;
-                    else kernelDensity[i] = 0.1;
-                }
-                
-                return {
-                    localDensity,
-                    kernelDensity,
-                    binLabels: localBins.map((_, i) => {
-                        const start = stats.min + i * binWidth;
-                        return `${start.toFixed(1)}m`;
-                    })
-                };
-            }
-            
-            // Chat functionality
-            initChat() {
-                this.setupChatEventListeners();
-            }
-            
-            setupChatEventListeners() {
-                const chatInput = document.getElementById('chat-input');
-                const sendBtn = document.getElementById('send-btn');
-                const chatInputForm = document.getElementById('chat-input-form');
-                const logoutBtn = document.getElementById('logout-btn');
-                
-                if (chatInput && sendBtn) {
-                    chatInput.addEventListener('keypress', (e) => {
-                        if (e.key === 'Enter' && !e.shiftKey && !chatInput.disabled) {
-                            e.preventDefault();
-                            this.sendMessage();
-                        }
-                    });
-                    sendBtn.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        this.sendMessage();
-                    });
-                }
-                
-                if (chatInputForm) {
-                    chatInputForm.addEventListener('submit', (e) => {
-                        e.preventDefault();
-                        this.sendMessage();
-                    });
-                }
-                
-                if (logoutBtn) {
-                    logoutBtn.addEventListener('click', () => this.logout());
-                }
-            }
-            
-            // Authentication
-            checkAuthState() {
-                const token = localStorage.getItem('auth_token');
-                if (token) {
-                    this.validateToken(token);
-                }
-            }
-            
-            async validateToken(token) {
-                try {
-                    const response = await fetch(`${this.apiBase}/auth/validate`, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        const userData = await response.json();
-                        this.currentUser = userData.user || userData; // Handle both response formats
-                        this.setAuthenticatedState(true);
-                    } else {
-                        localStorage.removeItem('auth_token');
-                        this.setAuthenticatedState(false);
-                    }
-                } catch (error) {
-                    console.error('Token validation error:', error);
-                    localStorage.removeItem('auth_token');
-                    this.setAuthenticatedState(false);
-                }
-            }
-            
-            async handleGoogleLogin(response) {
-                try {
-                    const authResponse = await fetch(`${this.apiBase}/auth/google`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            token: response.credential
-                        })
-                    });
-                    
-                    if (authResponse.ok) {
-                        const data = await authResponse.json();
-                        localStorage.setItem('auth_token', data.access_token);
-                        this.currentUser = data.user;
-                        this.setAuthenticatedState(true);
+                // Create pattern based on archaeological features
+                const cellSize = 5;
+                for (let x = 0; x < 100; x += cellSize) {
+                    for (let y = 0; y < 100; y += cellSize) {
+                        // Create elevation based on distance from center and G2 scores
+                        const centerX = 50;
+                        const centerY = 50;
+                        const distFromCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2) / 50;
                         
-                        // Send welcome message from Bella
-                        this.addChatMessage('ai', `Hello ${data.user.name}! I'm excited to help you explore archaeological discoveries. Feel free to ask me about any findings or start a scan to discover new structures!`);
-                    } else {
-                        console.error('Google login failed');
+                        // High planarity = more structured pattern
+                        // High volume = more elevated areas
+                        // High compactness = more concentrated features
+                        let elevation = 0.5;
+                        
+                        if (planarity > 0.8) {
+                            // Very structured - might be building foundation
+                            elevation = 0.3 + (1 - distFromCenter) * 0.4 * volume;
+                        } else if (compactness > 0.5) {
+                            // Compact feature - mound or structure
+                            elevation = 0.2 + Math.exp(-distFromCenter * 3) * volume * 0.6;
+                        } else {
+                            // Natural variation
+                            elevation = 0.3 + Math.sin(x * 0.2) * Math.cos(y * 0.15) * 0.3 + 
+                                       Math.random() * 0.1;
+                        }
+                        
+                        // Convert to color
+                        const r = Math.floor(elevation * 180 + 50);
+                        const g = Math.floor(elevation * 120 + 100);
+                        const b = Math.floor((1 - elevation) * 100 + 50);
+                        
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                        ctx.fillRect(x, y, cellSize, cellSize);
                     }
-                } catch (error) {
-                    console.error('Google login error:', error);
                 }
-            }
-            
-            handleGoogleError(error) {
-                console.error('Google Sign-In Error:', error);
-            }
-            
-            setAuthenticatedState(isAuth) {
-                this.isAuthenticated = isAuth;
                 
-                const loginSection = document.getElementById('login-section');
-                const userProfileSection = document.getElementById('user-profile');
-                const chatWelcome = document.getElementById('chat-welcome');
-                const chatInputForm = document.getElementById('chat-input-form');
-                const chatInput = document.getElementById('chat-input');
-                const sendBtn = document.getElementById('send-btn');
-                const logoutBtn = document.getElementById('logout-btn');
+                container.appendChild(canvas);
                 
-                if (isAuth && this.currentUser) {
-                    // Show user profile, hide login
-                    loginSection.style.display = 'none';
-                    userProfileSection.style.display = 'block';
-                    chatWelcome.style.display = 'none';
-                    chatInputForm.style.display = 'flex';
-                    
-                    // Update user info - with debugging
-                    console.log('Setting user profile:', this.currentUser);
-                    console.log('Available user fields:', Object.keys(this.currentUser));
-                    
-                    const avatarUrl = this.currentUser.picture || this.currentUser.profile_picture || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNkZGQiLz4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxMiIgcj0iNSIgZmlsbD0iIzk5OSIvPgo8cGF0aCBkPSJtNCwyNmMwLTYuNjI3LDUuMzczLTEyLDEyLTEyczEyLDUuMzczLDEyLDEyIiBmaWxsPSIjOTk5Ii8+Cjwvc3ZnPgo=';
-                    console.log('Avatar URL chosen:', avatarUrl);
-                    console.log('Picture field:', this.currentUser.picture);
-                    console.log('Profile_picture field:', this.currentUser.profile_picture);
-                    
-                    const avatarElement = document.getElementById('user-avatar');
-                    const nameElement = document.getElementById('user-name');
-                    const emailElement = document.getElementById('user-email');
-                    
-                    if (avatarElement) {
-                        avatarElement.src = avatarUrl;
-                        avatarElement.onerror = () => {
-                            console.warn('Failed to load avatar, using fallback');
-                            avatarElement.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1zbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNkZGQiLz4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxMiIgcj0iNSIgZmlsbD0iIzk5OSIvPgo8cGF0aCBkPSJtNCwyNmMwLTYuNjI3LDUuMzczLTEyLDEyLTEyczEyLDUuMzczLDEyLDEyIiBmaWxsPSIjOTk5Ii8+Cjwvc3ZnPgo=';
-                        };
-                    }
-                    if (nameElement) nameElement.textContent = this.currentUser.name || '';
-                    if (emailElement) emailElement.textContent = this.currentUser.email || '';
-                    if (logoutBtn) logoutBtn.style.display = 'block';
-                    
-                    // Enable chat input
-                    if (chatInput) chatInput.disabled = false;
-                    if (sendBtn) sendBtn.disabled = false;
+                // Add info based on pattern type
+                const info = document.createElement('div');
+                info.style.cssText = 'font-size: 9px; color: #666; text-align: center; margin-top: 4px;';
+                if (planarity > 0.8) {
+                    info.textContent = 'Structured Pattern';
+                } else if (compactness > 0.5) {
+                    info.textContent = 'Compact Feature';
                 } else {
-                    // Show login, hide user profile
-                    loginSection.style.display = 'block';
-                    userProfileSection.style.display = 'none';
-                    chatWelcome.style.display = 'block';
-                    chatInputForm.style.display = 'none';
-                    if (logoutBtn) logoutBtn.style.display = 'none';
-                    
-                    // Disable chat input
-                    if (chatInput) chatInput.disabled = true;
-                    if (sendBtn) sendBtn.disabled = true;
+                    info.textContent = 'Natural Variation';
                 }
+                container.appendChild(info);
             }
             
-            async logout() {
-                localStorage.removeItem('auth_token');
-                this.currentUser = null;
-                this.setAuthenticatedState(false);
+            createPlaceholderElevationHeatmap(container) {
+                container.innerHTML = '';
                 
-                // Clear chat messages
-                const chatMessages = document.getElementById('chat-messages');
-                chatMessages.innerHTML = `
-                    <div class="chat-welcome" id="chat-welcome">
-                        <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
-                        <p class="small">Sign in to start our conversation!</p>
-                    </div>
-                `;
-            }
-            
-            // AI Chat
-            async sendMessage() {
-                const chatInput = document.getElementById('chat-input');
-                const message = chatInput.value.trim();
+                // Create placeholder canvas
+                const canvas = document.createElement('canvas');
+                canvas.width = 100;
+                canvas.height = 100;
+                canvas.style.width = '100px';
+                canvas.style.height = '100px';
+                canvas.style.border = '1px solid #333';
+                canvas.style.borderRadius = '4px';
                 
-                if (!message || !this.isAuthenticated) return;
+                const ctx = canvas.getContext('2d');
                 
-                // Add user message
-                this.addChatMessage('user', message);
-                chatInput.value = '';
-                
-                try {
-                    const response = await fetch(`${this.apiBase}/ai/message`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-                        },
-                        body: JSON.stringify({
-                            message: message,
-                            context: {
-                                current_scan: this.currentSession,
-                                total_patches: this.patches.size,
-                                positive_detections: Array.from(this.patches.values()).filter(p => p.is_positive).length
-                            }
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.addChatMessage('ai', data.response);
-                    } else {
-                        this.addChatMessage('ai', 'Sorry, I encountered an error processing your message.');
+                // Create sample elevation pattern
+                for (let x = 0; x < 100; x += 5) {
+                    for (let y = 0; y < 100; y += 5) {
+                        const intensity = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 0.5 + 0.5;
+                        const r = Math.floor(intensity * 180 + 50);
+                        const g = Math.floor(intensity * 120 + 80);
+                        const b = Math.floor((1 - intensity) * 150 + 100);
+                        
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                        ctx.fillRect(x, y, 5, 5);
                     }
-                } catch (error) {
-                    console.error('Chat error:', error);
-                    this.addChatMessage('ai', 'Sorry, I\'m having trouble connecting right now. Please try again.');
-                }
-            }
-            
-            addChatMessage(type, content) {
-                const chatMessages = document.getElementById('chat-messages');
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message ${type}`;
-                messageDiv.innerHTML = `
-                    <div class="message-content">${content}</div>
-                    <div class="message-time">${new Date().toLocaleTimeString()}</div>
-                `;
-                
-                chatMessages.appendChild(messageDiv);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
-            
-            // Utilities
-            goToHomepage() {
-                // Reset to main discovery interface (homepage)
-                this.clearResults();
-                document.getElementById('sessionStatus').textContent = 'Ready for Discovery';
-                document.getElementById('scanningStatusIndicator').textContent = 'Status: Ready';
-                
-                // Ensure map is centered on default location
-                if (this.map) {
-                    this.map.setView([52.4751, 4.8156], 13);
                 }
                 
-                console.log('Returned to main discovery interface (homepage)');
+                container.appendChild(canvas);
+                
+                // Add placeholder info
+                const info = document.createElement('div');
+                info.style.cssText = 'font-size: 9px; color: #666; text-align: center; margin-top: 4px;';
+                info.textContent = 'Sample Pattern';
+                container.appendChild(info);
             }
             
-            showScanAnimation(lat, lon) {
-                // Create a temporary scanning circle animation
-                const scanCircle = L.circle([lat, lon], {
-                    color: '#00ff88',
-                    fillColor: 'transparent',
-                    weight: 2,
-                    radius: 30,
-                    className: 'scan-animation'
-                }).addTo(this.map);
-                
-                // Remove after 1.5 seconds
-                setTimeout(() => {
-                    this.map.removeLayer(scanCircle);
-                }, 1500);
-            }
-
-            // Show detailed visualization for a patch
-            showPatchDetails(patchId) {
-                console.log('🎯 UnifiedApp.showPatchDetails called with patchId:', patchId);
-                
-                const patch = this.patches.get(patchId);
-                if (!patch) {
-                    console.warn('❌ Patch not found:', patchId);
+            createElevationHistogram(container, patch, elevationData) {
+                // Find the canvas within the container
+                const canvas = container.querySelector('canvas');
+                if (!canvas) {
+                    console.warn('❌ No canvas found in histogram container');
                     return;
                 }
-
-                console.log('✅ Patch found:', patch.patch_id);
-                console.log('✅ Patch has elevation_data:', !!patch.elevation_data);
                 
-                // Use the patch visualization system
-                if (this.patchViz) {
-                    console.log('✅ PatchViz system available, calling showPatchDetails');
-                    this.patchViz.showPatchDetails(patch);
-                } else {
-                    console.error('❌ Patch visualization system not initialized');
-                }
-            }
-            
-            showMiniVisualizationInPopup(patch) {
-                // Populate mini elevation grid
-                this.populateMiniElevationGrid(patch);
-                
-                // Populate mini histogram
-                this.populateMiniHistogram(patch);
-            }
-            
-            populateMiniElevationGrid(patch) {
-                const gridElement = document.getElementById(`miniElevationGrid_${patch.patch_id}`);
-                if (!gridElement || !patch.elevation_data) return;
-                
-                const data = patch.elevation_data;
-                const rows = data.length;
-                const cols = data[0]?.length || 0;
-                
-                if (rows === 0 || cols === 0) return;
-                
-                // Determine optimal sample size based on available data resolution
-                // For AHN4 data (typically 80x80 pixels at 0.5m resolution), we can show more detail
-                // Match the 21x21 kernel size used by the detection algorithm when possible
-                let sampleSize = 8; // Default fallback
-                
-                if (rows >= 60 && cols >= 60) {
-                    sampleSize = 21; // Full kernel resolution for high-res data
-                } else if (rows >= 32 && cols >= 32) {
-                    sampleSize = 16; // Medium resolution
-                } else if (rows >= 16 && cols >= 16) {
-                    sampleSize = 12; // Low-medium resolution
-                }
-                
-                // Update CSS grid to match the sample size
-                gridElement.style.gridTemplateColumns = `repeat(${sampleSize}, 1fr)`;
-                
-                const rowStep = Math.max(1, Math.floor(rows / sampleSize));
-                const colStep = Math.max(1, Math.floor(cols / sampleSize));
-                
-                const stats = patch.elevation_stats || this.calculateElevationStats(data);
-                const min = stats.min;
-                const max = stats.max;
-                const range = max - min;
-                
-                gridElement.innerHTML = '';
-                
-                // Add grid info as a data attribute for debugging
-                gridElement.setAttribute('data-grid-info', `${sampleSize}x${sampleSize} (from ${rows}x${cols})`);
-                
-                for (let i = 0; i < sampleSize; i++) {
-                    for (let j = 0; j < sampleSize; j++) {
-                        const rowIdx = Math.min(i * rowStep, rows - 1);
-                        const colIdx = Math.min(j * colStep, cols - 1);
-                        const value = data[rowIdx][colIdx];
-                        
-                        if (value !== null && value !== undefined && !isNaN(value)) {
-                            const normalized = range > 0 ? (value - min) / range : 0;
-                            
-                            const cell = document.createElement('div');
-                            cell.className = 'mini-elevation-cell';
-                            cell.style.backgroundColor = this.getElevationColor(normalized);
-                            cell.title = `${value.toFixed(1)}m @ [${rowIdx},${colIdx}]`;
-                            
-                            gridElement.appendChild(cell);
-                        }
-                    }
-                }
-                
-                console.log(`🔍 Mini grid created: ${sampleSize}x${sampleSize} from ${rows}x${cols} source data`);
-            }
-            
-            populateMiniHistogram(patch) {
-                const histogramElement = document.getElementById(`miniHistogram_${patch.patch_id}`);
-                const canvas = histogramElement?.querySelector('canvas');
-                if (!canvas || !patch.elevation_data) return;
+                console.log('📊 createElevationHistogram called with:');
+                console.log('  - Patch ID:', patch.patch_id);
+                console.log('  - ElevationData:', elevationData);
                 
                 const ctx = canvas.getContext('2d');
                 const width = canvas.width;
                 const height = canvas.height;
                 
                 // Clear canvas
-                ctx.clearRect(0, 0, width, height);
+                ctx.fillStyle = '#1a1a1a';
+                ctx.fillRect(0, 0, width, height);
                 
-                // Flatten elevation data
-                const elevationValues = patch.elevation_data
-                    .flat()
-                    .filter(v => v !== null && v !== undefined && !isNaN(v));
+                // Handle both 1D and 2D elevation data structures
+                let flatData = [];
                 
-                if (elevationValues.length === 0) return;
+                if (!elevationData || !Array.isArray(elevationData)) {
+                    console.warn('❌ No elevation data for histogram');
+                    this.drawNoDataHistogram(ctx, width, height);
+                    return;
+                }
                 
-                const stats = patch.elevation_stats || this.calculateElevationStats(patch.elevation_data);
-                const numBins = 8; // Fewer bins for mini chart
-                const binWidth = (stats.max - stats.min) / numBins;
+                if (Array.isArray(elevationData[0])) {
+                    // 2D array - flatten it
+                    flatData = elevationData.flat().filter(val => typeof val === 'number' && !isNaN(val) && isFinite(val));
+                } else {
+                    // 1D array - filter directly
+                    flatData = elevationData.filter(val => typeof val === 'number' && !isNaN(val) && isFinite(val));
+                }
                 
-                // Create histogram
-                const bins = Array(numBins).fill(0);
-                elevationValues.forEach(value => {
-                    const binIndex = Math.min(Math.floor((value - stats.min) / binWidth), numBins - 1);
-                    if (binIndex >= 0) bins[binIndex]++;
+                if (flatData.length === 0) {
+                    console.warn('❌ No valid elevation data after filtering');
+                    this.drawNoDataHistogram(ctx, width, height);
+                    return;
+                }
+                
+                console.log(`✅ Processing ${flatData.length} elevation points for histogram`);
+                
+                // Create histogram bins
+                const numBins = 16;
+                const minElev = Math.min(...flatData);
+                const maxElev = Math.max(...flatData);
+                const range = maxElev - minElev;
+                
+                console.log(`📊 Elevation range: ${minElev.toFixed(2)}m to ${maxElev.toFixed(2)}m`);
+                
+                if (!isFinite(minElev) || !isFinite(maxElev) || range === 0) {
+                    console.warn('❌ Invalid elevation range for histogram');
+                    this.drawFlatHistogram(ctx, width, height, minElev);
+                    return;
+                }
+                
+                const binWidth = range / numBins;
+                const bins = new Array(numBins).fill(0);
+                
+                // Fill bins
+                flatData.forEach(elev => {
+                    const binIndex = Math.min(Math.floor((elev - minElev) / binWidth), numBins - 1);
+                    bins[binIndex]++;
                 });
                 
+                console.log('📊 Histogram bins:', bins);
+                
+                // Draw histogram
                 const maxCount = Math.max(...bins);
-                if (maxCount === 0) return;
+                if (maxCount === 0) {
+                    this.drawNoDataHistogram(ctx, width, height);
+                    return;
+                }
                 
-                // Draw mini histogram
-                const barWidth = width / numBins;
-                const padding = 2;
+                const barWidth = (width - 20) / numBins;
+                const maxBarHeight = height - 30;
                 
-                ctx.fillStyle = '#00ff88';
-                ctx.strokeStyle = '#00ff88';
+                ctx.strokeStyle = '#333';
                 ctx.lineWidth = 1;
                 
                 bins.forEach((count, i) => {
-                    const barHeight = (count / maxCount) * (height - padding * 2);
-                    const x = i * barWidth;
-                    const y = height - barHeight - padding;
+                    const barHeight = (count / maxCount) * maxBarHeight;
+                    const x = 10 + i * barWidth;
+                    const y = height - 15 - barHeight;
                     
-                    ctx.fillRect(x + 1, y, barWidth - 2, barHeight);
-                });
-            }
-            
-            calculateElevationStats(data) {
-                const flatData = data.flat().filter(v => v !== null && v !== undefined && !isNaN(v));
-                
-                if (flatData.length === 0) {
-                    return { min: 0, max: 0, mean: 0, std: 0 };
-                }
-
-                const min = Math.min(...flatData);
-                const max = Math.max(...flatData);
-                const mean = flatData.reduce((a, b) => a + b, 0) / flatData.length;
-                const variance = flatData.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / flatData.length;
-                const std = Math.sqrt(variance);
-
-                return { min, max, mean, std };
-            }
-            
-            getElevationColor(normalized) {
-                // Matplotlib terrain colormap approximation
-                normalized = Math.max(0, Math.min(1, normalized));
-                
-                // Matplotlib terrain colormap approximation
-                const colors = [
-                    { pos: 0.0, color: [51, 102, 153] },    // Deep blue (water/valleys)
-                    { pos: 0.15, color: [68, 119, 170] },   // Blue
-                    { pos: 0.3, color: [34, 136, 51] },     // Deep green (lowlands)
-                    { pos: 0.45, color: [102, 170, 68] },   // Light green (vegetation)
-                    { pos: 0.6, color: [170, 170, 68] },    // Yellow-green (hills)
-                    { pos: 0.75, color: [204, 153, 102] },  // Brown (exposed earth)
-                    { pos: 0.9, color: [238, 221, 204] },   // Light brown (rocky areas)
-                    { pos: 1.0, color: [255, 255, 255] }    // White (peaks)
-                ];
-
-                // Find the two colors to interpolate between
-                let lowerColor = colors[0];
-                let upperColor = colors[colors.length - 1];
-
-                for (let i = 0; i < colors.length - 1; i++) {
-                    if (normalized >= colors[i].pos && normalized <= colors[i + 1].pos) {
-                        lowerColor = colors[i];
-                        upperColor = colors[i + 1];
-                        break;
+                    // Color based on elevation range
+                    const binMidpoint = (i + 0.5) / numBins;
+                    if (binMidpoint < 0.3) {
+                        ctx.fillStyle = '#4CAF50'; // Green for low
+                    } else if (binMidpoint < 0.7) {
+                        ctx.fillStyle = '#FFC107'; // Yellow for mid
+                    } else {
+                        ctx.fillStyle = '#FF5722'; // Red for high
                     }
-                }
-
-                // Interpolate between the two colors
-                const range = upperColor.pos - lowerColor.pos;
-                const factor = range === 0 ? 0 : (normalized - lowerColor.pos) / range;
-
-                const r = Math.round(lowerColor.color[0] + factor * (upperColor.color[0] - lowerColor.color[0]));
-                const g = Math.round(lowerColor.color[1] + factor * (upperColor.color[1] - lowerColor.color[1]));
-                const b = Math.round(lowerColor.color[2] + factor * (upperColor.color[2] - lowerColor.color[2]));
-
-                return `rgb(${r}, ${g}, ${b})`;
+                    
+                    ctx.fillRect(x, y, barWidth - 1, barHeight);
+                    ctx.strokeRect(x, y, barWidth - 1, barHeight);
+                });
+                
+                // Draw axes
+                ctx.strokeStyle = '#555';
+                ctx.beginPath();
+                ctx.moveTo(10, height - 15);
+                ctx.lineTo(width - 10, height - 15);
+                ctx.moveTo(10, 15);
+                ctx.lineTo(10, height - 15);
+                ctx.stroke();
+                
+                // Add labels
+                ctx.fillStyle = '#999';
+                ctx.font = '8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${minElev.toFixed(1)}m`, 15, height - 3);
+                ctx.fillText(`${maxElev.toFixed(1)}m`, width - 15, height - 3);
+                
+                // Add sample count
+                ctx.textAlign = 'right';
+                ctx.fillText(`n=${flatData.length}`, width - 5, 12);
+                
+                console.log('✅ Elevation histogram created successfully');
             }
+            
+            drawNoDataHistogram(ctx, width, height) {
+                // Draw axes
+                ctx.strokeStyle = '#555';
+                ctx.beginPath();
+                ctx.moveTo(10, height - 15);
+                ctx.lineTo(width - 10, height - 15);
+                ctx.stroke();
+                
+                // Add "No Data" message
+                ctx.fillStyle = '#666';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('No Elevation Data', width / 2, height / 2);
+            }
+            
+            drawG2BasedHistogram(ctx, width, height, patch) {
+                // Create histogram based on G2 feature scores
+                const scores = patch.detection_result?.g2_feature_scores || {};
+                const entropy = scores.ElevationEntropy || 0.5;
+                const planarity = scores.Planarity || 0.5;
+                const volume = scores.Volume || 0.5;
+                
+                // High entropy = more spread out distribution
+                // High planarity = more peaked distribution
+                // High volume = shifted towards higher elevations
+                
+                let bins;
+                if (entropy > 0.8) {
+                    // Very high entropy - uniform distribution
+                    bins = new Array(16).fill(1).map(() => Math.random() * 0.5 + 0.5);
+                } else if (planarity > 0.8) {
+                    // High planarity - peaked distribution
+                    bins = new Array(16).fill(0);
+                    const peakPos = Math.floor(8 + volume * 4); // Peak position based on volume
+                    for (let i = 0; i < 16; i++) {
+                        const dist = Math.abs(i - peakPos);
+                        bins[i] = Math.exp(-dist * dist / (2 * (1 - planarity) * 10));
+                    }
+                } else {
+                    // Mixed distribution
+                    bins = new Array(16).fill(0).map((_, i) => {
+                        const pos = i / 15;
+                        return Math.exp(-Math.pow(pos - volume, 2) / (2 * entropy * 0.1)) + 
+                               Math.random() * entropy * 0.3;
+                    });
+                }
+                
+                // Normalize bins
+                const maxBin = Math.max(...bins);
+                if (maxBin > 0) {
+                    bins = bins.map(b => b / maxBin);
+                }
+                
+                // Draw bars
+                const barWidth = (width - 20) / bins.length;
+                const maxBarHeight = height - 30;
+                
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                
+                bins.forEach((value, i) => {
+                    const barHeight = value * maxBarHeight;
+                    const x = 10 + i * barWidth;
+                    const y = height - 15 - barHeight;
+                    
+                    // Color based on feature interpretation
+                    if (entropy > 0.9) {
+                        ctx.fillStyle = '#FF6B6B'; // Red for high entropy (possibly noise)
+                    } else if (planarity > 0.8) {
+                        ctx.fillStyle = '#4ECDC4'; // Teal for structured features
+                    } else {
+                        ctx.fillStyle = '#45B7D1'; // Blue for mixed features
+                    }
+                    
+                    ctx.fillRect(x, y, barWidth - 1, barHeight);
+                    ctx.strokeRect(x, y, barWidth - 1, barHeight);
+                });
+                
+                // Draw axes
+                ctx.strokeStyle = '#555';
+                ctx.beginPath();
+                ctx.moveTo(10, height - 15);
+                ctx.lineTo(width - 10, height - 15);
+                ctx.moveTo(10, 15);
+                ctx.lineTo(10, height - 15);
+                ctx.stroke();
+                
+                // Add interpretation label
+                ctx.fillStyle = '#999';
+                ctx.font = '8px Arial';
+                ctx.textAlign = 'center';
+                if (entropy > 0.9) {
+                    ctx.fillText('High Noise?', width / 2, height - 3);
+                } else if (planarity > 0.8) {
+                    ctx.fillText('Structured', width / 2, height - 3);
+                } else {
+                    ctx.fillText('Mixed Pattern', width / 2, height - 3);
+                }
+            }
+            
+            drawFlatHistogram(ctx, width, height, elevation) {
+                // Single bar for flat elevation
+                const barWidth = (width - 20) / 16;
+                const barHeight = (height - 30) * 0.8;
+                const x = width / 2 - barWidth / 2;
+                const y = height - 15 - barHeight;
+                
+                ctx.fillStyle = '#FFC107';
+                ctx.fillRect(x, y, barWidth, barHeight);
+                ctx.strokeStyle = '#333';
+                ctx.strokeRect(x, y, barWidth, barHeight);
+                
+                // Axes
+                ctx.strokeStyle = '#555';
+                ctx.beginPath();
+                ctx.moveTo(10, height - 15);
+                ctx.lineTo(width - 10, height - 15);
+                ctx.stroke();
+                
+                // Label
+                ctx.fillStyle = '#999';
+                ctx.font = '8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Flat: ${elevation.toFixed(1)}m`, width / 2, height - 3);
+            }
+            
+            drawSampleHistogram(ctx, width, height) {
+                // Create sample histogram data
+                const sampleBins = [2, 5, 12, 18, 25, 30, 28, 22, 15, 8, 4, 2, 1, 0, 0, 0];
+                const maxCount = Math.max(...sampleBins);
+                const barWidth = (width - 20) / sampleBins.length;
+                const maxBarHeight = height - 30;
+                
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                
+                sampleBins.forEach((count, i) => {
+                    const barHeight = (count / maxCount) * maxBarHeight;
+                    const x = 10 + i * barWidth;
+                    const y = height - 15 - barHeight;
+                    
+                    // Draw bar
+                    ctx.fillStyle = '#00cc66';
+                    ctx.fillRect(x, y, barWidth - 1, barHeight);
+                    
+                    // Draw outline
+                    ctx.strokeRect(x, y, barWidth - 1, barHeight);
+                });
+                
+                // Draw axes
+                ctx.strokeStyle = '#555';
+                ctx.beginPath();
+                ctx.moveTo(10, height - 15);
+                ctx.lineTo(width - 10, height - 15);
+                ctx.moveTo(10, 15);
+                ctx.lineTo(10, height - 15);
+                ctx.stroke();
+                
+                // Add sample labels
+                ctx.fillStyle = '#666';
+                ctx.font = '8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Sample Data', width / 2, height - 3);
+            }
+
         }
         
         // Google OAuth callbacks
         window.handleGoogleLogin = function(response) {
+            console.log('🔐 Global Google login callback triggered');
+            console.log('Response:', response);
+            console.log('UnifiedApp available:', !!window.unifiedApp);
+            
             if (window.unifiedApp) {
                 window.unifiedApp.handleGoogleLogin(response);
+            } else {
+                console.error('❌ UnifiedApp not available for Google login');
+                // Store response for later processing
+                window._pendingGoogleAuth = response;
             }
         };
         
         window.handleGoogleError = function(error) {
+            console.log('❌ Global Google error callback triggered');
+            console.log('Error:', error);
+            console.log('UnifiedApp available:', !!window.unifiedApp);
+            
             if (window.unifiedApp) {
                 window.unifiedApp.handleGoogleError(error);
             } else {
-                console.error('Google Sign-In Error:', error);
+                console.error('Google Sign-In Error (no app):', error);
             }
         };
         
@@ -2087,6 +2453,8 @@
 
         // Initialize app when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 DOM loaded, initializing app...');
+            
             // Log configuration
             if (window.AppConfig) {
                 window.AppConfig.log();
@@ -2097,9 +2465,52 @@
             if (googleOnload && window.AppConfig) {
                 googleOnload.setAttribute('data-client_id', window.AppConfig.googleClientId);
                 googleOnload.setAttribute('data-error_callback', 'handleGoogleError');
+                console.log('⚙️ Google OAuth configured with client ID:', window.AppConfig.googleClientId);
             }
             
+            // Initialize the unified app
             window.unifiedApp = new UnifiedREArchaeologyApp();
+            
+            // Debug: Check if Google API is loaded
+            if (window.google && window.google.accounts) {
+                console.log('✅ Google API loaded successfully');
+            } else {
+                console.log('⚠️ Google API not yet loaded, will retry...');
+                // Retry after a short delay
+                setTimeout(() => {
+                    if (window.google && window.google.accounts) {
+                        console.log('✅ Google API loaded on retry');
+                    } else {
+                        console.error('❌ Google API failed to load');
+                    }
+                }, 2000);
+            }
+        });
+        
+        // Additional check when window is fully loaded
+        window.addEventListener('load', function() {
+            console.log('🌍 Window fully loaded');
+            
+            // Final check for Google API
+            if (window.google && window.google.accounts) {
+                console.log('✅ Google API confirmed ready');
+                
+                // Initialize Google Sign-In if not already done
+                try {
+                    window.google.accounts.id.initialize({
+                        client_id: window.AppConfig?.googleClientId || '555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com',
+                        callback: window.handleGoogleLogin,
+                        error_callback: window.handleGoogleError,
+                        auto_select: false,
+                        cancel_on_tap_outside: false
+                    });
+                    console.log('✅ Google Sign-In re-initialized');
+                } catch (error) {
+                    console.warn('⚠️ Google Sign-In initialization warning:', error);
+                }
+            } else {
+                console.error('❌ Google API still not available after window load');
+            }
         });
         
         // Initialize collapsible panels on page load
@@ -2115,14 +2526,6 @@
                 }
             });
             
-            // Test modal visibility
-            console.log('🔍 Modal element on page load:', !!document.getElementById('patchGrid'));
-            const modal = document.getElementById('patchGrid');
-            if (modal) {
-                console.log('✅ Modal found, current display:', modal.style.display);
-                console.log('✅ Modal computed style:', window.getComputedStyle(modal).display);
-                console.log('✅ Modal z-index:', window.getComputedStyle(modal).zIndex);
-            }
         });
 
     </script>

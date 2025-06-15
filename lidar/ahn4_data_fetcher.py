@@ -239,6 +239,14 @@ class AHN4DataFetcher:
         return [
             # Zaanse Schans windmills - precise coordinates from historical records
             {
+                'name': 'Complex2_Zaanse_Schans_Extra',
+                'lat': 52.4745,
+                'lon': 4.8107,
+                'expected_structures': 1,
+                'site_type': 'negative',
+                'description': 'Non windmill location at Zaanse Schans'
+            },
+            {
                 'name': 'Complex_Zaanse_Schans',
                 'lat': 52.4776,
                 'lon': 4.8097,
