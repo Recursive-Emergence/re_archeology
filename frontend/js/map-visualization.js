@@ -211,16 +211,25 @@ class MapVisualization {
         // Determine border color based on detection results
         const borderColor = this.getPatchColor(patch);
         
-        // Determine fill based on elevation data
-        const fillStyle = this.getPatchFillStyle(patch);
+        // Determine fill: use confidence colors for detections, elevation for non-detections
+        let fillColor, fillOpacity;
+        if (patch.is_positive) {
+            // For positive detections, use the confidence color with good opacity
+            fillColor = borderColor;
+            fillOpacity = 0.8;
+        } else {
+            // For non-detections, use elevation-based fill
+            const fillStyle = this.getPatchFillStyle(patch);
+            fillColor = fillStyle.color;
+            fillOpacity = fillStyle.opacity;
+        }
         
-        // Create rectangle with elevation fill and detection border
+        // Create rectangle with detection-based coloring
         const rectangle = L.rectangle(bounds, {
             color: borderColor,
             weight: patch.is_positive ? 3 : 1, // Thicker border for detections
-            fillColor: fillStyle.color,
-            fillOpacity: fillStyle.opacity,
-            fillPattern: fillStyle.pattern,
+            fillColor: fillColor,
+            fillOpacity: fillOpacity,
             className: `patch ${patch.is_positive ? 'positive' : 'negative'}`
         });
 
@@ -236,7 +245,7 @@ class MapVisualization {
         rectangle.on('mouseover', (e) => {
             rectangle.setStyle({
                 weight: patch.is_positive ? 5 : 3,
-                fillOpacity: Math.min(fillStyle.opacity + 0.2, 1.0)
+                fillOpacity: Math.min(fillOpacity + 0.2, 1.0)
             });
             this.showPatchTooltip(e, patch);
         });
@@ -244,7 +253,7 @@ class MapVisualization {
         rectangle.on('mouseout', () => {
             rectangle.setStyle({
                 weight: patch.is_positive ? 3 : 1,
-                fillOpacity: fillStyle.opacity
+                fillOpacity: fillOpacity
             });
             this.hideTooltip();
         });
@@ -390,10 +399,11 @@ class MapVisualization {
         }
 
         const confidence = patch.confidence || 0;
-        if (confidence >= 0.8) return '#FF0000'; // Bright red for high confidence
-        if (confidence >= 0.6) return '#FF6600'; // Orange for medium confidence  
-        if (confidence >= 0.4) return '#FFAA00'; // Yellow-orange for low confidence
-        return '#CCCCCC'; // Light gray for very low confidence
+        if (confidence >= 0.8) return '#006400'; // Dark green for high confidence
+        if (confidence >= 0.6) return '#228B22'; // Forest green for medium-high confidence  
+        if (confidence >= 0.4) return '#32CD32'; // Lime green for medium confidence
+        if (confidence >= 0.2) return '#90EE90'; // Light green for low confidence
+        return '#E8F5E8'; // Very light green for very low confidence
     }
 
     /**
@@ -432,6 +442,18 @@ class MapVisualization {
                     <div class="info-row">
                         <span>Confidence:</span>
                         <span>${(patch.confidence * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="info-row">
+                        <span>Detection Method:</span>
+                        <span>${detection.method || 'G2_dutch_windmill'}</span>
+                    </div>
+                    <div class="info-row">
+                        <span>G2 Detected:</span>
+                        <span>${detection.g2_detected ? 'Yes' : 'No'}</span>
+                    </div>
+                    <div class="info-row">
+                        <span>G2 Confidence:</span>
+                        <span>${detection.g2_confidence ? (detection.g2_confidence * 100).toFixed(1) + '%' : '--'}</span>
                     </div>
                     <div class="info-row">
                         <span>φ⁰ Score:</span>
@@ -544,10 +566,24 @@ class MapVisualization {
      */
     refreshPatchColors() {
         this.patches.forEach(({patch, element}) => {
-            const color = this.getPatchColor(patch);
+            const borderColor = this.getPatchColor(patch);
+            
+            let fillColor, fillOpacity;
+            if (patch.is_positive) {
+                // For positive detections, use confidence color
+                fillColor = borderColor;
+                fillOpacity = 0.7;
+            } else {
+                // For non-detections, use elevation color
+                const fillStyle = this.getPatchFillStyle(patch);
+                fillColor = fillStyle.color;
+                fillOpacity = fillStyle.opacity;
+            }
+            
             element.setStyle({
-                color: color,
-                fillColor: color
+                color: borderColor,
+                fillColor: fillColor,
+                fillOpacity: fillOpacity
             });
         });
     }
@@ -668,16 +704,12 @@ class MapVisualization {
         const max = Math.max(...flatData);
         const range = max - min;
 
-        console.log(`Elevation data: ${rows}x${cols}, range: ${min.toFixed(2)}-${max.toFixed(2)}m`);
-
         // Improved resolution - use more detail than the old 8x8 grid
         const maxSize = 20; // Much better than the old 8x8
         const rowStep = Math.max(1, Math.floor(rows / maxSize));
         const colStep = Math.max(1, Math.floor(cols / maxSize));
         const displayRows = Math.ceil(rows / rowStep);
         const displayCols = Math.ceil(cols / colStep);
-
-        console.log(`Display grid: ${displayRows}x${displayCols} (step: ${rowStep}, ${colStep})`);
 
         // Create grid HTML
         const cellSize = Math.min(120 / displayCols, 120 / displayRows); // Max 120px container
@@ -726,7 +758,6 @@ class MapVisualization {
         
         gridContainer.innerHTML = titleHTML + gridHTML;
         
-        console.log('✅ Mini elevation grid populated with terrain colormap');
     }
 }
 

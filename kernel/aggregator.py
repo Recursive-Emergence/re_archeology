@@ -1086,21 +1086,14 @@ class StreamingDetectionAggregator:
         Returns:
             Tuple of (interpreted_polarity, adjusted_weight)
         """
-        # DEBUG: Print input
-        print(f"DEBUG _interpret_polarity: module={module_name}, score={score:.4f}")
-        
         # Check for explicit polarity preference from profile configuration
         if module_name in self.polarity_preferences:
             preferred_polarity = self.polarity_preferences[module_name]
-            print(f"DEBUG: Found preference for {module_name}: {preferred_polarity}")
             if preferred_polarity in ["positive", "negative"]:
                 # Use configured polarity preference, but still adjust weight based on score strength
                 score_strength = max(0.1, score)  # Avoid zero weight
                 adjusted_weight = weight * score_strength
-                print(f"DEBUG: Using preference, returning {preferred_polarity}, weight={adjusted_weight:.3f}")
                 return preferred_polarity, adjusted_weight
-        
-        print(f"DEBUG: No preference found, using dynamic logic")
         
         # Very low scores are typically negative evidence
         if score < 0.1:

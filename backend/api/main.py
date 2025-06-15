@@ -58,7 +58,8 @@ def readiness_check():
 # Import and include routers
 from backend.api.routers import (
     users, hypotheses, sites, websocket,
-    auth, discussion_threads, ai_chat, background_tasks, spatial_analysis, earth_engine_service, discovery
+    auth, discussion_threads, background_tasks, spatial_analysis, earth_engine_service, discovery
+    # ai_chat,  # Temporarily disabled to avoid sentence-transformers dependency
 )
 
 # Core routers
@@ -69,7 +70,7 @@ app.include_router(sites.router, prefix=settings.API_V1_STR, tags=["sites"])
 # Enhanced feature routers
 app.include_router(auth.router, prefix=settings.API_V1_STR, tags=["authentication"])
 app.include_router(discussion_threads.router, prefix=settings.API_V1_STR, tags=["discussion-threads"])
-app.include_router(ai_chat.router, prefix=settings.API_V1_STR, tags=["ai-chat"])
+# app.include_router(ai_chat.router, prefix=settings.API_V1_STR, tags=["ai-chat"])  # Temporarily disabled
 app.include_router(background_tasks.router, prefix=settings.API_V1_STR, tags=["background-tasks"])
 app.include_router(spatial_analysis.router, prefix=settings.API_V1_STR, tags=["spatial-analysis"])
 app.include_router(earth_engine_service.router, prefix=settings.API_V1_STR, tags=["earth-engine"])

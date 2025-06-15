@@ -48,11 +48,7 @@ class PatchVisualization {
         // Listen for patch click events from the map
         const mapElement = document.getElementById('map');
         if (mapElement) {
-            console.log('✅ Setting up patchClick event listener on map element');
             mapElement.addEventListener('patchClick', (e) => {
-                console.log('🎯 Patch click event received:', e.detail.patch.patch_id);
-                console.log('🎯 Event detail:', e.detail);
-                console.log('🎯 Patch object:', e.detail.patch);
                 this.showPatchDetails(e.detail.patch);
             });
         } else {
@@ -75,7 +71,6 @@ class PatchVisualization {
      * Show detailed visualization for a patch
      */
     showPatchDetails(patch) {
-        console.log('🎯 showPatchDetails called - DISABLING MODAL, using popup only');
         this.currentPatch = patch;
         
         // DO NOT show the modal - we want popup only
@@ -85,7 +80,6 @@ class PatchVisualization {
         // }
         
         // Instead, let the popup handle everything
-        console.log('✅ Patch details handled by popup system');
     }
 
     /**
@@ -272,11 +266,8 @@ class PatchVisualization {
         
         if (!chartContainer) {
             console.error('❌ Missing chart container with ID elevationChart!');
-            console.log('Available elements:', document.querySelectorAll('[id*="chart"], [id*="Chart"], [id*="histogram"], [id*="Histogram"]'));
             return;
         }
-        
-        console.log('✅ Chart container found, creating professional layout...');
 
         // Clear container and create analyzer-style layout
         chartContainer.innerHTML = '';
@@ -303,8 +294,6 @@ class PatchVisualization {
             `;
             return;
         }
-        
-        console.log('✅ Chart.js library loaded successfully');
 
         if (!patch.elevation_data || !Array.isArray(patch.elevation_data)) {
             console.error('❌ No elevation data available for patch:', patch.patch_id);
@@ -315,8 +304,6 @@ class PatchVisualization {
             `;
             return;
         }
-        
-        console.log('✅ Elevation data found, creating professional visualization...');
 
         // Calculate histogram data with real detection scores
         const histogramData = await this.calculateHistogramData(patch);
@@ -401,7 +388,6 @@ class PatchVisualization {
             canvasContainer.appendChild(canvas);
             histogramSection.appendChild(canvasContainer);
         } else {
-            console.log('⚠️ Creating new canvas element');
             // Fallback: create new canvas
             const canvasContainer = document.createElement('div');
             canvasContainer.style.cssText = `

@@ -20,27 +20,32 @@ import ee
 
 from backend.api.routers.auth import get_current_user_optional
 
-# Import the ElevationPatch class from phi0_core (in root directory)
+# Import the new G2 kernel system
 import sys
 import os
-# Add the root directory to Python path to import phi0_core
+# Add the root directory to Python path to import kernel system
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 try:
-    from phi0_core import ElevationPatch
+    from kernel import G2StructureDetector, G2DetectionResult
+    from kernel.core_detector import ElevationPatch
     logger = logging.getLogger(__name__)
-    logger.info("✅ Successfully imported ElevationPatch from phi0_core")
+    logger.info("✅ Successfully imported G2StructureDetector from kernel system")
 except ImportError as e:
     logger = logging.getLogger(__name__)
-    logger.error(f"❌ Failed to import phi0_core: {e}")
+    logger.error(f"❌ Failed to import kernel system: {e}")
     logger.error(f"Python path: {sys.path}")
     logger.error(f"Root directory: {root_dir}")
-    # Create a placeholder class to prevent startup failure
+    # Create placeholder classes to prevent startup failure
     class ElevationPatch:
         def __init__(self, *args, **kwargs):
-            raise NotImplementedError("phi0_core module not available")
+            raise NotImplementedError("Kernel system not available")
+    
+    class G2StructureDetector:
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError("Kernel system not available")
 # Temporarily enable debug logging to diagnose WebSocket issues
 logger.setLevel(logging.DEBUG)
 
@@ -191,6 +196,7 @@ def safe_asdict(dataclass_obj):
     data = asdict(dataclass_obj)
     return safe_serialize(data)
 
+@dataclass
 @dataclass
 class ScanPatch:
     """Information about a single scanned patch"""
@@ -528,55 +534,50 @@ async def get_session_details(session_id: str):
 
 @router.get("/discovery/kernels")
 async def get_cached_kernels(structure_type: str = None):
-    """Get list of cached kernels"""
+    """Get list of cached kernels from the new G2 system"""
     try:
-        # Import phi0_core to get real kernel data
-        from phi0_core import PhiZeroStructureDetector
+        # Import G2 detection system
+        from kernel import G2StructureDetector
         
-        # Try to load existing kernel
-        detector = PhiZeroStructureDetector(structure_type=structure_type or "windmill")
+        # Create detector with Dutch windmill profile
+        from kernel.detector_profile import DetectorProfileManager
+        
+        kernel_dir = "/media/im3/plus/lab4/RE/re_archaeology/kernel"
+        profile_manager = DetectorProfileManager(
+            profiles_dir=f"{kernel_dir}/profiles",
+            templates_dir=f"{kernel_dir}/templates"
+        )
+        profile = profile_manager.load_profile("dutch_windmill.json")
+        detector = G2StructureDetector(profile=profile)
         
         kernels_info = []
         
-        # Check if kernel exists and get its data
-        if hasattr(detector, 'elevation_kernel') and detector.elevation_kernel is not None:
-            # Calculate histogram from elevation kernel for frontend
-            elevation_kernel = detector.elevation_kernel
-            kernel_range = np.max(elevation_kernel) - np.min(elevation_kernel)
-            
-            if kernel_range >= 0.5:
-                # Apply same normalization as phi0_core
-                kernel_relative = elevation_kernel - np.min(elevation_kernel)
-                kernel_max_rel = np.max(kernel_relative)
-                
-                if kernel_max_rel >= 0.1:
-                    kernel_normalized = kernel_relative / kernel_max_rel
-                    
-                    # Create histogram with 16 bins
-                    num_bins = 16
-                    bin_edges = np.linspace(0, 1, num_bins + 1)
-                    hist, _ = np.histogram(kernel_normalized.flatten(), bins=bin_edges, density=True)
-                    
-                    # Normalize to probability distribution
-                    hist = hist / (np.sum(hist) + 1e-8)
-                    
-                    kernels_info.append({
-                        'structure_type': structure_type or "windmill",
-                        'kernel_size': detector.kernel_size,
-                        'elevation_histogram': hist.tolist(),
-                        'elevation_range': kernel_range,
-                        'created': datetime.now().isoformat(),
-                        'source': 'phi0_core'
-                    })
+        # Get profile information for frontend
+        profile = detector.profile
+        if profile:
+            kernels_info.append({
+                'structure_type': profile.structure_type.value,
+                'profile_name': profile.name,
+                'version': profile.version,
+                'description': profile.description,
+                'resolution_m': profile.geometry.resolution_m,
+                'structure_radius_m': profile.geometry.structure_radius_m,
+                'patch_size_m': profile.geometry.patch_size_m,
+                'detection_threshold': profile.thresholds.detection_threshold,
+                'confidence_threshold': profile.thresholds.confidence_threshold,
+                'enabled_features': list(profile.get_enabled_features().keys()),
+                'created': datetime.now().isoformat(),
+                'source': 'g2_kernel'
+            })
         
         return {
             'status': 'success',
             'kernels': kernels_info,
             'total_count': len(kernels_info),
-            'message': f'Found {len(kernels_info)} kernel(s)'
+            'message': f'Found {len(kernels_info)} G2 profile(s)'
         }
     except Exception as e:
-        logger.error(f"Failed to get cached kernels: {e}")
+        logger.error(f"Failed to get G2 kernel profiles: {e}")
         return {
             'status': 'success',
             'kernels': [],
@@ -733,25 +734,99 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                         'range': float(np.max(elevation_patch.elevation_data) - np.min(elevation_patch.elevation_data))
                     }
                     
-                    # Simple detection logic (could be enhanced with actual phi0 detection)
-                    # For now, use elevation variation as a proxy for structure detection
-                    elevation_range = elevation_stats['range']
-                    elevation_std = elevation_stats['std']
-                    
-                    # Detect based on elevation characteristics
-                    if elevation_range > 1.0 and elevation_std > 0.3:  # Some elevation variation
-                        is_positive = np.random.random() < 0.15  # 15% chance for interesting terrain
-                        confidence = min(0.9, (elevation_range + elevation_std) / 3.0) if is_positive else 0.0
-                    else:
-                        is_positive = np.random.random() < 0.05  # 5% chance for flat terrain
-                        confidence = np.random.random() * 0.4 if is_positive else 0.0
+                    # Use G2 Structure Detector with Dutch Windmill profile
+                    try:
+                        # Initialize G2 detector with Dutch windmill profile
+                        from kernel import G2StructureDetector
+                        from kernel.detector_profile import DetectorProfileManager
+                        
+                        # Load the Dutch windmill profile
+                        kernel_dir = "/media/im3/plus/lab4/RE/re_archaeology/kernel"
+                        profile_manager = DetectorProfileManager(
+                            profiles_dir=f"{kernel_dir}/profiles",
+                            templates_dir=f"{kernel_dir}/templates"
+                        )
+                        profile = profile_manager.load_profile("dutch_windmill.json")
+                        detector = G2StructureDetector(profile=profile)
+                        
+                        # Run detection on the elevation patch
+                        detection_result = detector.detect_structure(elevation_patch)
+                        
+                        if detection_result and detection_result.detected:
+                            is_positive = True
+                            confidence = detection_result.confidence
+                            logger.info(f"✅ G2 Detection: confidence={confidence:.3f} at ({lat:.6f}, {lon:.6f})")
+                        else:
+                            is_positive = False
+                            confidence = detection_result.confidence if detection_result else 0.0
+                            
+                    except Exception as detector_error:
+                        logger.warning(f"G2 detector failed, falling back to simple detection: {detector_error}")
+                        # Fallback to simple detection based on elevation characteristics
+                        elevation_range = elevation_stats['range']
+                        elevation_std = elevation_stats['std']
+                        
+                        if elevation_range > 1.0 and elevation_std > 0.3:  # Some elevation variation
+                            is_positive = np.random.random() < 0.15  # 15% chance for interesting terrain
+                            confidence = min(0.9, (elevation_range + elevation_std) / 3.0) if is_positive else 0.0
+                        else:
+                            is_positive = np.random.random() < 0.05  # 5% chance for flat terrain
+                            confidence = np.random.random() * 0.4 if is_positive else 0.0
                 else:
                     # Fallback if elevation loading fails
                     logger.warning(f"Failed to load elevation data for patch {patch_id}, using fallback detection")
                     is_positive = np.random.random() < 0.08  # 8% chance with no elevation data
                     confidence = np.random.random() * 0.5 if is_positive else 0.0
                 
-                # Create patch result with real elevation data
+                # Create patch result with G2 detection data
+                detection_result_data = {
+                    'confidence': confidence,
+                    'method': 'G2_dutch_windmill',
+                    'elevation_source': 'AHN4_real' if elevation_patch else 'fallback',
+                    # Add legacy phi0/psi0 values for frontend compatibility
+                    'phi0': confidence * 0.8 if is_positive else 0.1,
+                    'psi0': confidence * 0.9 if is_positive else 0.15
+                }
+                
+                # Add G2-specific results if available
+                if 'detection_result' in locals() and detection_result:
+                    # Safely serialize G2 feature results
+                    g2_feature_scores = {}
+                    if hasattr(detection_result, 'feature_results') and detection_result.feature_results:
+                        try:
+                            for feature_name, feature_result in detection_result.feature_results.items():
+                                if hasattr(feature_result, 'score'):
+                                    g2_feature_scores[feature_name] = float(feature_result.score)
+                                else:
+                                    g2_feature_scores[feature_name] = float(feature_result) if feature_result is not None else 0.0
+                        except Exception as serialize_error:
+                            logger.warning(f"Failed to serialize feature results: {serialize_error}")
+                            g2_feature_scores = {}
+                    
+                    # Safely serialize metadata
+                    g2_metadata = {}
+                    if hasattr(detection_result, 'metadata') and detection_result.metadata:
+                        try:
+                            # Only include basic types that can be JSON serialized
+                            for key, value in detection_result.metadata.items():
+                                if isinstance(value, (str, int, float, bool, type(None))):
+                                    g2_metadata[key] = value
+                                elif isinstance(value, (list, dict)):
+                                    # Convert complex types to string representation
+                                    g2_metadata[key] = str(value)
+                        except Exception as serialize_error:
+                            logger.warning(f"Failed to serialize metadata: {serialize_error}")
+                            g2_metadata = {}
+                    
+                    detection_result_data.update({
+                        'g2_detected': detection_result.detected,
+                        'g2_confidence': float(detection_result.confidence),
+                        'g2_final_score': float(detection_result.final_score) if hasattr(detection_result, 'final_score') else 0.0,
+                        'g2_feature_scores': g2_feature_scores,
+                        'g2_metadata': g2_metadata,
+                        'g2_reason': detection_result.reason if hasattr(detection_result, 'reason') and detection_result.reason else ""
+                    })
+                
                 patch = ScanPatch(
                     session_id=session.session_id,
                     patch_id=patch_id,
@@ -760,11 +835,7 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                     timestamp=datetime.now().isoformat(),
                     is_positive=is_positive,
                     confidence=confidence,
-                    detection_result={
-                        'phi0': confidence * 0.8 if is_positive else 0.1,
-                        'psi0': confidence * 0.9 if is_positive else 0.15,
-                        'elevation_source': 'AHN4_real' if elevation_patch else 'fallback'
-                    },
+                    detection_result=detection_result_data,
                     elevation_data=elevation_data,
                     elevation_stats=elevation_stats,
                     patch_size_m=patch_size_m
@@ -780,15 +851,70 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                 if is_positive:
                     session.positive_detections += 1
                 
-                # Send patch result with elevation data
+                # Send patch result with safe elevation data for visualization
                 try:
+                    # Safely serialize elevation data
+                    safe_elevation_data = None
+                    if patch.elevation_data:
+                        try:
+                            # Ensure elevation data is a proper list of lists (not numpy array)
+                            if isinstance(patch.elevation_data, list):
+                                safe_elevation_data = patch.elevation_data
+                            else:
+                                # Convert numpy array to list if needed
+                                safe_elevation_data = patch.elevation_data.tolist()
+                        except Exception as elev_error:
+                            logger.warning(f"Failed to serialize elevation data: {elev_error}")
+                            safe_elevation_data = None
+                    
+                    # Create safe detection result for frontend
+                    safe_detection_result = {}
+                    if patch.detection_result:
+                        # Include all expected frontend fields
+                        safe_detection_result = {
+                            'confidence': float(patch.detection_result.get('confidence', 0.0)),
+                            'method': str(patch.detection_result.get('method', 'G2_dutch_windmill')),
+                            'elevation_source': str(patch.detection_result.get('elevation_source', 'unknown')),
+                            'phi0': float(patch.detection_result.get('phi0', 0.0)),
+                            'psi0': float(patch.detection_result.get('psi0', 0.0))
+                        }
+                        
+                        # Add G2-specific data safely
+                        for key, value in patch.detection_result.items():
+                            if key.startswith('g2_'):
+                                if isinstance(value, (str, int, float, bool, type(None))):
+                                    safe_detection_result[key] = value
+                                elif isinstance(value, dict):
+                                    # For G2 feature scores, ensure they're all numbers
+                                    safe_dict = {}
+                                    for sub_key, sub_value in value.items():
+                                        if isinstance(sub_value, (int, float)):
+                                            safe_dict[sub_key] = float(sub_value)
+                                        elif isinstance(sub_value, (str, bool, type(None))):
+                                            safe_dict[sub_key] = sub_value
+                                    safe_detection_result[key] = safe_dict
+                    
+                    safe_patch_message = {
+                        'session_id': str(patch.session_id),
+                        'patch_id': str(patch.patch_id),
+                        'lat': float(patch.lat),
+                        'lon': float(patch.lon),
+                        'timestamp': str(patch.timestamp),
+                        'is_positive': bool(patch.is_positive),
+                        'confidence': float(patch.confidence),
+                        'detection_result': safe_detection_result,
+                        'elevation_data': safe_elevation_data,  # Include elevation data for visualization
+                        'elevation_stats': patch.elevation_stats if patch.elevation_stats else {},
+                        'patch_size_m': int(patch.patch_size_m)
+                    }
+                    
                     await manager.send_message({
                         'type': 'patch_result',
-                        'patch': safe_asdict(patch),
+                        'patch': safe_patch_message,
                         'session_progress': {
-                            'processed': session.processed_patches,
-                            'total': session.total_patches,
-                            'percentage': (session.processed_patches / session.total_patches) * 100
+                            'processed': int(session.processed_patches),
+                            'total': int(session.total_patches),
+                            'percentage': float((session.processed_patches / session.total_patches) * 100)
                         },
                         'timestamp': datetime.now().isoformat()
                     })

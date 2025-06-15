@@ -24,82 +24,90 @@
     "max_modules_for_efficiency": 6,
     "uncertainty_tolerance": 0.15
   },
-  "feature_overrides": {
+  "features": {
     "histogram": {
-      "similarity_method": "correlation",
-      "bin_count": 25,
-      "edge_enhancement": true,
-      "adaptive_binning": true,
-      "noise_reduction": true,
-      "min_variation": 0.25,
-      "polarity_preference": "positive"
+      "enabled": true,
+      "weight": 1.0,
+      "polarity_preference": "positive",
+      "parameters": {
+        "similarity_method": "correlation",
+        "bin_count": 25,
+        "edge_enhancement": true,
+        "adaptive_binning": true,
+        "noise_reduction": true,
+        "min_variation": 0.25
+      }
     },
     "volume": {
-      "volume_method": "adaptive",
-      "base_volume_normalization": 40.0,
-      "base_prominence_normalization": 4.0,
-      "border_width_factor": 0.3,
-      "adaptive_scaling": true,
-      "concentration_bonus": 1.2,
-      "relative_prominence_weight": 0.5,
-      "min_volume_threshold": 3.0,
-      "auto_range_adaptation": true,
-      "percentile_normalization": true,
-      "polarity_preference": null
+      "enabled": true,
+      "weight": 0.8,
+      "polarity_preference": null,
+      "parameters": {
+        "volume_method": "adaptive",
+        "base_volume_normalization": 40.0,
+        "base_prominence_normalization": 4.0,
+        "border_width_factor": 0.3,
+        "adaptive_scaling": true,
+        "concentration_bonus": 1.2,
+        "relative_prominence_weight": 0.5,
+        "min_volume_threshold": 3.0,
+        "auto_range_adaptation": true,
+        "percentile_normalization": true
+      }
     },
     "dropoff": {
-      "edge_method": "gradient",
-      "smoothing_radius": 0.8,
-      "adaptive_threshold": true,
-      "directional_analysis": true,
-      "edge_enhancement": true,
-      "sigma_inner_factor": 0.7,
-      "sigma_outer_factor": 1.3,
-      "polarity_preference": "positive"
+      "enabled": true,
+      "weight": 1.0,
+      "polarity_preference": "positive",
+      "parameters": {
+        "edge_method": "gradient",
+        "smoothing_radius": 0.8,
+        "adaptive_threshold": true,
+        "directional_analysis": true,
+        "edge_enhancement": true,
+        "sigma_inner_factor": 0.7,
+        "sigma_outer_factor": 1.3
+      }
     },
     "compactness": {
-      "shape_method": "circularity",
-      "n_angles": 45,
-      "min_samples": 12,
-      "symmetry_factor": 0.85,
-      "adaptive_radius": true,
-      "fourier_analysis": true,
-      "edge_detection": true,
-      "noise_tolerance": 0.08,
-      "polarity_preference": "positive"
+      "enabled": true,
+      "weight": 1.0,
+      "polarity_preference": "positive",
+      "parameters": {
+        "shape_method": "circularity",
+        "n_angles": 45,
+        "min_samples": 12,
+        "symmetry_factor": 0.85,
+        "adaptive_radius": true,
+        "fourier_analysis": true,
+        "edge_detection": true,
+        "noise_tolerance": 0.08
+      }
     },
     "entropy": {
-      "entropy_method": "shannon",
-      "spatial_bins": 16,
-      "edge_weight": 1.3,
-      "normalization": "local",
-      "adaptive_threshold": true,
-      "polarity_preference": "negative"
+      "enabled": true,
+      "weight": 3.0,
+      "polarity_preference": "negative",
+      "parameters": {
+        "entropy_method": "shannon",
+        "spatial_bins": 16,
+        "edge_weight": 1.3,
+        "normalization": "local",
+        "adaptive_threshold": true
+      }
     },
     "planarity": {
-      "plane_method": "least_squares",
-      "outlier_threshold": 2.0,
-      "edge_weight": 0.7,
-      "smoothing_radius": 1.2,
-      "adaptive_fitting": true,
-      "polarity_preference": "negative"
+      "enabled": true,
+      "weight": 0.6,
+      "polarity_preference": "negative",
+      "parameters": {
+        "plane_method": "least_squares",
+        "outlier_threshold": 2.0,
+        "edge_weight": 0.7,
+        "smoothing_radius": 1.2,
+        "adaptive_fitting": true
+      }
     }
-  },
-  "polarity_preferences": {
-    "histogram": "positive",
-    "volume": null,
-    "dropoff": "positive",
-    "compactness": "positive",
-    "entropy": "negative",
-    "planarity": "negative"
-  },
-  "feature_weights": {
-    "histogram": 1.0,
-    "volume": 0.8,
-    "dropoff": 1.0,
-    "compactness": 1.0,
-    "entropy": 3.0,
-    "planarity": 0.6
   },
   "aggregation_method": "streaming",
   "parallel_execution": true,

@@ -168,7 +168,10 @@ class StatusManager {
             // Update last heartbeat for any message
             this.updateState({ lastHeartbeat: Date.now() });
             
-            console.log('📨 Received message:', data.type, data);
+            // Only log important message types to reduce console noise
+            if (['session_started', 'session_complete', 'error', 'kernels_info'].includes(data.type)) {
+                console.log('📨 Received message:', data.type, data);
+            }
             
             switch (data.type) {
                 case 'heartbeat':
@@ -418,7 +421,6 @@ class StatusManager {
      * Handle patch elevation loaded messages
      */
     handlePatchElevationLoaded(data) {
-        console.log('📏 Patch elevation loaded:', data.patch_id);
         // Update patch data with elevation statistics if we have the patch stored
         this.triggerCallback('patchElevationLoaded', data);
     }

@@ -52,6 +52,22 @@ class G2DetectionResult:
     refinement_history: List[AggregationResult] = None
     reason: str = ""
     metadata: Dict[str, Any] = None
+    
+    @property
+    def feature_scores(self) -> Dict[str, float]:
+        """Backward compatibility property to extract scores from feature_results"""
+        if not self.feature_results:
+            return {}
+        
+        scores = {}
+        for name, result in self.feature_results.items():
+            if hasattr(result, 'score'):
+                scores[name] = float(result.score)
+            elif isinstance(result, (int, float)):
+                scores[name] = float(result)
+            else:
+                scores[name] = 0.0
+        return scores
 
 
 class G2StructureDetector:

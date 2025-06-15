@@ -21,15 +21,26 @@ settings = get_settings()
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 # Initialize sentence transformer for local embeddings (optional fallback)
-try:
-    # Import is done inside try block to handle case when package is not installed
-    from sentence_transformers import SentenceTransformer
-    embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-    SEMANTIC_SEARCH_ENABLED = True
-except Exception:
-    embedding_model = None
-    SEMANTIC_SEARCH_ENABLED = False
-    print("WARNING: Semantic search dependencies not installed. Semantic search will be disabled.")
+# Use lazy loading to avoid downloading models unless actually needed
+embedding_model = None
+SEMANTIC_SEARCH_ENABLED = False
+
+def get_embedding_model():
+    """Lazy load the embedding model only when needed"""
+    global embedding_model, SEMANTIC_SEARCH_ENABLED
+    if embedding_model is None and not SEMANTIC_SEARCH_ENABLED:
+        try:
+            # Import is done inside function to handle case when package is not installed
+            from sentence_transformers import SentenceTransformer
+            # Only actually load the model when this function is called, not on import
+            embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            SEMANTIC_SEARCH_ENABLED = True
+            logger.info("✅ Semantic search model loaded successfully")
+        except Exception as e:
+            embedding_model = None
+            SEMANTIC_SEARCH_ENABLED = False
+            logger.warning(f"WARNING: Semantic search dependencies not available: {e}")
+    return embedding_model
 
 class ChatMessage(BaseModel):
     role: str  # "user", "assistant", "system"
@@ -83,8 +94,9 @@ async def get_openai_embedding(text: str) -> List[float]:
         return response.data[0].embedding
     except Exception as e:
         # Fallback to local model if available
-        if embedding_model:
-            return embedding_model.encode(text).tolist()
+        local_model = get_embedding_model()
+        if local_model:
+            return local_model.encode(text).tolist()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate embedding: {str(e)}"

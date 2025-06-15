@@ -1253,10 +1253,6 @@
             }
             
             handlePatchUpdate(patch) {
-                console.log('🔄 handlePatchUpdate called with patch:', patch.patch_id);
-                console.log('🔄 Patch has elevation_data:', !!patch.elevation_data);
-                console.log('🔄 Patch keys:', Object.keys(patch));
-                
                 this.patches.set(patch.patch_id, patch);
                 this.addPatchToMap(patch);
                 
