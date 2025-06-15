@@ -19,10 +19,105 @@ class PlanarityModule(BaseFeatureModule):
     which can be detected through plane fitting and residual analysis.
     """
     
+    @classmethod
+    def get_default_parameters(cls) -> Dict[str, Any]:
+        """Return default parameters for planarity analysis"""
+        return {
+            "plane_method": "least_squares",
+            "outlier_threshold": 2.0,
+            "adaptive_fitting": True,
+            "robust_estimation": True,
+            "local_plane_analysis": True,
+            "min_points": 10,
+            "planarity_factor": 1.0,
+            "residual_analysis": True,
+            "surface_roughness": True
+        }
+    
     def __init__(self, weight: float = 0.9):
         super().__init__("Planarity", weight)
-        self.min_points = 10  # Minimum points required for plane fitting
-        self.planarity_factor = 1.0  # Factor for planarity calculation
+        
+        # Initialize with default parameters
+        defaults = self.get_default_parameters()
+        for param, value in defaults.items():
+            setattr(self, param, value)
+    
+    @property
+    def parameter_documentation(self) -> Dict[str, str]:
+        """Documentation for all planarity analysis parameters"""
+        return {
+            "plane_method": "Method for plane fitting: 'least_squares' for standard fitting, 'ransac' for robust fitting",
+            "outlier_threshold": "Threshold (in standard deviations) for identifying elevation outliers",
+            "adaptive_fitting": "Whether to adapt fitting method based on data characteristics",
+            "robust_estimation": "Whether to use robust estimation methods that resist outlier influence",
+            "local_plane_analysis": "Whether to analyze planarity in local sub-regions as well as globally",
+            "min_points": "Minimum number of valid elevation points required for reliable plane fitting",
+            "planarity_factor": "Scaling factor for planarity score interpretation (higher = stricter planarity requirement)",
+            "residual_analysis": "Whether to perform detailed analysis of plane fitting residuals",
+            "surface_roughness": "Whether to calculate additional surface roughness metrics"
+        }
+    
+    @property
+    def result_documentation(self) -> Dict[str, str]:
+        """Documentation for planarity analysis result metadata"""
+        return {
+            "planarity_score": "Overall planarity score (higher = more planar/flat surface)",
+            "plane_fit_quality": "Quality of the best-fit plane (R-squared value)",
+            "residual_std": "Standard deviation of residuals from the fitted plane",
+            "residual_mean": "Mean of residuals from the fitted plane (should be near zero)",
+            "plane_normal": "Normal vector of the fitted plane [x, y, z components]",
+            "plane_slope": "Slope angle of the fitted plane in degrees",
+            "plane_intercept": "Z-intercept of the fitted plane at patch center",
+            "outlier_count": "Number of elevation points identified as outliers",
+            "outlier_fraction": "Fraction of points that are outliers (0.0-1.0)",
+            "surface_roughness_rms": "Root mean square surface roughness",
+            "local_planarity_scores": "Planarity scores for sub-regions (if local_plane_analysis=True)",
+            "fitting_method_used": "Actual plane fitting method used (may differ from input if adaptive)",
+            "goodness_of_fit": "Overall goodness of fit measure combining multiple quality metrics",
+            "elevation_range": "Range of elevation values within the analysis region",
+            "planar_trend": "Primary trend direction of the fitted plane"
+        }
+    
+    @property
+    def interpretation_guide(self) -> Dict[str, str]:
+        """Guide for interpreting planarity analysis results"""
+        return {
+            "High Planarity (>0.8)": "Very flat surface - likely artificial platform or well-preserved structure top",
+            "Good Planarity (0.6-0.8)": "Reasonably flat surface - possible structure platform or natural terrace",
+            "Moderate Planarity (0.4-0.6)": "Somewhat irregular surface - eroded structure or natural slope",
+            "Low Planarity (<0.4)": "Irregular surface - likely natural terrain, vegetation, or heavily damaged structure",
+            "Low Residual Std": "Elevation points closely follow fitted plane - high surface regularity",
+            "High Residual Std": "Elevation points deviate significantly from plane - irregular surface",
+            "Few Outliers": "Most elevation points fit the planar model - consistent surface",
+            "Many Outliers": "Many points don't fit planar model - complex or damaged surface",
+            "Low Slope": "Nearly horizontal surface typical of platforms or level construction",
+            "High Slope": "Steep surface typical of natural slopes or structure sides",
+            "Good Fit Quality": "Plane model explains most elevation variation - truly planar surface"
+        }
+    
+    @property
+    def feature_description(self) -> str:
+        """Overall description of what the planarity feature analyzes"""
+        return """
+        Surface Planarity Analysis:
+        
+        The planarity module fits mathematical planes to elevation surfaces to quantify how flat
+        and regular they are. This helps distinguish artificial platforms and construction surfaces
+        from irregular natural terrain and vegetation-covered areas.
+        
+        Key Capabilities:
+        - Least squares and robust (RANSAC) plane fitting methods
+        - Outlier detection and resistant estimation
+        - Local planarity analysis in sub-regions
+        - Surface roughness quantification
+        - Slope and orientation analysis of fitted planes
+        
+        Best For:
+        - Detecting artificial platforms and level surfaces
+        - Identifying construction floors and paved areas
+        - Distinguishing preserved structures from eroded features
+        - Analyzing surface regularity and construction quality
+        """
     
     def compute(self, elevation_patch: np.ndarray, **kwargs) -> FeatureResult:
         """

@@ -19,10 +19,100 @@ class ElevationHistogramModule(BaseFeatureModule):
     the similarity between a local elevation patch and a reference pattern.
     """
     
+    @classmethod
+    def get_default_parameters(cls) -> Dict[str, Any]:
+        """Return default parameters for histogram analysis"""
+        return {
+            "similarity_method": "correlation",
+            "bin_count": 20,
+            "edge_enhancement": True,
+            "adaptive_binning": True,
+            "noise_reduction": True,
+            "min_variation": 0.3,
+            "normalize_histograms": True,
+            "outlier_removal": True
+        }
+    
     def __init__(self, weight: float = 1.5):  # Higher weight as it's fundamental
         super().__init__("ElevationHistogram", weight)
         self.reference_kernel: Optional[np.ndarray] = None
-        self.min_variation = 0.3  # Minimum elevation variation threshold
+        
+        # Initialize with default parameters
+        defaults = self.get_default_parameters()
+        for param, value in defaults.items():
+            setattr(self, param, value)
+    
+    @property
+    def parameter_documentation(self) -> Dict[str, str]:
+        """Documentation for all histogram analysis parameters"""
+        return {
+            "similarity_method": "Method for comparing histograms: 'correlation', 'chi_squared', 'bhattacharyya', 'wasserstein'",
+            "bin_count": "Number of bins for histogram discretization (higher = more detail, but less robust)",
+            "edge_enhancement": "Whether to enhance elevation edges before histogram calculation",
+            "adaptive_binning": "Whether to adapt bin ranges based on data characteristics",
+            "noise_reduction": "Whether to apply smoothing to reduce noise impact on histograms",
+            "min_variation": "Minimum elevation variation required for meaningful histogram analysis",
+            "normalize_histograms": "Whether to normalize histograms to unit sum for scale invariance",
+            "outlier_removal": "Whether to remove extreme elevation outliers before histogram calculation"
+        }
+    
+    @property
+    def result_documentation(self) -> Dict[str, str]:
+        """Documentation for histogram analysis result metadata"""
+        return {
+            "histogram_similarity": "Similarity score between patch and reference histogram (0.0-1.0)",
+            "correlation_coefficient": "Pearson correlation between histograms",
+            "patch_histogram": "Normalized histogram of the elevation patch",
+            "reference_histogram": "Normalized histogram of the reference pattern",
+            "bin_edges": "Elevation values defining histogram bin boundaries",
+            "peak_alignment": "How well the histogram peaks align between patch and reference",
+            "distribution_shape": "Characterization of the elevation distribution shape",
+            "variation_score": "Measure of elevation variation within the patch",
+            "noise_level": "Estimated noise level in the elevation data",
+            "outlier_count": "Number of elevation outliers detected and potentially removed",
+            "adaptive_bins_used": "Actual bin configuration used if adaptive binning was enabled",
+            "edge_enhancement_applied": "Whether edge enhancement preprocessing was applied",
+            "similarity_confidence": "Confidence measure for the similarity score based on data quality"
+        }
+    
+    @property
+    def interpretation_guide(self) -> Dict[str, str]:
+        """Guide for interpreting histogram analysis results"""
+        return {
+            "High Similarity (>0.8)": "Elevation pattern closely matches reference - strong structural match",
+            "Good Similarity (0.6-0.8)": "Elevation pattern similar to reference - probable structural match",
+            "Moderate Similarity (0.4-0.6)": "Some pattern similarity - possible structure with variations",
+            "Low Similarity (0.2-0.4)": "Weak pattern match - unlikely to be target structure type",
+            "No Similarity (<0.2)": "Elevation pattern very different from reference - not target structure",
+            "High Variation": "Complex elevation structure with diverse heights",
+            "Low Variation": "Relatively flat or uniform elevation structure",
+            "Peak Alignment": "How well the most prominent elevations match between patch and reference",
+            "Noise Impact": "High noise levels reduce histogram reliability and similarity confidence"
+        }
+    
+    @property
+    def feature_description(self) -> str:
+        """Overall description of what the histogram feature analyzes"""
+        return """
+        Elevation Histogram Similarity Analysis:
+        
+        The histogram module compares the elevation distribution of a patch against a reference pattern
+        to identify structural similarities. It builds normalized histograms of elevation values and
+        computes similarity metrics to determine how well the patch matches expected structural patterns.
+        
+        Key Capabilities:
+        - Multiple similarity metrics (correlation, chi-squared, Bhattacharyya, Wasserstein distance)
+        - Adaptive binning based on data characteristics
+        - Edge enhancement for better structural feature detection
+        - Noise reduction and outlier handling
+        - Confidence assessment based on data quality
+        
+        Best For:
+        - Pattern matching against known structure types
+        - Identifying elevation distribution signatures
+        - Template-based structure detection
+        - Validating structural hypotheses based on elevation patterns
+        """
     
     def set_reference_kernel(self, kernel: np.ndarray):
         """Set the reference elevation kernel for comparison"""

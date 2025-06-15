@@ -76,6 +76,47 @@ class FeatureConfiguration:
             raise ValueError("Confidence threshold must be between 0 and 1")
 
 
+def create_default_feature_configurations() -> Dict[str, FeatureConfiguration]:
+    """Create default feature configurations by querying modules for their parameters"""
+    from .modules.features.histogram_module import ElevationHistogramModule
+    from .modules.features.volume_module import VolumeModule
+    from .modules.features.compactness_module import CompactnessModule
+    from .modules.features.dropoff_module import DropoffSharpnessModule
+    from .modules.features.entropy_module import ElevationEntropyModule
+    from .modules.features.planarity_module import PlanarityModule
+    
+    # Map feature names to module classes
+    feature_modules = {
+        "histogram": (ElevationHistogramModule, 1.5),
+        "volume": (VolumeModule, 1.3),
+        "dropoff": (DropoffSharpnessModule, 1.2),
+        "compactness": (CompactnessModule, 1.1),
+        "entropy": (ElevationEntropyModule, 1.0),
+        "planarity": (PlanarityModule, 0.9)
+    }
+    
+    configurations = {}
+    for feature_name, (module_class, default_weight) in feature_modules.items():
+        try:
+            # Get default parameters from the module itself
+            default_params = module_class.get_default_parameters()
+            configurations[feature_name] = FeatureConfiguration(
+                enabled=True,
+                weight=default_weight,
+                parameters=default_params
+            )
+        except Exception as e:
+            logger.warning(f"Could not get default parameters for {feature_name}: {e}")
+            # Fallback to minimal configuration
+            configurations[feature_name] = FeatureConfiguration(
+                enabled=True,
+                weight=default_weight,
+                parameters={}
+            )
+    
+    return configurations
+
+
 @dataclass
 class DetectionThresholds:
     """Thresholds for detection decision-making"""
@@ -106,20 +147,7 @@ class DetectorProfile:
     thresholds: DetectionThresholds = field(default_factory=DetectionThresholds)
     
     # Feature module configurations
-    features: Dict[str, FeatureConfiguration] = field(default_factory=lambda: {
-        "histogram": FeatureConfiguration(enabled=True, weight=1.5, 
-                                        parameters={"similarity_method": "correlation"}),
-        "volume": FeatureConfiguration(enabled=True, weight=1.3,
-                                     parameters={"volume_method": "trapezoid"}),
-        "dropoff": FeatureConfiguration(enabled=True, weight=1.2,
-                                      parameters={"edge_method": "gradient"}),
-        "compactness": FeatureConfiguration(enabled=True, weight=1.1,
-                                          parameters={"shape_method": "circularity"}),
-        "entropy": FeatureConfiguration(enabled=True, weight=1.0,
-                                      parameters={"entropy_method": "shannon"}),
-        "planarity": FeatureConfiguration(enabled=True, weight=0.9,
-                                        parameters={"plane_method": "least_squares"})
-    })
+    features: Dict[str, FeatureConfiguration] = field(default_factory=create_default_feature_configurations)
     
     # Advanced configuration
     aggregation_method: str = "streaming"  # "streaming" or "batch"
@@ -202,6 +230,8 @@ class DetectorProfile:
                 "features.histogram.weight": 1.5,
                 "features.compactness.weight": 1.3,
                 "features.dropoff.weight": 1.2,
+                "features.volume.parameters.base_volume_normalization": 30.0,
+                "features.volume.parameters.base_prominence_normalization": 3.0,
                 "thresholds.detection_threshold": 0.55
             },
             StructureType.SETTLEMENT: {
@@ -209,6 +239,9 @@ class DetectorProfile:
                 "features.volume.weight": 1.4,
                 "features.entropy.weight": 1.2,
                 "features.planarity.weight": 1.1,
+                "features.volume.parameters.base_volume_normalization": 80.0,
+                "features.volume.parameters.base_prominence_normalization": 4.0,
+                "features.volume.parameters.local_context_weight": 0.4,
                 "thresholds.detection_threshold": 0.45
             },
             StructureType.EARTHWORK: {
@@ -216,6 +249,9 @@ class DetectorProfile:
                 "features.volume.weight": 1.5,
                 "features.dropoff.weight": 1.3,
                 "features.planarity.weight": 0.7,
+                "features.volume.parameters.base_volume_normalization": 120.0,
+                "features.volume.parameters.base_prominence_normalization": 8.0,
+                "features.volume.parameters.local_context_weight": 0.2,
                 "thresholds.detection_threshold": 0.5
             },
             StructureType.GEOGLYPH: {
@@ -223,6 +259,9 @@ class DetectorProfile:
                 "features.compactness.weight": 1.4,
                 "features.entropy.weight": 0.8,
                 "features.planarity.weight": 1.2,
+                "features.volume.parameters.base_volume_normalization": 200.0,
+                "features.volume.parameters.base_prominence_normalization": 2.0,
+                "features.volume.parameters.local_context_weight": 0.5,
                 "thresholds.detection_threshold": 0.4
             }
         }
@@ -250,6 +289,305 @@ class DetectorProfile:
             obj[final_attr] = value
         else:
             setattr(obj, final_attr, value)
+    
+    def create_volume_optimized_profile(self, structure_type: StructureType) -> 'DetectorProfile':
+        """Create a new profile optimized for volume detection with adaptive parameters"""
+        volume_optimizations = {
+            StructureType.WINDMILL: {
+                "name": "Volume-Optimized Windmill",
+                "description": "Windmill detection with adaptive volume analysis",
+                "volume_params": {
+                    "base_volume_normalization": 30.0,
+                    "base_prominence_normalization": 3.0,
+                    "adaptive_scaling": True,
+                    "size_scaling_factor": 1.2,
+                    "context_weight": 0.25,
+                    "concentration_bonus": 1.15,
+                    "min_volume_threshold": 3.0,
+                    "max_volume_saturation": 500.0
+                }
+            },
+            StructureType.SETTLEMENT: {
+                "name": "Volume-Optimized Settlement",
+                "description": "Settlement detection with multi-scale adaptive volume analysis",
+                "volume_params": {
+                    "base_volume_normalization": 80.0,
+                    "base_prominence_normalization": 4.0,
+                    "adaptive_scaling": True,
+                    "size_scaling_factor": 1.0,
+                    "context_weight": 0.4,
+                    "concentration_bonus": 1.05,
+                    "relative_prominence_weight": 0.5,
+                    "min_volume_threshold": 8.0,
+                    "max_volume_saturation": 1500.0
+                }
+            },
+            StructureType.EARTHWORK: {
+                "name": "Volume-Optimized Earthwork",
+                "description": "Earthwork detection with prominence-focused adaptive volume analysis",
+                "volume_params": {
+                    "base_volume_normalization": 120.0,
+                    "base_prominence_normalization": 8.0,
+                    "adaptive_scaling": True,
+                    "size_scaling_factor": 0.8,
+                    "context_weight": 0.2,
+                    "concentration_bonus": 1.2,
+                    "relative_prominence_weight": 0.6,
+                    "min_prominence_threshold": 1.0,
+                    "max_prominence_saturation": 30.0
+                }
+            }
+        }
+        
+        if structure_type not in volume_optimizations:
+            # Use generic optimization
+            new_profile = DetectorProfile(
+                name=f"Volume-Optimized {structure_type.value.title()}",
+                description=f"Generic volume-optimized detection for {structure_type.value}",
+                structure_type=structure_type
+            )
+        else:
+            opt = volume_optimizations[structure_type]
+            new_profile = DetectorProfile(
+                name=opt["name"],
+                description=opt["description"],
+                structure_type=structure_type
+            )
+            
+            # Update volume parameters
+            for param, value in opt["volume_params"].items():
+                new_profile.features["volume"].parameters[param] = value
+        
+        # Optimize for structure type
+        new_profile.optimize_for_structure_type()
+        
+        return new_profile
+    
+    @classmethod
+    def create_adaptive_volume_profile(cls, structure_type: StructureType = StructureType.GENERIC) -> 'DetectorProfile':
+        """Create a profile specifically optimized for adaptive volume detection"""
+        volume_overrides = {
+            "volume": {
+                "weight": 2.0,  # Increase volume weight
+                "adaptive_scaling": True,
+                "size_scaling_factor": 1.1,
+                "area_scaling_reference": 150.0,
+                "context_weight": 0.35,
+                "concentration_bonus": 1.2,
+                "relative_prominence_weight": 0.45,
+                "auto_range_adaptation": True,
+                "percentile_normalization": True,
+                "local_statistics_radius": 2.5,
+                "min_volume_threshold": 3.0,
+                "max_volume_saturation": 800.0
+            },
+            "histogram": {"weight": 1.2},
+            "dropoff": {"weight": 1.0},
+            "compactness": {"weight": 0.8},
+            "entropy": {"weight": 0.6},
+            "planarity": {"weight": 0.5}
+        }
+        
+        profile = cls.create_specialized_profile(
+            name="Adaptive Volume Detection",
+            description="Profile optimized for adaptive volume-based structure detection",
+            structure_type=structure_type,
+            feature_overrides=volume_overrides
+        )
+        
+        # Lower detection threshold since volume is primary indicator
+        profile.thresholds.detection_threshold = 0.45
+        profile.thresholds.confidence_threshold = 0.55
+        
+        return profile
+    
+    def create_additional_adaptive_template_profiles(self) -> None:
+        """Create additional template profiles showcasing adaptive volume capabilities"""
+        adaptive_templates = [
+            DetectorProfile(
+                name="Ultra-Adaptive Generic",
+                description="Fully adaptive profile that learns from any structure type",
+                structure_type=StructureType.GENERIC,
+                features={
+                    "volume": FeatureConfiguration(enabled=True, weight=1.8,
+                                                 parameters={
+                                                     "adaptive_scaling": True,
+                                                     "size_scaling_factor": 1.0,
+                                                     "area_scaling_reference": 100.0,
+                                                     "context_weight": 0.4,
+                                                     "concentration_bonus": 1.15,
+                                                     "relative_prominence_weight": 0.5,
+                                                     "auto_range_adaptation": True,
+                                                     "percentile_normalization": True,
+                                                     "local_statistics_radius": 2.0,
+                                                     "min_volume_threshold": 1.0,
+                                                     "max_volume_saturation": 2000.0,
+                                                     "min_prominence_threshold": 0.1,
+                                                     "max_prominence_saturation": 50.0
+                                                 }),
+                    "histogram": FeatureConfiguration(enabled=True, weight=1.5),
+                    "dropoff": FeatureConfiguration(enabled=True, weight=1.2),
+                    "compactness": FeatureConfiguration(enabled=True, weight=1.0),
+                    "entropy": FeatureConfiguration(enabled=True, weight=0.8),
+                    "planarity": FeatureConfiguration(enabled=True, weight=0.6)
+                }
+            ),
+            DetectorProfile(
+                name="Micro-Structure Sensitive",
+                description="Optimized for small, subtle structures with high sensitivity",
+                structure_type=StructureType.GENERIC,
+                features={
+                    "volume": FeatureConfiguration(enabled=True, weight=2.2,
+                                                 parameters={
+                                                     "adaptive_scaling": True,
+                                                     "size_scaling_factor": 1.5,
+                                                     "area_scaling_reference": 25.0,  # Small reference area
+                                                     "context_weight": 0.5,  # High context sensitivity
+                                                     "concentration_bonus": 1.3,
+                                                     "relative_prominence_weight": 0.6,
+                                                     "min_volume_threshold": 0.5,  # Very low threshold
+                                                     "max_volume_saturation": 200.0,
+                                                     "min_prominence_threshold": 0.05,
+                                                     "max_prominence_saturation": 5.0
+                                                 })
+                },
+                thresholds=DetectionThresholds(
+                    detection_threshold=0.35,  # Lower threshold for sensitivity
+                    confidence_threshold=0.45
+                )
+            ),
+            DetectorProfile(
+                name="Macro-Structure Robust",
+                description="Optimized for large, prominent structures with noise robustness",
+                structure_type=StructureType.GENERIC,
+                features={
+                    "volume": FeatureConfiguration(enabled=True, weight=1.6,
+                                                 parameters={
+                                                     "adaptive_scaling": True,
+                                                     "size_scaling_factor": 0.8,
+                                                     "area_scaling_reference": 500.0,  # Large reference area
+                                                     "context_weight": 0.2,  # Lower context sensitivity
+                                                     "concentration_bonus": 1.1,
+                                                     "relative_prominence_weight": 0.3,
+                                                     "min_volume_threshold": 20.0,  # Higher threshold
+                                                     "max_volume_saturation": 5000.0,
+                                                     "min_prominence_threshold": 2.0,
+                                                     "max_prominence_saturation": 100.0
+                                                 })
+                },
+                thresholds=DetectionThresholds(
+                    detection_threshold=0.6,  # Higher threshold for robustness
+                    confidence_threshold=0.7
+                )
+            )
+        ]
+        
+        for profile in adaptive_templates:
+            profile.optimize_for_structure_type()
+            self.save_template(profile)
+            self.save_profile(profile)
+        
+        logger.info(f"Created {len(adaptive_templates)} adaptive template profiles")
+    
+    @classmethod
+    def create_specialized_profile(cls, 
+                                 name: str,
+                                 description: str = "",
+                                 structure_type: StructureType = StructureType.GENERIC,
+                                 feature_overrides: Dict[str, Dict[str, Any]] = None) -> 'DetectorProfile':
+        """
+        Create a specialized profile with feature parameter overrides
+        
+        Args:
+            name: Profile name
+            description: Profile description 
+            structure_type: Type of archaeological structure
+            feature_overrides: Dict of {feature_name: {param_name: value}} to override defaults
+            
+        Returns:
+            DetectorProfile with customized parameters
+        """
+        # Start with default configuration
+        profile = cls(
+            name=name,
+            description=description,
+            structure_type=structure_type
+        )
+        
+        # Apply feature parameter overrides
+        if feature_overrides:
+            for feature_name, param_overrides in feature_overrides.items():
+                if feature_name in profile.features:
+                    # Update existing parameters
+                    profile.features[feature_name].parameters.update(param_overrides)
+                else:
+                    logger.warning(f"Feature '{feature_name}' not found in profile")
+        
+        logger.info(f"Created specialized profile '{name}' with {len(feature_overrides or {})} feature overrides")
+        return profile
+    
+    @classmethod
+    def create_high_precision_profile(cls) -> 'DetectorProfile':
+        """Create a profile optimized for high precision detection"""
+        overrides = {
+            "volume": {
+                "context_weight": 0.5,  # High context sensitivity
+                "min_volume_threshold": 0.5,  # Very low threshold for sensitivity
+                "percentile_normalization": True
+            },
+            "histogram": {
+                "bin_count": 30,  # More bins for precision
+                "edge_enhancement": True,
+                "noise_reduction": True
+            },
+            "compactness": {
+                "n_angles": 72,  # More angles for precision
+                "fourier_analysis": True
+            }
+        }
+        
+        profile = cls.create_specialized_profile(
+            name="High Precision Detection",
+            description="Profile optimized for maximum detection precision",
+            feature_overrides=overrides
+        )
+        
+        # Stricter thresholds for precision
+        profile.thresholds.detection_threshold = 0.7
+        profile.thresholds.confidence_threshold = 0.8
+        
+        return profile
+    
+    @classmethod
+    def create_fast_survey_profile(cls) -> 'DetectorProfile':
+        """Create a profile optimized for fast large-area surveys"""
+        # Now we only need to specify what we want to change!
+        overrides = {
+            "volume": {
+                "context_weight": 0.2,  # Less context for speed
+                "percentile_normalization": False,  # Faster computation
+                "local_statistics_radius": 1.5
+            },
+            "histogram": {
+                "bin_count": 15,  # Fewer bins for speed
+                "edge_enhancement": False,
+                "adaptive_binning": False
+            },
+            "entropy": {"weight": 0.0},  # Disable for speed
+            "planarity": {"weight": 0.0}  # Disable for speed
+        }
+        
+        profile = cls.create_specialized_profile(
+            name="Fast Survey Mode",
+            description="Profile optimized for rapid large-area detection",
+            feature_overrides=overrides
+        )
+        
+        # Fast decision making
+        profile.thresholds.early_decision_threshold = 0.75
+        profile.thresholds.min_modules_for_decision = 2
+        
+        return profile
 
 
 class DetectorProfileManager:
@@ -357,7 +695,15 @@ class DetectorProfileManager:
                 structure_type=StructureType.GENERIC,
                 features={
                     "histogram": FeatureConfiguration(enabled=True, weight=2.0),
-                    "volume": FeatureConfiguration(enabled=True, weight=1.5),
+                    "volume": FeatureConfiguration(enabled=True, weight=1.5,
+                                                 parameters={
+                                                     "adaptive_scaling": True,
+                                                     "context_weight": 0.2,  # Less context for speed
+                                                     "auto_range_adaptation": True,
+                                                     "percentile_normalization": False,  # Faster computation
+                                                     "local_statistics_radius": 1.5,  # Smaller radius for speed
+                                                     "concentration_bonus": 1.1
+                                                 }),
                     "dropoff": FeatureConfiguration(enabled=False),
                     "compactness": FeatureConfiguration(enabled=False),
                     "entropy": FeatureConfiguration(enabled=False),
@@ -377,7 +723,10 @@ class DetectorProfileManager:
             # Also save to profiles for immediate use
             self.save_profile(profile)
         
-        logger.info(f"Created {len(presets)} template profiles")
+        # Create additional adaptive templates
+        self.create_adaptive_template_profiles()
+        
+        logger.info(f"Created {len(presets)} standard template profiles + adaptive templates")
     
     def save_template(self, profile: DetectorProfile, filename: Optional[str] = None) -> str:
         """Save a detector profile as a template"""
@@ -440,16 +789,62 @@ class DetectorProfileManager:
         geometry = GeometricParameters(**profile_dict['geometry'])
         thresholds = DetectionThresholds(**profile_dict['thresholds'])
         
-        # Reconstruct feature configurations
-        features = {}
-        for name, config_dict in profile_dict['features'].items():
-            features[name] = FeatureConfiguration(**config_dict)
-        
-        profile_dict['geometry'] = geometry
-        profile_dict['thresholds'] = thresholds
-        profile_dict['features'] = features
-        
-        profile = DetectorProfile(**profile_dict)
+        # Check if this is a new-style template with feature_overrides
+        if 'feature_overrides' in profile_dict:
+            # Create profile using the new override system
+            feature_overrides = profile_dict.get('feature_overrides', {})
+            feature_weights = profile_dict.get('feature_weights', {})
+            
+            # Create base profile
+            profile = DetectorProfile(
+                name=profile_dict.get('name', 'Loaded Profile'),
+                description=profile_dict.get('description', ''),
+                structure_type=profile_dict['structure_type']
+            )
+            
+            # Apply geometry and thresholds
+            profile.geometry = geometry
+            profile.thresholds = thresholds
+            
+            # Apply feature parameter overrides
+            for feature_name, param_overrides in feature_overrides.items():
+                if feature_name in profile.features:
+                    # Extract polarity_preference separately since it's not a parameter
+                    if 'polarity_preference' in param_overrides:
+                        profile.features[feature_name].polarity_preference = param_overrides['polarity_preference']
+                        # Remove from param_overrides so it doesn't go into parameters
+                        param_overrides = {k: v for k, v in param_overrides.items() if k != 'polarity_preference'}
+                    profile.features[feature_name].parameters.update(param_overrides)
+                    
+            # Apply custom weights
+            for feature_name, weight in feature_weights.items():
+                if feature_name in profile.features:
+                    profile.features[feature_name].weight = weight
+            
+            # Apply polarity preferences from template
+            polarity_preferences = profile_dict.get('polarity_preferences', {})
+            for feature_name, polarity_pref in polarity_preferences.items():
+                if feature_name in profile.features:
+                    profile.features[feature_name].polarity_preference = polarity_pref
+                    
+            # Set other profile attributes
+            profile.aggregation_method = profile_dict.get('aggregation_method', 'streaming')
+            profile.parallel_execution = profile_dict.get('parallel_execution', True)
+            profile.max_workers = profile_dict.get('max_workers', 4)
+            profile.enable_refinement = profile_dict.get('enable_refinement', True)
+            profile.max_refinement_attempts = profile_dict.get('max_refinement_attempts', 2)
+            
+        else:
+            # Legacy format - reconstruct feature configurations
+            features = {}
+            for name, config_dict in profile_dict['features'].items():
+                features[name] = FeatureConfiguration(**config_dict)
+            
+            profile_dict['geometry'] = geometry
+            profile_dict['thresholds'] = thresholds
+            profile_dict['features'] = features
+            
+            profile = DetectorProfile(**profile_dict)
         
         logger.info(f"Loaded profile '{profile.name}' from {filepath}")
         return profile

@@ -15,11 +15,20 @@ This directory contains test scripts for the G₂ kernel system.
 - **`test_detector_profile.py`** - Comprehensive profile system tests
 - **`test_profile_integration.py`** - Integration between DetectorProfile and G2StructureDetector
 
+### Polarity Preferences Tests
+- **`test_polarity_simple.py`** - Simple tests for polarity preferences functionality
+- **`test_windmill_accuracy.py`** - Comprehensive windmill detection accuracy test
+
 ## Usage
 
-Run the minimal test suite:
+Run the polarity preferences test:
 ```bash
-python test_minimal.py
+python test_polarity_simple.py
+```
+
+Run windmill detection accuracy test:
+```bash
+python test_windmill_accuracy.py
 ```
 
 Run all tests:
@@ -36,3 +45,5 @@ python test_*.py
 ✅ **Optimization** - Structure-type specific optimizations  
 ✅ **Geometry** - Resolution, patch size, and shape configurations  
 ✅ **Performance** - Speed vs accuracy trade-off testing
+✅ **Polarity Preferences** - Configurable feature polarity from profiles
+✅ **Windmill Detection** - Specialized tests for Dutch windmill mound detection

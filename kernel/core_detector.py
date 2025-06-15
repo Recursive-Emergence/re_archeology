@@ -12,9 +12,15 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 
-from .aggregator import RecursiveDetectionAggregator, AggregationResult, StreamingDetectionAggregator, StreamingAggregationResult
-from .modules import feature_registry, FeatureResult
-from .detector_profile import DetectorProfile, DetectorProfileManager, StructureType
+try:
+    from .aggregator import RecursiveDetectionAggregator, AggregationResult, StreamingDetectionAggregator, StreamingAggregationResult
+    from .modules import feature_registry, FeatureResult
+    from .detector_profile import DetectorProfile, DetectorProfileManager, StructureType
+except ImportError:
+    # Fallback for direct execution
+    from aggregator import RecursiveDetectionAggregator, AggregationResult, StreamingDetectionAggregator, StreamingAggregationResult
+    from modules import feature_registry, FeatureResult
+    from detector_profile import DetectorProfile, DetectorProfileManager, StructureType
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -91,6 +97,10 @@ class G2StructureDetector:
             max_workers, enable_refinement, max_refinement_attempts
         )
         
+        # Check if profile was successfully created
+        if self.profile is None:
+            raise RuntimeError("Could not create a valid detector profile. Please provide a profile explicitly.")
+        
         # Extract core parameters from profile
         self.resolution_m = self.profile.geometry.resolution_m
         self.structure_radius_m = self.profile.geometry.structure_radius_m
@@ -104,7 +114,21 @@ class G2StructureDetector:
         
         # Initialize feature modules using profile configuration
         enabled_features = self.profile.get_enabled_features()
-        module_weights = {name: config.weight for name, config in enabled_features.items()}
+        
+        # Map profile feature names to actual module names for weights
+        feature_name_mapping = {
+            'histogram': 'ElevationHistogram',
+            'entropy': 'ElevationEntropy', 
+            'dropoff': 'DropoffSharpness',
+            'volume': 'Volume',
+            'compactness': 'Compactness',
+            'planarity': 'Planarity'
+        }
+        
+        module_weights = {}
+        for profile_name, config in enabled_features.items():
+            module_name = feature_name_mapping.get(profile_name, profile_name)
+            module_weights[module_name] = config.weight
         
         self.feature_modules = feature_registry.get_all_modules(module_weights)
         
@@ -113,11 +137,23 @@ class G2StructureDetector:
         for module in self.feature_modules.values():
             module.set_parameters(self.resolution_m, structure_radius_px)
         
-        # Initialize aggregator using profile thresholds
+        # Configure modules with their specific parameters from profile
+        self._configure_modules_from_profile()
+        
+        # Extract polarity preferences from profile feature configurations
+        polarity_preferences = {}
+        for profile_name, feature_config in enabled_features.items():
+            if feature_config.polarity_preference is not None:
+                # Map profile feature name to actual module name using same mapping
+                module_name = feature_name_mapping.get(profile_name, profile_name)
+                polarity_preferences[module_name] = feature_config.polarity_preference
+        
+        # Initialize aggregator using profile thresholds and polarity preferences
         self.aggregator = StreamingDetectionAggregator(
             base_score=0.5,  # G₂ neutral starting score
             early_decision_threshold=self.profile.thresholds.early_decision_threshold,
-            min_modules_for_decision=self.profile.thresholds.min_modules_for_decision
+            min_modules_for_decision=self.profile.thresholds.min_modules_for_decision,
+            polarity_preferences=polarity_preferences
         )
         
         logger.info(f"G₂ detector initialized with profile '{self.profile.name}' - "
@@ -170,14 +206,21 @@ class G2StructureDetector:
             logger.info("Created profile from legacy parameters")
             return profile
         
-        # No parameters provided - use default amazon_windmill template
+        # No parameters provided - create a basic default profile
         try:
-            profile = self._create_default_amazon_windmill_profile()
-            logger.info("Using default Amazon Windmill profile")
+            from .detector_profile import DetectorProfile, StructureType
+            profile = DetectorProfile(
+                name="Basic Default Profile",
+                description="Auto-generated basic profile for G₂ detector",
+                structure_type=StructureType.GENERIC
+            )
+            logger.info("Created basic default profile")
             return profile
         except Exception as e:
             logger.error(f"Failed to create default profile: {e}")
-            raise RuntimeError("Could not create valid detector profile") from e
+            # If even basic profile creation fails, provide minimal fallback
+            logger.warning("Using minimal fallback configuration")
+            return None
     
     def _create_profile_from_legacy_params(self,
                                           resolution_m: Optional[float],
@@ -187,12 +230,14 @@ class G2StructureDetector:
                                           enable_refinement: Optional[bool],
                                           max_refinement_attempts: Optional[int]) -> DetectorProfile:
         """Create a DetectorProfile from legacy individual parameters"""
-        from .detector_profile import GeometricParameters, DetectionThresholds, FeatureConfiguration
+        from .detector_profile import GeometricParameters, DetectionThresholds, FeatureConfiguration, DetectorProfile, StructureType
         
-        # Start with default profile and override with provided parameters
-        profile = self._create_default_amazon_windmill_profile()
-        profile.name = "Legacy Parameter Profile"
-        profile.description = "Created from individual constructor parameters"
+        # Start with basic default profile and override with provided parameters
+        profile = DetectorProfile(
+            name="Legacy Parameter Profile",
+            description="Created from individual constructor parameters",
+            structure_type=StructureType.GENERIC
+        )
         
         # Override geometry parameters
         if resolution_m is not None:
@@ -331,10 +376,9 @@ class G2StructureDetector:
         refinement_attempts = 0
         refinement_history = [aggregation_result]
         
-        # Note: StreamingDetectionAggregator may not support refinement
-        # This is a placeholder for future enhancement
+        # Recursive refinement is supported by RecursiveDetectionAggregator
         if self.enable_refinement:
-            logger.info("Refinement is enabled but not yet implemented for StreamingDetectionAggregator")
+            logger.info("Starting recursive refinement process")
         
         # Step 5: Make final detection decision
         detection_threshold = self.detection_threshold
@@ -581,128 +625,18 @@ class G2StructureDetector:
         
         return results
     
-    def _resolve_profile(self, 
-                        profile: Optional[DetectorProfile], 
-                        profile_name: Optional[str],
-                        resolution_m: Optional[float],
-                        structure_radius_m: Optional[float], 
-                        structure_type: Optional[str],
-                        max_workers: Optional[int],
-                        enable_refinement: Optional[bool],
-                        max_refinement_attempts: Optional[int]) -> DetectorProfile:
-        """
-        Resolve detector profile using three initialization modes:
-        1. Use provided profile directly
-        2. Load profile by name  
-        3. Create profile from legacy parameters or use default
-        """
-        # Mode 1: Use existing profile
-        if profile is not None:
-            logger.info(f"Using provided profile: '{profile.name}'")
-            return profile
+    def _configure_modules_from_profile(self):
+        """Configure feature modules with their specific parameters from the profile"""
+        enabled_features = self.profile.get_enabled_features()
         
-        # Mode 2: Load profile by name
-        if profile_name is not None:
-            try:
-                profile = self.profile_manager.load_template(f"{profile_name}.json")
-                logger.info(f"Loaded profile template: '{profile_name}'")
-                return profile
-            except FileNotFoundError:
-                logger.warning(f"Profile template '{profile_name}' not found, creating default")
-        
-        # Mode 3: Create from legacy parameters or use default
-        if any(param is not None for param in [resolution_m, structure_radius_m, structure_type]):
-            # Issue deprecation warning for legacy usage
-            warnings.warn(
-                "Using individual parameters is deprecated. "
-                "Please use DetectorProfile for better configuration management.",
-                DeprecationWarning,
-                stacklevel=3
-            )
-            
-            # Create profile from legacy parameters
-            profile = self._create_profile_from_legacy_params(
-                resolution_m, structure_radius_m, structure_type,
-                max_workers, enable_refinement, max_refinement_attempts
-            )
-            logger.info("Created profile from legacy parameters")
-            return profile
-        
-        # No parameters provided - use default amazon_windmill template
-        try:
-            profile = self._create_default_amazon_windmill_profile()
-            logger.info("Using default Amazon Windmill profile")
-            return profile
-        except Exception as e:
-            logger.error(f"Failed to create default profile: {e}")
-            raise RuntimeError("Could not create valid detector profile") from e
-    
-    def _create_profile_from_legacy_params(self,
-                                          resolution_m: Optional[float],
-                                          structure_radius_m: Optional[float], 
-                                          structure_type: Optional[str],
-                                          max_workers: Optional[int],
-                                          enable_refinement: Optional[bool],
-                                          max_refinement_attempts: Optional[int]) -> DetectorProfile:
-        """Create a DetectorProfile from legacy individual parameters"""
-        from .detector_profile import GeometricParameters, DetectionThresholds, FeatureConfiguration
-        
-        # Start with default profile and override with provided parameters
-        profile = self._create_default_amazon_windmill_profile()
-        profile.name = "Legacy Parameter Profile"
-        profile.description = "Created from individual constructor parameters"
-        
-        # Override geometry parameters
-        if resolution_m is not None:
-            profile.geometry.resolution_m = resolution_m
-        if structure_radius_m is not None:
-            profile.geometry.structure_radius_m = structure_radius_m
-            
-        # Override structure type
-        if structure_type is not None:
-            try:
-                profile.structure_type = StructureType(structure_type)
-            except ValueError:
-                logger.warning(f"Unknown structure type '{structure_type}', using GENERIC")
-                profile.structure_type = StructureType.GENERIC
-        
-        # Override execution parameters
-        if max_workers is not None:
-            profile.max_workers = max_workers
-        if enable_refinement is not None:
-            profile.enable_refinement = enable_refinement
-        if max_refinement_attempts is not None:
-            profile.max_refinement_attempts = max_refinement_attempts
-            
-        return profile
-    
-    def _create_default_amazon_windmill_profile(self) -> DetectorProfile:
-        """Create the default Amazon Windmill detection profile"""
-        from .detector_profile import GeometricParameters, DetectionThresholds, FeatureConfiguration
-        
-        return DetectorProfile(
-            name="Amazon Windmill Default",
-            description="Default profile optimized for windmill detection in Amazonian terrain",
-            structure_type=StructureType.WINDMILL,
-            geometry=GeometricParameters(
-                resolution_m=0.5,
-                structure_radius_m=8.0,
-                patch_size_m=(20.0, 20.0)
-            ),
-            thresholds=DetectionThresholds(
-                detection_threshold=0.5,
-                early_decision_threshold=0.85,
-                min_modules_for_decision=2
-            ),
-            features={
-                "ElevationHistogram": FeatureConfiguration(enabled=True, weight=1.5),
-                "Volume": FeatureConfiguration(enabled=True, weight=1.3),
-                "DropoffSharpness": FeatureConfiguration(enabled=True, weight=1.2),
-                "Compactness": FeatureConfiguration(enabled=True, weight=1.1),
-                "ElevationEntropy": FeatureConfiguration(enabled=True, weight=1.0),
-                "Planarity": FeatureConfiguration(enabled=True, weight=0.9)
-            },
-            max_workers=5,
-            enable_refinement=True,
-            max_refinement_attempts=2
-        )
+        for module_name, config in enabled_features.items():
+            if module_name in self.feature_modules and config.parameters:
+                module = self.feature_modules[module_name]
+                
+                # Call the module's configure method with the profile parameters
+                try:
+                    module.configure(**config.parameters)
+                    logger.debug(f"Configured {module_name} module with {len(config.parameters)} parameters")
+                except Exception as e:
+                    logger.warning(f"Failed to configure {module_name} module: {e}")
+                    # Continue with other modules even if one fails

@@ -60,16 +60,18 @@ class RecursiveDetectionAggregator:
     to make final detection decisions with recursive refinement capability.
     """
     
-    def __init__(self, phi0_weight: float = 0.6, feature_weight: float = 0.4):
+    def __init__(self, phi0_weight: float = 0.6, feature_weight: float = 0.4, polarity_preferences: Dict[str, str] = None):
         """
         Initialize the aggregator
         
         Args:
             phi0_weight: Weight for base φ⁰ score contribution
             feature_weight: Weight for feature evidence contribution
+            polarity_preferences: Dict mapping feature names to polarity preferences ("positive", "negative", or None)
         """
         self.phi0_weight = phi0_weight
         self.feature_weight = feature_weight
+        self.polarity_preferences = polarity_preferences or {}
         self.evidence_signals: List[EvidenceSignal] = []
         self.phi0_score = 0.0
         self.refinement_history: List[AggregationResult] = []
@@ -303,6 +305,15 @@ class RecursiveDetectionAggregator:
         Returns:
             Tuple of (interpreted_polarity, adjusted_weight)
         """
+        # Check for explicit polarity preference from profile configuration
+        if module_name in self.polarity_preferences:
+            preferred_polarity = self.polarity_preferences[module_name]
+            if preferred_polarity in ["positive", "negative"]:
+                # Use configured polarity preference, but still adjust weight based on score strength
+                score_strength = max(0.1, score)  # Avoid zero weight
+                adjusted_weight = weight * score_strength
+                return preferred_polarity, adjusted_weight
+        
         # Very low scores are typically negative evidence
         if score < 0.1:
             return "negative", weight * 0.8
@@ -700,7 +711,8 @@ class StreamingDetectionAggregator:
     def __init__(self, 
                  base_score: float = 0.5,
                  early_decision_threshold: float = 0.85,
-                 min_modules_for_decision: int = 2):
+                 min_modules_for_decision: int = 2,
+                 polarity_preferences: Dict[str, str] = None):
         """
         Initialize optimized streaming aggregator
         
@@ -708,10 +720,12 @@ class StreamingDetectionAggregator:
             base_score: Neutral starting score (G₂ approach)
             early_decision_threshold: Confidence threshold for early decisions
             min_modules_for_decision: Minimum modules needed before early decision
+            polarity_preferences: Dict mapping feature names to polarity preferences ("positive", "negative", or None)
         """
         self.base_score = base_score
         self.early_decision_threshold = early_decision_threshold
         self.min_modules_for_decision = min_modules_for_decision
+        self.polarity_preferences = polarity_preferences or {}
         
         # State tracking
         self.evidence_signals: List[EvidenceSignal] = []
@@ -737,10 +751,29 @@ class StreamingDetectionAggregator:
             weight: Weight for this evidence in aggregation
         """
         if result.valid:
-            # Dynamic polarity interpretation for neutral features
-            interpreted_polarity, adjusted_weight = self._interpret_polarity(
-                name, result.score, result.metadata or {}, weight
-            )
+            # Check if FeatureResult has explicit polarity set
+            if hasattr(result, 'polarity') and result.polarity in ["positive", "negative"]:
+                # Use explicit polarity from the feature module
+                interpreted_polarity = result.polarity
+                adjusted_weight = weight
+            else:
+                # For neutral/unspecified features, check polarity preferences first
+                if name in self.polarity_preferences:
+                    preferred_polarity = self.polarity_preferences[name]
+                    if preferred_polarity in ["positive", "negative"]:
+                        # Use configured polarity preference
+                        interpreted_polarity = preferred_polarity
+                        adjusted_weight = weight
+                    else:
+                        # Fall back to dynamic interpretation
+                        interpreted_polarity, adjusted_weight = self._interpret_polarity(
+                            name, result.score, result.metadata or {}, weight
+                        )
+                else:
+                    # No preference set, use dynamic interpretation
+                    interpreted_polarity, adjusted_weight = self._interpret_polarity(
+                        name, result.score, result.metadata or {}, weight
+                    )
             
             signal = EvidenceSignal(
                 name=name,
@@ -1053,6 +1086,22 @@ class StreamingDetectionAggregator:
         Returns:
             Tuple of (interpreted_polarity, adjusted_weight)
         """
+        # DEBUG: Print input
+        print(f"DEBUG _interpret_polarity: module={module_name}, score={score:.4f}")
+        
+        # Check for explicit polarity preference from profile configuration
+        if module_name in self.polarity_preferences:
+            preferred_polarity = self.polarity_preferences[module_name]
+            print(f"DEBUG: Found preference for {module_name}: {preferred_polarity}")
+            if preferred_polarity in ["positive", "negative"]:
+                # Use configured polarity preference, but still adjust weight based on score strength
+                score_strength = max(0.1, score)  # Avoid zero weight
+                adjusted_weight = weight * score_strength
+                print(f"DEBUG: Using preference, returning {preferred_polarity}, weight={adjusted_weight:.3f}")
+                return preferred_polarity, adjusted_weight
+        
+        print(f"DEBUG: No preference found, using dynamic logic")
+        
         # Very low scores are typically negative evidence
         if score < 0.1:
             return "negative", weight * 0.8

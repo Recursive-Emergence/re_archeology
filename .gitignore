@@ -207,3 +207,4 @@ htmlcov/
 sage*.json
 .env.cloudrun
 .env.cloudrun.yaml
+g2_validation_results/
