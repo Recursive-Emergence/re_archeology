@@ -398,7 +398,9 @@ class G2StructureDetector:
         
         # Step 5: Make final detection decision
         detection_threshold = self.detection_threshold
-        detected = aggregation_result.final_score >= detection_threshold
+        confidence_threshold = self.profile.thresholds.confidence_threshold
+        detected = (aggregation_result.final_score >= detection_threshold and 
+                   aggregation_result.confidence >= confidence_threshold)
         
         # Generate comprehensive result
         result = G2DetectionResult(
@@ -414,6 +416,7 @@ class G2StructureDetector:
             metadata={
                 "base_score": base_score,
                 "detection_threshold": detection_threshold,
+                "confidence_threshold": confidence_threshold,
                 "structure_type": self.structure_type,
                 "feature_module_count": len(self.feature_modules)
             }
@@ -577,8 +580,9 @@ class G2StructureDetector:
         
         # Step 4: Make detection decision
         detection_threshold = self.detection_threshold
-        detected = final_aggregation.final_score >= detection_threshold
-        
+        confidence_threshold = self.profile.thresholds.confidence_threshold
+        detected = (final_aggregation.final_score >= detection_threshold and 
+                   final_aggregation.confidence >= confidence_threshold)
         # Generate comprehensive result
         result = G2DetectionResult(
             detected=detected,
@@ -593,6 +597,7 @@ class G2StructureDetector:
             metadata={
                 "base_score": base_score,
                 "detection_threshold": detection_threshold,
+                "confidence_threshold": confidence_threshold,
                 "structure_type": self.structure_type,
                 "feature_module_count": len(self.feature_modules),
                 "streaming_results": streaming_results,
@@ -649,10 +654,37 @@ class G2StructureDetector:
             if module_name in self.feature_modules and config.parameters:
                 module = self.feature_modules[module_name]
                 
+                # Special handling for histogram module - load reference kernel if specified
+                if module_name == 'histogram' and 'reference_kernel_path' in config.parameters:
+                    try:
+                        import pickle
+                        from pathlib import Path
+                        
+                        kernel_path = config.parameters['reference_kernel_path']
+                        full_path = Path(kernel_path)
+                        
+                        if full_path.exists():
+                            with open(full_path, 'rb') as f:
+                                kernel_data = pickle.load(f)
+                            
+                            if 'elevation_kernel' in kernel_data:
+                                reference_kernel = kernel_data['elevation_kernel']
+                                module.set_reference_kernel(reference_kernel)
+                                logger.info(f"Loaded reference kernel from {kernel_path} for histogram module")
+                            else:
+                                logger.warning(f"No elevation_kernel found in {kernel_path}")
+                        else:
+                            logger.warning(f"Reference kernel file not found: {kernel_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load reference kernel: {e}")
+                
                 # Call the module's configure method with the profile parameters
                 try:
+                    logger.info(f"Configuring {module_name} module with parameters: {list(config.parameters.keys())}")
                     module.configure(**config.parameters)
-                    logger.debug(f"Configured {module_name} module with {len(config.parameters)} parameters")
+                    logger.info(f"Successfully configured {module_name} module with {len(config.parameters)} parameters")
                 except Exception as e:
-                    logger.warning(f"Failed to configure {module_name} module: {e}")
+                    logger.error(f"Failed to configure {module_name} module: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     # Continue with other modules even if one fails

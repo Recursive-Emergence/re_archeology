@@ -382,6 +382,9 @@ class VolumeModule(BaseFeatureModule):
                 combined_score = ((1 - self.relative_prominence_weight) * combined_score + 
                                 self.relative_prominence_weight * relative_prominence_score)
                 
+                # Ensure final score is always bounded [0, 1]
+                combined_score = np.clip(combined_score, 0.0, 1.0)
+                
             else:
                 combined_score = 0.0
                 volume_above_base = 0.0
