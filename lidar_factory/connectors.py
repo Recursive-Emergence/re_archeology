@@ -52,6 +52,9 @@ class GEEConnector(LidarConnector):
                 logger.error(f"❌ Failed to initialize Earth Engine: {e}")
                 # Optionally, re-raise or handle more gracefully
                 raise
+        
+        # Set the instance flag to match the class flag
+        self.ee_initialized = GEEConnector._ee_initialized
 
     def fetch_patch(self, lat: float, lon: float, size_m: int, target_resolution_m: float, data_type_to_fetch: str) -> Optional[np.ndarray]:
         """
@@ -70,7 +73,10 @@ class GEEConnector(LidarConnector):
             logger.info(f"Fetching GEE data for {self.dataset_metadata.name} ({data_type_to_fetch} using band '{band_name}') at ({lat:.4f}, {lon:.4f}), size: {size_m}m, target_res: {target_resolution_m}m/px")
 
             center = ee.Geometry.Point([lon, lat])
-            polygon = center.buffer(size_m / 2).bounds()
+            
+            # Create a proper square bounds in meters using buffer
+            # This should create a more square result than using degrees
+            square_bounds = center.buffer(size_m / 2.0).bounds()
 
             # Get the GEE image or image collection ID from provider_info
             image_asset_id: Optional[str] = None
@@ -90,10 +96,15 @@ class GEEConnector(LidarConnector):
             else:
                 image = ee.Image(image_asset_id).select(band_name)
             
-            image_reprojected = image.reproject(crs='EPSG:4326', scale=target_resolution_m)
+            # Use a projected coordinate system for more consistent pixel spacing
+            # UTM zone is better for square patches than lat/lon
+            image_reprojected = image.reproject(crs='EPSG:3857', scale=target_resolution_m)  # Web Mercator for better square sampling
 
+            # Calculate expected dimensions for validation
+            expected_pixels_dim = int(size_m / target_resolution_m)
+            
             rect_data = image_reprojected.sampleRectangle(
-                region=polygon,
+                region=square_bounds,
                 defaultValue=-9999
             )
             
@@ -118,8 +129,17 @@ class GEEConnector(LidarConnector):
                     logger.warning(f"All values were NaN for {self.dataset_metadata.name} (band: {band_name}) at {lat:.4f}, {lon:.4f}. Filled with 0.")
                     elevation_array = np.nan_to_num(elevation_array, nan=0.0)
 
-            expected_pixels_dim = int(size_m / target_resolution_m)
+            # Log shape comparison with expected
             logger.info(f"✅ Fetched {self.dataset_metadata.name} (band: {band_name}) data: shape {elevation_array.shape}, expected ~({expected_pixels_dim}x{expected_pixels_dim})")
+            
+            # Optional: Resize to exact square if very close but not perfect
+            if abs(elevation_array.shape[0] - expected_pixels_dim) <= 5 and abs(elevation_array.shape[1] - expected_pixels_dim) <= 5:
+                from scipy.ndimage import zoom
+                if 'scipy' in globals():  # Only if scipy is available
+                    target_shape = (expected_pixels_dim, expected_pixels_dim)
+                    zoom_factors = (target_shape[0] / elevation_array.shape[0], target_shape[1] / elevation_array.shape[1])
+                    elevation_array = zoom(elevation_array, zoom_factors, order=1)
+                    logger.info(f"Resized patch to exact square: {elevation_array.shape}")
             
             return elevation_array
 

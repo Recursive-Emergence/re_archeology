@@ -4,24 +4,24 @@ G₂ Kernel Validation System with Real AHN4 Data
 Enhanced validation using the new G₂ kernel detector from kernel/ directory
 Uses real AHN4 elevation data from Google Earth Engine for Dutch windmill detection
 """
-
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+import logging
+import time # Added import
+import json # Added import
+import numpy as np # Added import
+import matplotlib.pyplot as plt # Added import
 from matplotlib.patches import Rectangle
-import json
-import os
-import time
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, asdict
-import logging
 from pathlib import Path
 
 # Import the new G₂ kernel detector
 from kernel.core_detector import G2StructureDetector
 
-# Import AHN4 data fetcher
-from lidar.ahn4_data_fetcher import AHN4DataFetcher
+# Import LidarMapFactory
+from lidar_factory.factory import LidarMapFactory # Changed import
+
+# Import the AHN4DataFetcher to get the real test locations
+from lidar_factory.ahn4_data_fetcher import AHN4DataFetcher # Added import
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -37,11 +37,38 @@ class ValidationSite:
     site_type: str  # 'positive' or 'negative'
     confidence: float = 0.0  # Expected confidence level
 
+# Real Dutch windmill locations from ahn4_data_fetcher (before retirement)
+# Each entry: (name, lat, lon, expected_structures, site_type)
+_DUTCH_WINDMILL_LOCATIONS_DATA = [
+    # Training Sites (first 6) - Real locations from ahn4_data_fetcher
+    ("De Kat", 52.47505310183309, 4.8177388422949585, 1, "positive"),
+    ("De Zoeker", 52.47590104112108, 4.817647238879872, 1, "positive"),
+    ("Het Jonge Schaap", 52.47621811347626, 4.816644787814995, 1, "positive"),
+    ("De Bonte Hen", 52.47793734015221, 4.813402499137949, 1, "positive"),
+    ("De Gekroonde Poelenburg", 52.474166977199445, 4.817628676751737, 1, "positive"),
+    ("De Huisman", 52.47323132365517, 4.816668420518732, 1, "positive"),
+    
+    # Validation Sites (remaining) - Mix of positive and negative
+    ("Kinderdijk Windmill Complex", 51.8820, 4.6300, 2, "positive"),
+    ("De Gooyer Windmill Amsterdam", 52.3667, 4.9270, 1, "positive"),
+    ("Molen de Adriaan Haarlem", 52.3823, 4.6308, 1, "positive"),
+    ("Historic Windmill Leiden", 52.1589, 4.4937, 1, "positive"),
+    
+    # Negative control sites - areas without windmills
+    ("Some Trees Area", 52.628085, 4.762604, 0, "negative"),
+    ("Dutch Farmland", 52.2593, 5.2714, 0, "negative"),
+    ("Complex Zaanse Schans (not windmill)", 52.4776, 4.8097, 0, "negative"),
+    ("Rural Field Near Utrecht", 52.0907, 5.1214, 0, "negative"),
+    ("Open Agricultural Area Gelderland", 52.0585, 5.8710, 0, "negative"),
+    ("Forest Area Veluwe National Park", 52.1500, 5.9000, 0, "negative"),
+]
+
+
 class G2ValidationSystem:
     """Enhanced validation system using G₂ kernel detector"""
     
     def __init__(self, output_dir: str = "g2_validation_results"):
-        """Initialize validation system with AHN4 data fetcher and Dutch windmill profile"""
+        """Initialize validation system with LidarMapFactory and Dutch windmill profile"""
         # Load the Dutch windmill profile from templates first
         from kernel.detector_profile import DetectorProfileManager
         self.profile_manager = DetectorProfileManager(templates_dir="kernel/templates")
@@ -50,7 +77,9 @@ class G2ValidationSystem:
         # Initialize the G₂ detector with the Dutch windmill profile
         self.detector = G2StructureDetector(profile=self.dutch_profile)
         
-        self.ahn4_fetcher = AHN4DataFetcher()
+        # LidarMapFactory is used via static methods, no instance needed here.
+        # self.ahn4_fetcher = AHN4DataFetcher() # Removed
+        
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         
@@ -72,66 +101,68 @@ class G2ValidationSystem:
         logger.info(f"Enabled features: {list(self.dutch_profile.get_enabled_features().keys())}")
 
     def get_training_sites(self) -> List[ValidationSite]:
-        """Get training sites with known Dutch windmill structures from AHN4 fetcher"""
-        dutch_locations = self.ahn4_fetcher.get_dutch_windmill_locations()
+        """Get training sites with known Dutch windmill structures from internal list"""
+        # dutch_locations = self.ahn4_fetcher.get_dutch_windmill_locations() # Removed
+        training_sites_data = _DUTCH_WINDMILL_LOCATIONS_DATA[:6]
         training_sites = []
         
-        for location in dutch_locations[:6]:  # Use first 6 as training sites
+        for name, lat, lon, expected, site_type_str in training_sites_data:
             training_sites.append(ValidationSite(
-                location['name'], 
-                location['lat'], 
-                location['lon'], 
-                location['expected_structures'], 
-                location['site_type']
+                name=name,
+                lat=lat,
+                lon=lon,
+                expected_structures=expected,
+                site_type=site_type_str
             ))
         
         return training_sites
 
     def get_validation_sites(self) -> List[ValidationSite]:
-        """Get validation sites for testing from AHN4 fetcher"""
-        dutch_locations = self.ahn4_fetcher.get_dutch_windmill_locations()
+        """Get validation sites for testing from internal list"""
+        # dutch_locations = self.ahn4_fetcher.get_dutch_windmill_locations() # Removed
+        validation_sites_data = _DUTCH_WINDMILL_LOCATIONS_DATA[6:]
         validation_sites = []
         
-        for location in dutch_locations[6:]:  # Use remaining as validation sites
+        for name, lat, lon, expected, site_type_str in validation_sites_data:
             validation_sites.append(ValidationSite(
-                location['name'], 
-                location['lat'], 
-                location['lon'], 
-                location['expected_structures'], 
-                location['site_type']
+                name=name,
+                lat=lat,
+                lon=lon,
+                expected_structures=expected,
+                site_type=site_type_str
             ))
         
         return validation_sites
 
     def get_ahn4_lidar_data(self, site: ValidationSite, size: Tuple[int, int] = (80, 80)) -> Optional[np.ndarray]:
-        """Get real AHN4 LiDAR data for Dutch windmill validation - REAL DATA ONLY"""
-        height, width = size
-        size_m = 40  # 80m x 80m patch with 0.5m precision = 160x160 pixels
+        """Get LiDAR data for Dutch windmill validation using LidarMapFactory with fallback"""
+        # Request 40x40m patch at 0.5m precision = 80x80 pixels (square)
+        patch_edge_size_m = 40  # 40m x 40m patch for windmill detection
+        target_resolution_m = 0.5  # 0.5m per pixel precision
+
+        logger.info(f"Fetching LiDAR data for {site.name} at {site.lat:.4f}, {site.lon:.4f} using LidarMapFactory")
+        logger.info(f"Requesting {patch_edge_size_m}m x {patch_edge_size_m}m patch at {target_resolution_m}m/pixel (expected: 80x80 pixels)")
         
-        logger.info(f"Fetching AHN4 data for {site.name} at {site.lat:.4f}, {site.lon:.4f}")
-        
-        # Only use real AHN4 data - no synthetic fallback
-        if not self.ahn4_fetcher.ee_initialized:
-            logger.error("Earth Engine not available - cannot proceed without real data")
-            return None
-            
-        lidar_data = self.ahn4_fetcher.get_ahn4_data(
-            site.lat, site.lon, 
-            size_m=size_m, 
-            resolution_m=0.5
+        # Use LidarMapFactory to get the patch
+        # Let the factory choose the best available dataset (AHN4 preferred, with fallbacks)
+        # We specify preferred_data_type as DSM.
+        lidar_data = LidarMapFactory.get_patch(
+            lat=site.lat,
+            lon=site.lon,
+            size_m=patch_edge_size_m,
+            preferred_resolution_m=target_resolution_m,
+            preferred_data_type="DSM"   # Digital Surface Model
         )
         
-        if lidar_data is not None:
-            # Resize to requested dimensions if needed
-            if lidar_data.shape != (height, width):
-                from scipy.ndimage import zoom
-                zoom_factor = (height / lidar_data.shape[0], width / lidar_data.shape[1])
-                lidar_data = zoom(lidar_data, zoom_factor, order=1)
-            
-            logger.info(f"Successfully fetched real AHN4 data for {site.name}: {lidar_data.shape}")
+        if lidar_data is not None and lidar_data.size > 0:
+            logger.info(f"Successfully fetched LiDAR data for {site.name}. Shape: {lidar_data.shape}")
+            # Expected shape for 40m at 0.5m/px is (80, 80) - should be square
+            expected_shape = (80, 80)
+            if lidar_data.shape != expected_shape:
+                logger.warning(f"Expected square patch {expected_shape}, got {lidar_data.shape}. This may indicate factory/GEE projection issues.")
             return lidar_data
         else:
-            logger.error(f"Failed to fetch AHN4 data for {site.name} - skipping site")
+            logger.error(f"Failed to fetch LiDAR data for {site.name} using LidarMapFactory.")
             return None
 
     def save_lidar_image(self, lidar_data: np.ndarray, site: ValidationSite) -> str:
@@ -504,6 +535,18 @@ Base Score: {g2_result.get('base_score', 0):.3f}"""
         # Calculate overall metrics
         metrics = self.calculate_validation_metrics()
         
+        # Check if we have any results
+        if not metrics:
+            logger.error("No validation results available - all sites failed to fetch LiDAR data")
+            logger.error("Please ensure Google Earth Engine is properly initialized or other data sources are available")
+            return {
+                'validation_metrics': {},
+                'site_results': [],
+                'site_paths': {},
+                'timestamp': time.strftime('%Y%m%d_%H%M%S'),
+                'error': 'No LiDAR data could be fetched for any validation sites'
+            }
+        
         # Save comprehensive results
         comprehensive_results = {
             'validation_metrics': metrics,
@@ -538,11 +581,14 @@ Base Score: {g2_result.get('base_score', 0):.3f}"""
             serializable_results = make_json_serializable(comprehensive_results)
             json.dump(serializable_results, f, indent=2)
         
-        # Create summary visualization
+        # Create summary visualization only if we have results
         self.create_summary_visualization(metrics)
         
         logger.info(f"Validation complete! Results saved to {results_path}")
-        logger.info(f"Accuracy: {metrics['accuracy']:.3f}, Precision: {metrics['precision']:.3f}, Recall: {metrics['recall']:.3f}, F1: {metrics['f1_score']:.3f}")
+        if metrics:
+            logger.info(f"Accuracy: {metrics['accuracy']:.3f}, Precision: {metrics['precision']:.3f}, Recall: {metrics['recall']:.3f}, F1: {metrics['f1_score']:.3f}")
+        else:
+            logger.warning("No metrics to display - validation failed to process any sites")
         
         return comprehensive_results
 
