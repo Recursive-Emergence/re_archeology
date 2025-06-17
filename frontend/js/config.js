@@ -26,7 +26,11 @@ class AppConfig {
     }
     
     getApiBase() {
-        // In all environments, API is served from the same origin
+        // In development, use explicit localhost:8080
+        if (this.environment === 'development') {
+            return `http://localhost:8080/api/v1`;
+        }
+        // In all other environments, API is served from the same origin
         return `/api/v1`;
     }
     

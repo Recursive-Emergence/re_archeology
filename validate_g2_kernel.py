@@ -20,9 +20,6 @@ from kernel.core_detector import G2StructureDetector
 # Import LidarMapFactory
 from lidar_factory.factory import LidarMapFactory # Changed import
 
-# Import the AHN4DataFetcher to get the real test locations
-from lidar_factory.ahn4_data_fetcher import AHN4DataFetcher # Added import
-
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

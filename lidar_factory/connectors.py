@@ -45,7 +45,31 @@ class GEEConnector(LidarConnector):
         """Initializes Earth Engine if not already initialized."""
         if not GEEConnector._ee_initialized:
             try:
-                ee.Initialize(project='sage-striker-294302') # TODO: Make project configurable if needed
+                # First check if Earth Engine is already initialized by the shared utility
+                try:
+                    from backend.utils.earth_engine import is_earth_engine_available
+                    if is_earth_engine_available():
+                        logger.info("✅ Earth Engine already initialized by shared utility")
+                        GEEConnector._ee_initialized = True
+                        self.ee_initialized = True
+                        return
+                except ImportError:
+                    logger.debug("Shared Earth Engine utility not available, using local initialization")
+                
+                import os
+                
+                # Fallback: Try to use service account authentication locally
+                service_account_key = os.getenv('GOOGLE_APPLICATION_CREDENTIALS') or os.getenv('GOOGLE_EE_SERVICE_ACCOUNT_KEY')
+                project_id = os.getenv('GOOGLE_EE_PROJECT_ID', 'sage-striker-294302')
+                
+                if service_account_key and os.path.exists(service_account_key):
+                    logger.info(f"🔐 Initializing Earth Engine with service account: {service_account_key}")
+                    credentials = ee.ServiceAccountCredentials(None, key_file=service_account_key)
+                    ee.Initialize(credentials, project=project_id)
+                else:
+                    logger.info(f"🔐 Initializing Earth Engine with default credentials for project: {project_id}")
+                    ee.Initialize(project=project_id)
+                    
                 GEEConnector._ee_initialized = True
                 logger.info(f"✅ Earth Engine initialized successfully for {self.dataset_metadata.name if self.dataset_metadata else 'GEE Connector'}")
             except Exception as e:
@@ -102,11 +126,29 @@ class GEEConnector(LidarConnector):
 
             # Calculate expected dimensions for validation
             expected_pixels_dim = int(size_m / target_resolution_m)
+            expected_total_pixels = expected_pixels_dim * expected_pixels_dim
             
-            rect_data = image_reprojected.sampleRectangle(
-                region=square_bounds,
-                defaultValue=-9999
-            )
+            # Check if we'll exceed Earth Engine's pixel limit (262,144)
+            if expected_total_pixels > 262144:
+                logger.warning(f"Requested resolution too high for {self.dataset_metadata.name}: {expected_total_pixels} pixels > 262,144 limit. Reducing resolution.")
+                # Automatically reduce resolution to stay under limit
+                max_dim = int(np.sqrt(262144))  # ~512 pixels per side
+                new_resolution = size_m / max_dim
+                logger.info(f"Auto-adjusting resolution from {target_resolution_m}m to {new_resolution:.1f}m for {self.dataset_metadata.name}")
+                image_reprojected = image.reproject(crs='EPSG:3857', scale=new_resolution)
+            
+            try:
+                rect_data = image_reprojected.sampleRectangle(
+                    region=square_bounds,
+                    defaultValue=-9999
+                )
+            except Exception as e:
+                if "Too many pixels" in str(e):
+                    logger.warning(f"Still too many pixels for {self.dataset_metadata.name}. Skipping this dataset.")
+                    return None
+                else:
+                    logger.error(f"GEE Error fetching {self.dataset_metadata.name} (band: {band_name}) data: {e}")
+                    return None
             
             elev_block = rect_data.get(band_name).getInfo()
             

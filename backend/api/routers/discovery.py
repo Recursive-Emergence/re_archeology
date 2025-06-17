@@ -15,6 +15,7 @@ from dataclasses import dataclass, asdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.websockets import WebSocketState
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import numpy as np
 import ee
 
@@ -64,40 +65,45 @@ def clean_patch_data(elevation_data: np.ndarray) -> np.ndarray:
             elevation_data = np.full_like(elevation_data, 2.0)
     return elevation_data
 
-def load_real_elevation_patch(lat, lon, windmill_name, buffer_radius_m=20, resolution_m=0.5):
+def load_elevation_patch_unified(lat, lon, patch_name, buffer_radius_m=20, resolution_m=0.5, data_type="DSM"):
     """
-    Load elevation patch using Earth Engine AHN4 DSM data.
-    Uses sampleRectangle to fetch the entire grid in one request.
+    Unified elevation loading using LidarMapFactory.
+    This replaces both Earth Engine and manual elevation loading.
     """
-    logger.info(f"Loading REAL AHN4 data for {windmill_name}...")
+    logger.info(f"Loading elevation data via LidarFactory for {patch_name}...")
     logger.info(f"  Location: ({lat:.6f}, {lon:.6f})")
     logger.info(f"  Buffer: {buffer_radius_m}m radius at {resolution_m}m resolution")
+    logger.info(f"  Data type: {data_type}")
     
     try:
-        # Ensure Earth Engine is available
-        if not is_earth_engine_available():
-            raise Exception("Earth Engine not available - cannot load elevation data")
+        from lidar_factory.factory import LidarMapFactory
         
-        center = ee.Geometry.Point([lon, lat])
-        polygon = center.buffer(buffer_radius_m).bounds()
+        # Calculate patch size from buffer radius (diameter)
+        patch_size_m = int(buffer_radius_m * 2)
         
-        # Load AHN4 DSM data
-        ahn4_dsm = ee.ImageCollection("AHN/AHN4").select('dsm').median()
-        ahn4_dsm = ahn4_dsm.reproject(crs='EPSG:28992', scale=resolution_m)
+        # Use LidarFactory to get elevation data
+        elevation_array = LidarMapFactory.get_patch(
+            lat=lat,
+            lon=lon,
+            size_m=patch_size_m,
+            preferred_resolution_m=resolution_m,
+            preferred_data_type=data_type
+        )
         
-        # Use sampleRectangle to fetch the entire grid in one request
-        rect = ahn4_dsm.sampleRectangle(region=polygon, defaultValue=-9999, properties=[])
-        elev_block = rect.get('dsm').getInfo()
-        elevation_array = np.array(elev_block, dtype=np.float32)
-        
-        # Replace sentinel value with np.nan for further processing
-        elevation_array = np.where(elevation_array == -9999, np.nan, elevation_array)
-        
-        # If all values are nan, raise error
-        if np.isnan(elevation_array).all():
-            raise Exception(f"No valid elevation data for {windmill_name}")
+        if elevation_array is None:
+            raise Exception(f"No elevation data available from LidarFactory for {patch_name}")
         
         # Fill any remaining nans with the mean of valid values
+        elevation_array = clean_patch_data(elevation_array)
+        
+        logger.info(f"✅ Loaded elevation patch via LidarFactory: {elevation_array.shape}, "
+                   f"range: [{np.nanmin(elevation_array):.2f}, {np.nanmax(elevation_array):.2f}]")
+        
+        return elevation_array
+        
+    except Exception as e:
+        logger.error(f"❌ LidarFactory elevation loading failed for {patch_name}: {e}")
+        raise
         if np.isnan(elevation_array).any():
             mean_val = np.nanmean(elevation_array)
             elevation_array = np.where(np.isnan(elevation_array), mean_val, elevation_array)
@@ -122,55 +128,64 @@ def load_real_elevation_patch(lat, lon, windmill_name, buffer_radius_m=20, resol
         logger.error(f"❌ Failed to load patch for {windmill_name}: {main_error}")
         raise Exception(f"Earth Engine data loading failed for {windmill_name}: {main_error}")
 
-def load_elevation_patch_gee(lat: float, lon: float, buffer_radius_m: int = 20, resolution_m: float = 0.5):
+def load_elevation_patch_lidar_factory(lat: float, lon: float, buffer_radius_m: int = 20, resolution_m: float = 0.5):
     """
-    Load elevation patch using Earth Engine AHN4 DSM data.
-    Uses the same proven method as validate_phi0.py
+    Load elevation patch using LidarMapFactory.
+    This unified approach can handle multiple data sources including AHN4, SRTM, etc.
     """
     try:
-        logger.debug(f"Loading REAL AHN4 data at ({lat:.4f}, {lon:.4f})")
+        # Import LidarMapFactory
+        import sys
+        import os
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        if root_dir not in sys.path:
+            sys.path.insert(0, root_dir)
         
-        # Create geometry using the CONFIRMED method from validation
-        center = ee.Geometry.Point([lon, lat])
-        polygon = center.buffer(buffer_radius_m).bounds()
+        from lidar_factory.factory import LidarMapFactory
         
-        # Load AHN4 DSM data (includes structures) for accurate detection
-        ahn4_dsm = ee.ImageCollection("AHN/AHN4").select('dsm').median()
-        ahn4_dsm = ahn4_dsm.reproject(crs='EPSG:28992', scale=resolution_m)
+        logger.debug(f"Loading LiDAR data via factory at ({lat:.4f}, {lon:.4f})")
         
-        # Use sampleRectangle to fetch the entire grid in one request (CONFIRMED METHOD)
-        rect = ahn4_dsm.sampleRectangle(region=polygon, defaultValue=-9999, properties=[])
+        # Calculate patch size in meters from buffer radius
+        patch_size_m = buffer_radius_m * 2
         
-        # Get elevation data with timeout protection
-        elev_block = rect.get('dsm').getInfo()
-        elevation_array = np.array(elev_block, dtype=np.float32)
+        # Use LidarMapFactory to get the best available data
+        elevation_array = LidarMapFactory.get_patch(
+            lat=lat,
+            lon=lon,
+            size_m=patch_size_m,
+            preferred_resolution_m=resolution_m,
+            preferred_data_type="DSM"  # Digital Surface Model includes structures
+        )
         
-        # Replace sentinel value with np.nan for further processing (CONFIRMED METHOD)
-        elevation_array = np.where(elevation_array == -9999, np.nan, elevation_array)
+        if elevation_array is None:
+            raise Exception(f"No LiDAR data available at location")
         
-        # If all values are nan, raise error
-        if np.isnan(elevation_array).all():
-            raise Exception(f"No valid elevation data at location")
-        
-        # Clean the patch data using the confirmed method
+        # Clean the patch data
         elevation_array = clean_patch_data(elevation_array)
         
-        # Create ElevationPatch object using the confirmed structure
+        # Create ElevationPatch object
         patch = ElevationPatch(
             elevation_data=elevation_array,
             lat=lat,
             lon=lon,
-            source="AHN4_real",
+            source="LidarFactory",
             resolution_m=resolution_m,
-            patch_size_m=buffer_radius_m * 2
+            patch_size_m=patch_size_m
         )
         
-        logger.debug(f"✅ Loaded patch: {patch.elevation_data.shape} at ({lat:.6f}, {lon:.6f})")
+        logger.debug(f"✅ Loaded patch via LidarFactory: {patch.elevation_data.shape} at ({lat:.6f}, {lon:.6f})")
         return patch
         
     except Exception as e:
-        logger.debug(f"Failed to load patch at ({lat:.4f}, {lon:.4f}): {e}")
+        logger.debug(f"Failed to load patch via LidarFactory at ({lat:.4f}, {lon:.4f}): {e}")
         return None
+
+# Keep the old function name for backward compatibility
+def load_elevation_patch_gee(lat: float, lon: float, buffer_radius_m: int = 20, resolution_m: float = 0.5):
+    """
+    Legacy function name - now redirects to LidarFactory implementation
+    """
+    return load_elevation_patch_lidar_factory(lat, lon, buffer_radius_m, resolution_m)
 
 def safe_serialize(obj):
     """Convert object to JSON-serializable format"""
@@ -360,6 +375,10 @@ class EnhancedConnectionManager:
 discovery_manager = EnhancedConnectionManager()
 active_sessions: Dict[str, DiscoverySession] = {}
 session_patches: Dict[str, List[ScanPatch]] = {}
+
+# Request models for API endpoints
+class SessionRequest(BaseModel):
+    session_id: str
 
 router = APIRouter()
 
@@ -674,28 +693,83 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
         scan_radius_km = config.get('scan_radius_km', 2.0)
         patch_size_m = config.get('patch_size_m', 40)  # Default changed to 40m
         
-        # Calculate patch grid with CONTIGUOUS coverage (0m gaps)
-        patches_per_side = int(np.sqrt(session.total_patches))
-        patch_size_km = patch_size_m / 1000  # Convert to km
+        # Calculate SLIDING WINDOW scanning with meter-by-meter movement
+        # Use sliding window approach instead of fixed grid tiles
+        sliding_step_m = config.get('sliding_step_m', 1)  # Default to 1 meter steps
         
-        # Calculate step size to ensure EXACT contiguous coverage (no gaps)
-        # Each patch should be exactly adjacent to the next
-        lat_step_deg = (patch_size_m / 111000)  # Convert meters to degrees latitude
-        lon_step_deg = (patch_size_m / (111000 * np.cos(np.radians(center_lat))))  # Adjust for longitude
+        # Check if using bounds-based scanning (southeast extension from clicked point)
+        use_bounds = config.get('use_bounds', False)
+        bounds = config.get('bounds')
         
-        # Starting coordinates (top-left corner of the grid)
-        start_lat = center_lat + (patches_per_side * lat_step_deg) / 2
-        start_lon = center_lon - (patches_per_side * lon_step_deg) / 2
+        if use_bounds and bounds:
+            # Use bounds-based rectangular scanning (southeast extension)
+            north = bounds['north']
+            south = bounds['south']
+            west = bounds['west']
+            east = bounds['east']
+            
+            # Calculate scan area dimensions in degrees
+            lat_span = north - south
+            lon_span = east - west
+            
+            # Convert to meters for step calculation
+            lat_m_per_deg = 111000  # Approximate meters per degree latitude
+            lon_m_per_deg = 111000 * np.cos(np.radians(center_lat))  # Adjust for longitude
+            
+            scan_width_m = lon_span * lon_m_per_deg
+            scan_height_m = lat_span * lat_m_per_deg
+            
+            # Calculate number of steps needed for sliding window
+            steps_lon = max(1, int(scan_width_m / sliding_step_m))
+            steps_lat = max(1, int(scan_height_m / sliding_step_m))
+            
+            # Starting position is the northwest corner (clicked point)
+            start_lat = north
+            start_lon = west
+            
+            logger.info(f"Bounds-based sliding window scan: {steps_lat}x{steps_lon} steps covering {scan_width_m:.0f}m x {scan_height_m:.0f}m")
+            
+        else:
+            # Original center-based circular scanning
+            # Convert scan area to meters for sliding window calculation
+            scan_radius_m = scan_radius_km * 1000
+            
+            # Calculate the scanning bounds in meters from center
+            lat_m_per_deg = 111000  # Approximate meters per degree latitude
+            lon_m_per_deg = 111000 * np.cos(np.radians(center_lat))  # Adjust for longitude
+            
+            # Calculate number of steps needed to cover the scan area
+            total_scan_width_m = scan_radius_m * 2  # Full diameter
+            steps_lat = steps_lon = int(total_scan_width_m / sliding_step_m)
+            
+            # Calculate starting position (top-left corner of scan area)
+            start_lat = center_lat + (scan_radius_m / lat_m_per_deg)
+            start_lon = center_lon - (scan_radius_m / lon_m_per_deg)
+            
+            logger.info(f"Center-based sliding window scan: {steps_lat}x{steps_lon} steps = {steps_lat * steps_lon} patches")
         
-        # Scan patches in a grid pattern with real elevation data
-        for i in range(patches_per_side):
-            for j in range(patches_per_side):
+        # Update total patches to reflect the sliding window approach
+        session.total_patches = steps_lat * steps_lon
+        
+        # Convert step size from meters to degrees
+        lat_step_deg = sliding_step_m / (111000)  # Use standard conversion
+        lon_step_deg = sliding_step_m / (111000 * np.cos(np.radians(center_lat)))
+        
+        # Scan with sliding window approach - each step moves by sliding_step_m meters
+        for i in range(steps_lat):
+            for j in range(steps_lon):
                 if session.status != 'active':
                     break
                 
-                # Calculate patch center location for CONTIGUOUS coverage
-                lat = start_lat - i * lat_step_deg
-                lon = start_lon + j * lon_step_deg
+                # Calculate patch center location for SLIDING WINDOW coverage
+                if use_bounds and bounds:
+                    # For bounds-based scanning, move southeast from starting point
+                    lat = start_lat - i * lat_step_deg
+                    lon = start_lon + j * lon_step_deg
+                else:
+                    # Original center-based scanning
+                    lat = start_lat - i * lat_step_deg
+                    lon = start_lon + j * lon_step_deg
                 
                 patch_id = f"{session.session_id}_{i}_{j}"
                 
@@ -713,7 +787,7 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                 
                 # Load REAL elevation data from Google Earth Engine
                 buffer_radius_m = patch_size_m // 2  # Half the patch size
-                elevation_patch = load_elevation_patch_gee(lat, lon, buffer_radius_m, resolution_m=0.5)
+                elevation_patch = load_elevation_patch_unified(lat, lon, f"patch_{patch_number}", buffer_radius_m, resolution_m=0.5)
                 
                 # Initialize patch data
                 elevation_data = None
@@ -721,6 +795,7 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                 is_positive = False
                 confidence = 0.0
                 
+                # Convert elevation data to list for JSON serialization AND visualization
                 if elevation_patch is not None:
                     # Convert elevation data to list for JSON serialization
                     elevation_data = elevation_patch.elevation_data.tolist()
@@ -732,6 +807,24 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                         'mean': float(np.mean(elevation_patch.elevation_data)),
                         'std': float(np.std(elevation_patch.elevation_data)),
                         'range': float(np.max(elevation_patch.elevation_data) - np.min(elevation_patch.elevation_data))
+                    }
+                    
+                    # Create visualization data for the frontend
+                    # Downsample elevation data for efficient transmission while preserving detail
+                    h, w = elevation_patch.elevation_data.shape
+                    if h > 20 or w > 20:  # If patch is larger than 20x20, downsample
+                        step_h = max(1, h // 20)
+                        step_w = max(1, w // 20)
+                        viz_elevation = elevation_patch.elevation_data[::step_h, ::step_w].tolist()
+                    else:
+                        viz_elevation = elevation_data
+                    
+                    # Create patch bounds for visualization
+                    patch_bounds = {
+                        'lat_min': lat - (patch_size_m / 2) / 111000,
+                        'lat_max': lat + (patch_size_m / 2) / 111000,
+                        'lon_min': lon - (patch_size_m / 2) / (111000 * np.cos(np.radians(lat))),
+                        'lon_max': lon + (patch_size_m / 2) / (111000 * np.cos(np.radians(lat)))
                     }
                     
                     # Use G2 Structure Detector with Dutch Windmill profile
@@ -824,7 +917,10 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                         'g2_final_score': float(detection_result.final_score) if hasattr(detection_result, 'final_score') else 0.0,
                         'g2_feature_scores': g2_feature_scores,
                         'g2_metadata': g2_metadata,
-                        'g2_reason': detection_result.reason if hasattr(detection_result, 'reason') and detection_result.reason else ""
+                        'g2_reason': detection_result.reason if hasattr(detection_result, 'reason') and detection_result.reason else "",
+                        # Add visualization data for frontend mapping
+                        'patch_bounds': patch_bounds if 'patch_bounds' in locals() else {},
+                        'visualization_elevation': viz_elevation if 'viz_elevation' in locals() else None
                     })
                 
                 patch = ScanPatch(
@@ -1000,3 +1096,521 @@ async def get_earth_engine_status():
         "available": is_earth_engine_available(),
         "timestamp": datetime.now().isoformat()
     }
+
+# =============================================================================
+# LI DAR SCANNING ENDPOINT
+# =============================================================================
+
+@router.post("/discovery/lidar-scan")
+async def start_lidar_scan(
+    config: Dict[str, Any],
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """
+    Start a LiDAR tile-by-tile scanning operation.
+    Streams elevation data patches without structure detection.
+    """
+    try:
+        from lidar_factory.factory import LidarMapFactory
+        
+        session_id = str(uuid.uuid4())
+        
+        # Extract configuration
+        center_lat = float(config.get('center_lat', 52.4751))
+        center_lon = float(config.get('center_lon', 4.8156))
+        radius_km = float(config.get('radius_km', 2.0))
+        tile_size_m = int(config.get('tile_size_m', 64))  # Smaller default for streaming
+        
+        # Calculate scanning parameters
+        radius_m = radius_km * 1000
+        scan_grid_size = int(2 * radius_m / tile_size_m)
+        
+        logger.info(f"🔧 LiDAR streaming config: {tile_size_m}m tiles, {scan_grid_size}x{scan_grid_size} grid")
+        
+        # Create session info with enhanced queue management
+        session_info = {
+            "session_id": session_id,
+            "type": "lidar_scan",
+            "status": "started",
+            "config": config,
+            "start_time": datetime.now(timezone.utc).isoformat(),
+            "total_tiles": scan_grid_size * scan_grid_size,
+            "processed_tiles": 0,
+            "streaming_mode": True,  # Enable streaming mode
+            "tile_size_m": tile_size_m,
+            "is_paused": False,      # Add pause state
+            "tile_queue": [],        # Queue of remaining tiles
+            "current_tile_index": 0  # Track current processing position
+        }
+        
+        # Store session
+        active_sessions[session_id] = session_info
+        
+        # Start background task for tile scanning
+        asyncio.create_task(run_lidar_scan_async(session_id, session_info))
+        
+        logger.info(f"✅ Started LiDAR scan session {session_id}")
+        
+        return {
+            "session_id": session_id,
+            "status": "started",
+            "message": f"LiDAR scan started for {scan_grid_size}x{scan_grid_size} tiles",
+            "total_tiles": scan_grid_size * scan_grid_size
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start LiDAR scan: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start LiDAR scan: {str(e)}")
+
+async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
+    """
+    Background task to perform tile-by-tile LiDAR scanning using LidarFactory
+    """
+    try:
+        from lidar_factory.factory import LidarMapFactory
+        
+        config = session_info["config"]
+        center_lat = float(config.get('center_lat', 52.4751))
+        center_lon = float(config.get('center_lon', 4.8156))
+        radius_km = float(config.get('radius_km', 2.0))
+        tile_size_m = int(config.get('tile_size_m', 64))  # Smaller for streaming
+        data_type = config.get('data_type', 'DSM')
+        streaming_mode = config.get('streaming_mode', True)  # Enable by default
+        
+        # Calculate scan area bounds (should match the green rectangle)
+        radius_m = radius_km * 1000
+        lat_delta = radius_m / 111320
+        lon_delta = radius_m / (111320 * np.cos(np.radians(center_lat)))
+        
+        # Define the exact scan area bounds
+        north_lat = center_lat + lat_delta
+        south_lat = center_lat - lat_delta  
+        east_lon = center_lon + lon_delta
+        west_lon = center_lon - lon_delta
+        
+        # Calculate how many tiles we need to cover this area
+        area_width_m = 2 * radius_m
+        area_height_m = 2 * radius_m
+        tiles_x = max(1, int(np.ceil(area_width_m / tile_size_m)))
+        tiles_y = max(1, int(np.ceil(area_height_m / tile_size_m)))
+        
+        logger.info(f"�️ Streaming LiDAR scan: {tiles_x}×{tiles_y} tiles of {tile_size_m}m each")
+        
+        # Update session status
+        session_info["status"] = "running"
+        session_info["processed_tiles"] = 0
+        session_info["total_tiles"] = tiles_x * tiles_y
+        session_info["processed_tile_ids"] = set()  # Track processed tiles to prevent duplicates
+        
+        # Generate tiles to exactly cover the scan area
+        # Simple systematic tiling: top-left to bottom-right
+        logger.info(f"📋 Systematic tiling: {tiles_y} rows × {tiles_x} cols = {tiles_y * tiles_x} tiles")
+        
+        # Process tiles systematically row by row, left to right
+        for row in range(tiles_y):
+            for col in range(tiles_x):
+                if session_id not in active_sessions:
+                    logger.info(f"🛑 LiDAR scan {session_id} stopped by user")
+                    return
+                
+                # Check for pause state and wait if paused (always get fresh session info)
+                while True:
+                    current_session = active_sessions.get(session_id)
+                    if not current_session:
+                        logger.info(f"🛑 LiDAR scan {session_id} stopped while checking pause")
+                        return
+                    
+                    if not current_session.get("is_paused", False):
+                        break  # Not paused, continue processing
+                    
+                    logger.info(f"⏸️ LiDAR scan {session_id} is paused at tile ({row},{col}), waiting...")
+                    await asyncio.sleep(0.2)  # Check every 200ms for better responsiveness
+                
+                # Create unique tile ID to prevent duplicates
+                tile_id = f"tile_{row}_{col}"
+                
+                # Skip if already processed (duplicate prevention)
+                if tile_id in session_info.get("processed_tile_ids", set()):
+                    logger.warning(f"🔄 Skipping duplicate tile {tile_id}")
+                    continue
+                
+                # Mark tile as being processed
+                session_info.setdefault("processed_tile_ids", set()).add(tile_id)
+                logger.debug(f"🔧 Processing tile {tile_id} ({row},{col})")
+                
+                # Calculate tile position within the scan area
+                lat_step = (north_lat - south_lat) / tiles_y
+                lon_step = (east_lon - west_lon) / tiles_x
+                
+                tile_lat = south_lat + (row + 0.5) * lat_step
+                tile_lon = west_lon + (col + 0.5) * lon_step
+                
+                try:
+                    # Force AHN4 high-resolution LiDAR data
+                    # Use reasonable resolution to avoid Earth Engine limits
+                    preferred_resolution = max(1.0, tile_size_m / 256.0)  # Keep under 256x256 pixels
+                    
+                    elevation_data = LidarMapFactory.get_patch(
+                        lat=tile_lat,
+                        lon=tile_lon,
+                        size_m=tile_size_m,
+                        preferred_resolution_m=preferred_resolution,
+                        exact_dataset_name="AHN4",  # Force AHN4 (real LiDAR)
+                        preferred_data_type=data_type
+                    )
+                    
+                    if elevation_data is not None:
+                        # Log elevation statistics for debugging
+                        elev_min = float(np.nanmin(elevation_data))
+                        elev_max = float(np.nanmax(elevation_data))
+                        elev_mean = float(np.nanmean(elevation_data))
+                        
+                        # Downsample elevation data for efficient transmission while preserving detail
+                        # AHN4 is 0.5m resolution, so we downsample for visualization
+                        h, w = elevation_data.shape
+                        max_viz_size = 64  # Maximum size for visualization (64x64 = 4096 pixels)
+                        
+                        if h > max_viz_size or w > max_viz_size:
+                            step_h = max(1, h // max_viz_size)
+                            step_w = max(1, w // max_viz_size)
+                            viz_elevation = elevation_data[::step_h, ::step_w].tolist()
+                            viz_shape = [len(viz_elevation), len(viz_elevation[0])]
+                        else:
+                            viz_elevation = elevation_data.tolist()
+                            viz_shape = [h, w]
+                        
+                        # Create tile result with scan area bounds and grid position
+                        tile_result = {
+                            "session_id": session_id,
+                            "tile_id": tile_id,
+                            "type": "lidar_tile",
+                            "center_lat": tile_lat,
+                            "center_lon": tile_lon,
+                            "size_m": tile_size_m,
+                            "has_data": True,
+                            "grid_row": row,                 # Add grid position for visual effects
+                            "grid_col": col,
+                            "grid_total_rows": tiles_y,
+                            "grid_total_cols": tiles_x,
+                            "elevation_stats": {
+                                "min": float(np.nanmin(elevation_data)),
+                                "max": float(np.nanmax(elevation_data)),
+                                "mean": float(np.nanmean(elevation_data)),
+                                "std": float(np.nanstd(elevation_data))
+                            },
+                            "shape": elevation_data.shape,
+                            "viz_elevation": viz_elevation,  # Add downsampled elevation data
+                            "viz_shape": viz_shape,          # Shape of visualization data
+                            "scan_bounds": {                 # Add original scan area bounds
+                                "north": north_lat,
+                                "south": south_lat,
+                                "east": east_lon,
+                                "west": west_lon
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        logger.debug(f"✅ Sending tile {tile_id} with elevation data")
+                        # Send tile result to connected clients
+                        await discovery_manager.send_message(tile_result)
+                        
+                    else:
+                        # No data available for this tile
+                        tile_result = {
+                            "session_id": session_id,
+                            "tile_id": tile_id,
+                            "type": "lidar_tile",
+                            "center_lat": tile_lat,
+                            "center_lon": tile_lon,
+                            "size_m": tile_size_m,
+                            "has_data": False,
+                            "grid_row": row,                 # Add grid position for visual effects
+                            "grid_col": col,
+                            "grid_total_rows": tiles_y,
+                            "grid_total_cols": tiles_x,
+                            "scan_bounds": {                 # Add original scan area bounds
+                                "north": north_lat,
+                                "south": south_lat,
+                                "east": east_lon,
+                                "west": west_lon
+                            },
+                            "message": "No LiDAR data available",
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        logger.debug(f"⚠️ Sending tile {tile_id} with no data")
+                        await discovery_manager.send_message(tile_result)
+                    
+                    # Update progress
+                    session_info["processed_tiles"] = row * tiles_x + col + 1
+                    
+                    # Send progress update
+                    progress_update = {
+                        "session_id": session_id,
+                        "type": "lidar_progress",
+                        "processed_tiles": session_info["processed_tiles"],
+                        "total_tiles": session_info["total_tiles"],
+                        "progress_percent": (session_info["processed_tiles"] / session_info["total_tiles"]) * 100,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                    
+                    await discovery_manager.send_message(progress_update)
+                    
+                    # Small delay to prevent overwhelming the system
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing tile {row},{col}: {e}")
+                    continue
+        
+        # Mark session as completed
+        session_info["status"] = "completed"
+        session_info["end_time"] = datetime.now(timezone.utc).isoformat()
+        
+        # Send completion message
+        completion_message = {
+            "session_id": session_id,
+            "type": "lidar_completed",
+            "message": f"LiDAR scan completed. Processed {session_info['processed_tiles']} tiles.",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await discovery_manager.send_message(completion_message)
+        logger.info(f"✅ Completed LiDAR scan session {session_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error in LiDAR scan {session_id}: {e}")
+        session_info["status"] = "error"
+        session_info["error"] = str(e)
+        
+        error_message = {
+            "session_id": session_id,
+            "type": "lidar_error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await discovery_manager.send_message(error_message)
+
+@router.post("/discovery/pause-resume-lidar")
+async def pause_resume_lidar_scan(
+    session_id: str,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """
+    Pause or resume an active LiDAR scanning session.
+    """
+    try:
+        if session_id not in active_sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session_info = active_sessions[session_id]
+        
+        if session_info["type"] != "lidar_scan":
+            raise HTTPException(status_code=400, detail="Session is not a LiDAR scan")
+        
+        # Toggle pause state
+        current_paused = session_info.get("is_paused", False)
+        session_info["is_paused"] = not current_paused
+        
+        status = "paused" if session_info["is_paused"] else "resumed"
+        session_info["status"] = status
+        
+        logger.info(f"📊 LiDAR scan {session_id} {status}")
+        
+        # Notify clients of pause/resume
+        await discovery_manager.send_message({
+            "session_id": session_id,
+            "type": "lidar_status",
+            "status": status,
+            "is_paused": session_info["is_paused"],
+            "processed_tiles": session_info["processed_tiles"],
+            "total_tiles": session_info["total_tiles"],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {
+            "session_id": session_id,
+            "status": status,
+            "is_paused": session_info["is_paused"],
+            "message": f"LiDAR scan {status}",
+            "processed_tiles": session_info["processed_tiles"],
+            "total_tiles": session_info["total_tiles"]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to pause/resume LiDAR scan: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to pause/resume LiDAR scan: {str(e)}")
+
+@router.post("/discovery/pause-lidar")
+async def pause_lidar_scan(
+    request: SessionRequest,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """
+    Pause an active LiDAR scanning session.
+    """
+    try:
+        session_id = request.session_id
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+            
+        logger.info(f"⏸️ Pause request for session: {session_id}")
+        
+        if session_id not in active_sessions:
+            logger.error(f"❌ Session not found: {session_id}")
+            logger.info(f"🔍 Available sessions: {list(active_sessions.keys())}")
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session_info = active_sessions[session_id]
+        
+        if session_info["type"] != "lidar_scan":
+            raise HTTPException(status_code=400, detail="Session is not a LiDAR scan")
+        
+        if session_info.get("is_paused", False):
+            logger.info(f"⚠️ Session {session_id} is already paused")
+            return {
+                "session_id": session_id,
+                "status": "already_paused",
+                "message": "LiDAR scan is already paused",
+                "processed_tiles": session_info["processed_tiles"],
+                "total_tiles": session_info["total_tiles"]
+            }
+        
+        # Pause the session
+        session_info["is_paused"] = True
+        session_info["status"] = "paused"
+        
+        logger.info(f"✅ LiDAR scan {session_id} PAUSED successfully")
+        logger.info(f"📊 Session state: is_paused={session_info['is_paused']}, status={session_info['status']}")
+        
+        # Notify clients
+        await discovery_manager.send_message({
+            "session_id": session_id,
+            "type": "lidar_status",
+            "status": "paused",
+            "is_paused": True,
+            "processed_tiles": session_info["processed_tiles"],
+            "total_tiles": session_info["total_tiles"],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {
+            "session_id": session_id,
+            "status": "paused",
+            "message": "LiDAR scan paused",
+            "processed_tiles": session_info["processed_tiles"],
+            "total_tiles": session_info["total_tiles"]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to pause LiDAR scan: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to pause LiDAR scan: {str(e)}")
+
+@router.post("/discovery/resume-lidar")
+async def resume_lidar_scan(
+    request: SessionRequest,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """
+    Resume a paused LiDAR scanning session.
+    """
+    try:
+        session_id = request.session_id
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+            
+        logger.info(f"▶️ Resume request for session: {session_id}")
+        
+        if session_id not in active_sessions:
+            logger.error(f"❌ Session not found: {session_id}")
+            logger.info(f"🔍 Available sessions: {list(active_sessions.keys())}")
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session_info = active_sessions[session_id]
+        
+        if session_info["type"] != "lidar_scan":
+            raise HTTPException(status_code=400, detail="Session is not a LiDAR scan")
+        
+        if not session_info.get("is_paused", False):
+            logger.info(f"⚠️ Session {session_id} is already running")
+            return {
+                "session_id": session_id,
+                "status": "already_running",
+                "message": "LiDAR scan is already running",
+                "processed_tiles": session_info["processed_tiles"],
+                "total_tiles": session_info["total_tiles"]
+            }
+        
+        # Resume the session
+        session_info["is_paused"] = False
+        session_info["status"] = "running"
+        
+        logger.info(f"✅ LiDAR scan {session_id} resumed")
+        
+        # Notify clients
+        await discovery_manager.send_message({
+            "session_id": session_id,
+            "type": "lidar_status",
+            "status": "resumed",
+            "is_paused": False,
+            "processed_tiles": session_info["processed_tiles"],
+            "total_tiles": session_info["total_tiles"],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {
+            "session_id": session_id,
+            "status": "resumed",
+            "message": "LiDAR scan resumed",
+            "processed_tiles": session_info["processed_tiles"],
+            "total_tiles": session_info["total_tiles"]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to resume LiDAR scan: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resume LiDAR scan: {str(e)}")
+
+def generate_progressive_tile_order(tiles_x, tiles_y, pattern='left_to_right'):
+    """
+    Generate tile coordinates in progressive order patterns
+    """
+    tiles = []
+    
+    if pattern == 'left_to_right':
+        # Process column by column from left to right (wipe effect)
+        for col in range(tiles_x):
+            for row in range(tiles_y):
+                tiles.append((row, col))
+                
+    elif pattern == 'top_to_bottom':
+        # Process row by row from top to bottom
+        for row in range(tiles_y):
+            for col in range(tiles_x):
+                tiles.append((row, col))
+                
+    elif pattern == 'center_outward':
+        # Process from center outward in a spiral
+        center_row, center_col = tiles_y // 2, tiles_x // 2
+        visited = set()
+        
+        # Start with center tile
+        tiles.append((center_row, center_col))
+        visited.add((center_row, center_col))
+        
+        # Expand outward in layers
+        for radius in range(1, max(tiles_x, tiles_y)):
+            for dr in range(-radius, radius + 1):
+                for dc in range(-radius, radius + 1):
+                    if abs(dr) == radius or abs(dc) == radius:  # Only edge of current radius
+                        r, c = center_row + dr, center_col + dc
+                        if 0 <= r < tiles_y and 0 <= c < tiles_x and (r, c) not in visited:
+                            tiles.append((r, c))
+                            visited.add((r, c))
+    else:
+        # Default: simple sequential
+        for row in range(tiles_y):
+            for col in range(tiles_x):
+                tiles.append((row, col))
+    
+    return tiles

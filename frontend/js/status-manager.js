@@ -61,15 +61,25 @@ class StatusManager {
         
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         
-        // Use unified API endpoint
+        // Use unified API endpoint - simplified URL construction
         const apiBase = window.AppConfig ? window.AppConfig.apiBase : '/api/v1';
-        const apiBaseUrl = baseUrl || (window.AppConfig ? window.AppConfig.apiBase.replace('/api/v1', '') : '');
+        this.apiBaseUrl = apiBase; // Store for use in HTTP requests
         
-        const wsUrl = apiBaseUrl ? 
-            `${protocol}//${new URL(apiBaseUrl).host}${apiBase}/ws/discovery` :
-            `${protocol}//${window.location.host}/api/v1/ws/discovery`;
+        let wsUrl;
+        if (apiBase.startsWith('http')) {
+            // Full URL provided (development mode)
+            const httpUrl = new URL(apiBase);
+            wsUrl = `${protocol}//${httpUrl.host}${httpUrl.pathname}/ws/discovery`;
+        } else {
+            // Relative URL (production mode)
+            wsUrl = `${protocol}//${window.location.host}${apiBase}/ws/discovery`;
+        }
         
         console.log('🔗 Establishing WebSocket connection to unified API:', wsUrl);
+        console.log('📋 API Base:', apiBase);
+        console.log('🌐 Window location:', window.location.href);
+        console.log('🔧 Protocol:', protocol);
+        console.log('🏗️ AppConfig:', window.AppConfig);
         
         try {
             await this.establishConnection(wsUrl);
@@ -101,6 +111,15 @@ class StatusManager {
             
             this.websocket.onerror = (error) => {
                 clearTimeout(connectionTimeout);
+                console.error('🚫 WebSocket error:', error);
+                console.error('🚫 WebSocket URL that failed:', wsUrl);
+                console.error('🚫 WebSocket readyState:', this.websocket.readyState);
+                console.error('🚫 Error details:', {
+                    type: error.type,
+                    target: error.target,
+                    message: error.message,
+                    timeStamp: error.timeStamp
+                });
                 reject(new Error(`WebSocket connection failed: ${error.message || 'Unknown error'}`));
             };
             
@@ -230,6 +249,22 @@ class StatusManager {
                     this.handlePatchElevationLoaded(data);
                     break;
                     
+                case 'lidar_tile':
+                    this.handleLidarTile(data);
+                    break;
+                    
+                case 'lidar_progress':
+                    this.handleLidarProgress(data);
+                    break;
+                    
+                case 'lidar_completed':
+                    this.handleLidarCompleted(data);
+                    break;
+                    
+                case 'lidar_error':
+                    this.handleLidarError(data);
+                    break;
+                    
                 default:
                     console.warn('⚠️ Unknown message type:', data.type);
                     this.triggerCallback('unknownMessage', data);
@@ -294,6 +329,7 @@ class StatusManager {
      * Handle patch result with enhanced tracking
      */
     handlePatchResult(data) {
+        console.log('🔍 StatusManager handlePatchResult called with:', data);
         const patch = data.patch || data;
         
         // Update statistics
@@ -314,6 +350,7 @@ class StatusManager {
             stats.averageConfidence = totalConfidence / stats.totalPatches;
         }
         
+        console.log('📊 Updated statistics:', stats);
         this.updateState({ statistics: stats });
         this.triggerCallback('patchResult', patch);
         this.updateProcessingRate();
@@ -664,8 +701,32 @@ class StatusManager {
             }
             
             const targetSessionId = sessionId || this.state.session?.session_id;
+            console.log('🔍 StatusManager stopDiscovery - sessionId provided:', sessionId);
+            console.log('🔍 StatusManager stopDiscovery - state session:', this.state.session);
+            console.log('🔍 StatusManager stopDiscovery - target session ID:', targetSessionId);
+            
             if (!targetSessionId) {
-                throw new Error('No active session to stop');
+                // If no session ID, try to get active sessions and stop them
+                console.warn('⚠️ No session ID provided, attempting to get active sessions');
+                try {
+                    const activeSessions = await this.api.getActiveSessions();
+                    console.log('📋 Active sessions found:', activeSessions);
+                    
+                    if (activeSessions && activeSessions.length > 0) {
+                        // Stop the first active session
+                        const firstSession = activeSessions[0];
+                        const sessionIdToStop = firstSession.session_id || firstSession.id;
+                        console.log('🎯 Stopping first active session:', sessionIdToStop);
+                        const result = await this.api.stopDiscovery(sessionIdToStop);
+                        console.log('⏹️ Discovery session stopped via unified API (active session):', result);
+                        return result;
+                    } else {
+                        throw new Error('No active sessions found to stop');
+                    }
+                } catch (sessionError) {
+                    console.warn('⚠️ Failed to get active sessions:', sessionError.message);
+                    throw new Error('No active session to stop');
+                }
             }
             
             const result = await this.api.stopDiscovery(targetSessionId);
@@ -902,11 +963,72 @@ class StatusManager {
         
         this.triggerCallback('reset');
     }
+    
+    /**
+     * Handle LiDAR tile data
+     */
+    handleLidarTile(data) {
+        console.log('📡 LiDAR tile received:', data.tile_id, data.has_data ? 'with data' : 'no data');
+        this.triggerCallback('lidarTile', data);
+    }
+    
+    /**
+     * Handle LiDAR progress updates
+     */
+    handleLidarProgress(data) {
+        console.log('📊 LiDAR progress:', `${data.processed_tiles}/${data.total_tiles} (${data.progress_percent.toFixed(1)}%)`);
+        
+        // Update state with LiDAR progress
+        this.updateState({
+            progress: {
+                current: data.processed_tiles,
+                total: data.total_tiles,
+                percentage: data.progress_percent,
+                rate: 0,
+                eta: null
+            }
+        });
+        
+        this.triggerCallback('lidarProgress', data);
+    }
+    
+    /**
+     * Handle LiDAR tiling completion
+     */
+    handleLidarCompleted(data) {
+        console.log('✅ LiDAR tiling completed:', data.message);
+        
+        this.updateState({ 
+            scanning: false,
+            progress: {
+                current: data.processed_tiles || 0,
+                total: data.total_tiles || 0,
+                percentage: 100,
+                rate: 0,
+                eta: null
+            }
+        });
+        
+        this.triggerCallback('lidarCompleted', data);
+    }
+    
+    /**
+     * Handle LiDAR tiling errors
+     */
+    handleLidarError(data) {
+        console.error('❌ LiDAR tiling error:', data.error);
+        
+        this.updateState({ scanning: false });
+        this.addError('lidar', data.error);
+        this.triggerCallback('lidarError', data);
+    }
 }
 
-// Export for use in other modules
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = StatusManager;
-} else {
-    window.StatusManager = StatusManager;
-}
+/**
+ * Export for use in other modules
+ */
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = StatusManager;
+    } else {
+        window.StatusManager = StatusManager;
+    }

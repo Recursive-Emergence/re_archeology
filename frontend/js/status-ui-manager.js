@@ -42,6 +42,7 @@ class StatusUIManager {
             progressDetails: document.getElementById('progressDetails'),
             
             // Control buttons
+            lidarScanBtn: document.getElementById('lidarScanBtn'),
             startScanBtn: document.getElementById('startScanBtn'),
             stopScanBtn: document.getElementById('stopScanBtn'),
             clearResultsBtn: document.getElementById('clearResultsBtn'),
@@ -252,6 +253,16 @@ class StatusUIManager {
      */
     setupEventListeners() {
         // Button state management
+        if (this.elements.lidarScanBtn) {
+            console.log('✅ LiDAR tiling button found, adding event listener');
+            this.elements.lidarScanBtn.addEventListener('click', () => {
+                console.log('�️ LiDAR tiling button clicked!');
+                this.handleLidarScan();
+            });
+        } else {
+            console.error('❌ LiDAR tiling button not found');
+        }
+        
         if (this.elements.startScanBtn) {
             this.elements.startScanBtn.addEventListener('click', () => {
                 this.handleStartScan();
@@ -534,17 +545,27 @@ class StatusUIManager {
      */
     updateStatistics() {
         const stats = this.statusManager.state.statistics;
+        console.log('📊 StatusUIManager updating statistics:', stats);
         
         if (this.elements.processedPatches) {
             this.elements.processedPatches.textContent = stats.totalPatches;
+            console.log('✅ Updated processedPatches to:', stats.totalPatches);
+        } else {
+            console.warn('❌ processedPatches element not found');
         }
         
         if (this.elements.totalDetections) {
             this.elements.totalDetections.textContent = stats.positiveDetections;
+            console.log('✅ Updated totalDetections to:', stats.positiveDetections);
+        } else {
+            console.warn('❌ totalDetections element not found');
         }
         
         if (this.elements.highConfidenceDetections) {
             this.elements.highConfidenceDetections.textContent = stats.highConfidenceDetections;
+            console.log('✅ Updated highConfidenceDetections to:', stats.highConfidenceDetections);
+        } else {
+            console.warn('❌ highConfidenceDetections element not found');
         }
         
         // Update floating widget
@@ -814,6 +835,151 @@ class StatusUIManager {
         }
     }
     
+    /**
+     * Handle LiDAR tiling button click (now supports pause/resume)
+     */
+    handleLidarScan() {
+        console.log('🔧 handleLidarScan called');
+        
+        const btn = this.elements.lidarScanBtn;
+        const currentState = btn?.getAttribute('data-state') || 'idle';
+        
+        console.log(`🎯 Current LiDAR state: ${currentState}`);
+        
+        if (window.unifiedApp) {
+            switch (currentState) {
+                case 'idle':
+                case 'completed':
+                    console.log('🗂️ Starting new LiDAR tiling session');
+                    this.updateLidarButtonState('running', 0, '0/0');
+                    if (window.unifiedApp.startLidarScan) {
+                        window.unifiedApp.startLidarScan();
+                    } else {
+                        console.error('❌ startLidarScan method not available');
+                        this.updateLidarButtonState('idle', 0, 'Error');
+                    }
+                    break;
+                    
+                case 'running':
+                    console.log('⏸️ Pausing LiDAR tiling');
+                    this.updateLidarButtonState('paused', 0, 'Paused');
+                    if (window.unifiedApp.pauseLidarScan) {
+                        window.unifiedApp.pauseLidarScan();
+                    } else {
+                        console.warn('⚠️ pauseLidarScan method not available');
+                    }
+                    break;
+                    
+                case 'paused':
+                    console.log('▶️ Resuming LiDAR tiling');
+                    this.updateLidarButtonState('running', 0, 'Resuming...');
+                    if (window.unifiedApp.resumeLidarScan) {
+                        window.unifiedApp.resumeLidarScan();
+                    } else {
+                        console.warn('⚠️ resumeLidarScan method not available');
+                    }
+                    break;
+                    
+                default:
+                    console.warn('⚠️ Unknown LiDAR state:', currentState);
+                    this.updateLidarButtonState('idle', 0, '');
+            }
+        } else {
+            console.error('❌ Unified app not found');
+            this.updateLidarButtonState('idle', 0, 'Error');
+        }
+    }
+    
+    /**
+     * Update LiDAR button visual state
+     */
+    updateLidarButtonState(state, progress = 0, statusText = '') {
+        const btn = this.elements.lidarScanBtn;
+        if (!btn) return;
+        
+        // Update button state attribute
+        btn.setAttribute('data-state', state);
+        
+        // Update progress bar
+        btn.style.setProperty('--progress', `${Math.round(progress * 100)}%`);
+        
+        // Update text content
+        const textSpan = btn.querySelector('.btn-text');
+        const statusSpan = btn.querySelector('.btn-status');
+        
+        if (textSpan) {
+            // Update span content if spans exist
+            switch (state) {
+                case 'idle':
+                    textSpan.textContent = 'LiDAR Tiling';
+                    break;
+                case 'running':
+                    textSpan.textContent = 'Pause Tiling';
+                    break;
+                case 'paused':
+                    textSpan.textContent = 'Resume Tiling';
+                    break;
+                case 'completed':
+                    textSpan.textContent = 'Tiling Complete';
+                    break;
+                default:
+                    textSpan.textContent = 'LiDAR Tiling';
+            }
+        } else {
+            // Fallback: update button text directly if spans don't exist
+            switch (state) {
+                case 'idle':
+                    btn.textContent = '🗂️ LiDAR Tiling';
+                    break;
+                case 'running':
+                    btn.textContent = '⏸️ Pause Tiling';
+                    break;
+                case 'paused':
+                    btn.textContent = '▶️ Resume Tiling';
+                    break;
+                case 'completed':
+                    btn.textContent = '✅ Tiling Complete';
+                    break;
+                default:
+                    btn.textContent = '🗂️ LiDAR Tiling';
+            }
+        }
+        
+        if (statusSpan) {
+            statusSpan.textContent = statusText;
+        } else if (statusText && !textSpan) {
+            // If no spans exist, append status to button text
+            const currentText = btn.textContent;
+            if (statusText && !currentText.includes(statusText)) {
+                btn.textContent = `${currentText} ${statusText}`;
+            }
+        }
+        
+        console.log(`🎨 LiDAR button state updated: ${state} (${Math.round(progress * 100)}%)`);
+    }
+
+    /**
+     * Update LiDAR progress with visual feedback
+     */
+    updateLidarProgress(current, total, statusMessage = '') {
+        const progress = total > 0 ? current / total : 0;
+        const progressText = `${current}/${total}`;
+        
+        // Update button if it's in running state
+        const btn = this.elements.lidarScanBtn;
+        if (btn && btn.getAttribute('data-state') === 'running') {
+            this.updateLidarButtonState('running', progress, progressText);
+        }
+        
+        // Update any progress displays
+        const progressElements = document.querySelectorAll('.lidar-progress');
+        progressElements.forEach(el => {
+            el.style.width = `${Math.round(progress * 100)}%`;
+        });
+        
+        console.log(`📊 LiDAR progress: ${progressText} (${Math.round(progress * 100)}%)`);
+    }
+
     /**
      * Utility: Create DOM element
      */

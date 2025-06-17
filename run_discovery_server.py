@@ -16,9 +16,9 @@ sys.path.append('/media/im3/plus/lab4/RE/re_archaeology/backend')
 if __name__ == "__main__":
     print("🏛️ Starting Windmill Discovery API Server")
     print("=" * 50)
-    print("🌐 WebSocket: ws://localhost:8080/ws")
-    print("🌐 API: http://localhost:8080")
-    print("🌐 Frontend: http://localhost:8080/frontend")
+    print("🌐 WebSocket: ws://localhost:8080/api/v1/ws/discovery")
+    print("🌐 API: http://localhost:8080/api/v1")
+    print("🌐 Frontend: http://localhost:8080/")
     print("=" * 50)
     
     # Start the FastAPI server
