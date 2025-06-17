@@ -19,20 +19,10 @@ class DiscoveryManager extends EventEmitter {
     }
     
     async init(mapManager) {
-        console.log('🔍 Initializing discovery manager...');
-        
         this.mapManager = mapManager;
-        
-        // Initialize status manager
         await this.statusManager.init();
-        
-        // Setup status manager event handlers
         this.setupStatusManagerEvents();
-        
-        // Setup discovery controls
         this.setupDiscoveryControls();
-        
-        console.log('✅ Discovery manager initialized');
     }
     
     setupStatusManagerEvents() {
@@ -125,13 +115,9 @@ class DiscoveryManager extends EventEmitter {
     
     async startScan() {
         if (this.isScanning || !this.statusManager.isConnected()) {
-            console.warn('⚠️ Cannot start scan: already scanning or not connected');
             return;
         }
         
-        console.log('🚀 Starting discovery scan...');
-        
-        // Clear any previous results
         this.clearResults();
         
         const config = {
@@ -145,9 +131,8 @@ class DiscoveryManager extends EventEmitter {
         
         try {
             await this.statusManager.startDiscovery(config);
-            console.log('✅ Discovery scan started successfully');
         } catch (error) {
-            console.error('❌ Failed to start discovery scan:', error);
+            console.error('Failed to start discovery scan:', error);
             this.emit('scanError', error);
         }
     }

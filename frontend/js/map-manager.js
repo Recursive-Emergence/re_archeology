@@ -14,18 +14,9 @@ class MapManager extends EventEmitter {
     }
     
     async init() {
-        console.log('🗺️ Initializing map manager...');
-        
-        // Initialize the Leaflet map
         this.initLeafletMap();
-        
-        // Initialize patch visualization system
         this.initPatchVisualization();
-        
-        // Setup map event handlers
         this.setupMapEvents();
-        
-        console.log('✅ Map manager initialized');
     }
     
     initLeafletMap() {

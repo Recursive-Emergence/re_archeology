@@ -545,27 +545,17 @@ class StatusUIManager {
      */
     updateStatistics() {
         const stats = this.statusManager.state.statistics;
-        console.log('📊 StatusUIManager updating statistics:', stats);
         
         if (this.elements.processedPatches) {
             this.elements.processedPatches.textContent = stats.totalPatches;
-            console.log('✅ Updated processedPatches to:', stats.totalPatches);
-        } else {
-            console.warn('❌ processedPatches element not found');
         }
         
         if (this.elements.totalDetections) {
             this.elements.totalDetections.textContent = stats.positiveDetections;
-            console.log('✅ Updated totalDetections to:', stats.positiveDetections);
-        } else {
-            console.warn('❌ totalDetections element not found');
         }
         
         if (this.elements.highConfidenceDetections) {
             this.elements.highConfidenceDetections.textContent = stats.highConfidenceDetections;
-            console.log('✅ Updated highConfidenceDetections to:', stats.highConfidenceDetections);
-        } else {
-            console.warn('❌ highConfidenceDetections element not found');
         }
         
         // Update floating widget
@@ -948,14 +938,11 @@ class StatusUIManager {
         if (statusSpan) {
             statusSpan.textContent = statusText;
         } else if (statusText && !textSpan) {
-            // If no spans exist, append status to button text
             const currentText = btn.textContent;
             if (statusText && !currentText.includes(statusText)) {
                 btn.textContent = `${currentText} ${statusText}`;
             }
         }
-        
-        console.log(`🎨 LiDAR button state updated: ${state} (${Math.round(progress * 100)}%)`);
     }
 
     /**
@@ -971,13 +958,10 @@ class StatusUIManager {
             this.updateLidarButtonState('running', progress, progressText);
         }
         
-        // Update any progress displays
         const progressElements = document.querySelectorAll('.lidar-progress');
         progressElements.forEach(el => {
             el.style.width = `${Math.round(progress * 100)}%`;
         });
-        
-        console.log(`📊 LiDAR progress: ${progressText} (${Math.round(progress * 100)}%)`);
     }
 
     /**

@@ -12,18 +12,10 @@ class ChatManager extends EventEmitter {
     }
     
     async init(authManager) {
-        console.log('💬 Initializing chat manager...');
-        
         this.authManager = authManager;
-        
-        // Setup chat UI event handlers
         this.setupChatEvents();
-        
-        // Initialize chat interface
         this.initializeChatInterface();
-        
         this.isInitialized = true;
-        console.log('✅ Chat manager initialized');
     }
     
     setupChatEvents() {
@@ -54,15 +46,8 @@ class ChatManager extends EventEmitter {
     }
     
     onUserAuthenticated(user) {
-        console.log('👤 Chat: User authenticated:', user.name);
-        
-        // Update welcome message with user's name
         this.updateWelcomeMessage(user);
-        
-        // Enable chat input
         this.enableChatInput();
-        
-        // Add authentication success message
         this.addSystemMessage(`Welcome back, ${user.name?.split(' ')[0] || 'Explorer'}! I'm here to help you discover archaeological structures.`);
     }
     

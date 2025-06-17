@@ -321,7 +321,6 @@ class StatusManager {
      * Handle patch elevation loaded updates
      */
     handlePatchElevationLoaded(data) {
-        console.log('📊 Patch elevation loaded:', data.patch_id, data.elevation_stats);
         this.triggerCallback('patchElevationLoaded', data);
     }
     
@@ -350,7 +349,6 @@ class StatusManager {
             stats.averageConfidence = totalConfidence / stats.totalPatches;
         }
         
-        console.log('📊 Updated statistics:', stats);
         this.updateState({ statistics: stats });
         this.triggerCallback('patchResult', patch);
         this.updateProcessingRate();
@@ -968,7 +966,6 @@ class StatusManager {
      * Handle LiDAR tile data
      */
     handleLidarTile(data) {
-        console.log('📡 LiDAR tile received:', data.tile_id, data.has_data ? 'with data' : 'no data');
         this.triggerCallback('lidarTile', data);
     }
     
@@ -976,9 +973,6 @@ class StatusManager {
      * Handle LiDAR progress updates
      */
     handleLidarProgress(data) {
-        console.log('📊 LiDAR progress:', `${data.processed_tiles}/${data.total_tiles} (${data.progress_percent.toFixed(1)}%)`);
-        
-        // Update state with LiDAR progress
         this.updateState({
             progress: {
                 current: data.processed_tiles,

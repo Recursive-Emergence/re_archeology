@@ -11,154 +11,107 @@ class UnifiedREArchaeologyApp {
         this.patches = new Map();
         this.currentSession = null;
         this.selectedArea = null;
-        
-        console.log('🏛️ Simple Legacy App initialized');
     }
 
     async init() {
         try {
-            // Initialize map first
             this.initMap();
-            
-            // Setup status callbacks BEFORE attempting connection
             this.setupStatusCallbacks();
             
-            // Initialize status manager connection
             try {
                 await this.statusManager.connect();
-                console.log('✅ Backend connected');
             } catch (error) {
-                console.log('⚠️ Backend not available');
+                // Backend connection will retry automatically
             }
             
-            // Initialize controls
             this.initControls();
             
-            // Initialize Status UI Manager
             if (typeof StatusUIManager !== 'undefined') {
                 this.statusUI = new StatusUIManager(this.statusManager);
-                console.log('✅ StatusUIManager initialized');
-                
-                // Initialize LiDAR button to idle state
                 if (this.statusUI.updateLidarButtonState) {
                     this.statusUI.updateLidarButtonState('idle', 0, '');
                 }
-            } else {
-                console.warn('⚠️ StatusUIManager not available');
             }
             
             this.updateButtonStates();
             this.updateConnectionStatus();
             
-            // Add debugging helper to window for console access
             if (typeof window !== 'undefined') {
                 window.debugReset = () => this.forceResetScanningState();
-                console.log('🔧 Debug commands available:');
-                console.log('   window.debugReset() - Reset stuck scanning state');
-                console.log('   window.unifiedApp.forceResetScanningState() - Same as above');
             }
-            
-            console.log('✅ App ready');
         } catch (error) {
-            console.error('❌ Failed to initialize:', error);
+            console.error('Failed to initialize app:', error);
         }
     }
 
     initMap() {
-        console.log('🗺️ Initializing map...');
-        
-        // Cleanup existing map if present
         if (this.mapVisualization) {
-            console.log('🧹 Cleaning up existing map...');
             try {
                 this.mapVisualization.destroy();
             } catch (error) {
-                console.warn('⚠️ Error cleaning up existing map:', error);
+                console.warn('Error cleaning up existing map:', error);
             }
             this.mapVisualization = null;
             this.mapInstance = null;
         }
         
-        // Check if MapVisualization class is available
         if (typeof MapVisualization === 'undefined') {
-            console.error('❌ MapVisualization class not found! Check script loading order.');
+            console.error('MapVisualization class not found!');
             throw new Error('MapVisualization class not defined');
         }
         
-        // Initialize MapVisualization (which creates the Leaflet map)
         this.mapVisualization = new MapVisualization('map', {
             center: [52.4751, 4.8156],
             zoom: 13
         });
         
-        console.log('🗺️ MapVisualization created:', this.mapVisualization);
-        
-        // Get the map instance from MapVisualization
         this.mapInstance = this.mapVisualization.map;
         
-        console.log('🗺️ Map instance:', this.mapInstance);
-        
-        // Set up default scan area on load
         this.setupDefaultScanArea();
         
         if (this.mapInstance) {
-            // Map click handler for area selection (only when not scanning)
             this.mapInstance.on('click', (e) => {
                 if (!this.isScanning && (!this.selectedArea || !this.selectedArea.isLocked)) {
                     this.selectScanArea(e.latlng.lat, e.latlng.lng);
-                } else if (this.isScanning) {
-                    console.log('⚠️ Cannot change scan area during active tiling session');
                 }
             });
             
-            // Zoom event handler to maintain rectangle visibility
             this.mapInstance.on('zoomend', () => {
                 this.refreshSelectionRectangle();
             });
             
-            // Move event handler to maintain rectangle visibility during panning
             this.mapInstance.on('moveend', () => {
                 this.refreshSelectionRectangle();
             });
             
-            // Create default scan area around Zaanse Schans
             setTimeout(() => {
-                console.log('📍 Creating default scan area...');
-                this.selectScanArea(52.4751, 4.8156); // Default to Zaanse Schans
-            }, 1000); // Wait for map to fully load
+                this.selectScanArea(52.4751, 4.8156);
+            }, 1000);
         } else {
-            console.error('❌ Failed to get map instance');
+            console.error('Failed to get map instance');
         }
-        
-        console.log('✅ Map initialized successfully');
     }
 
     setupStatusCallbacks() {
-        console.log('🔧 Setting up status callbacks');
-        
         this.statusManager.on('connectionEstablished', () => {
-            console.log('🔗 Connection established callback triggered');
             this.updateConnectionStatus(true);
             this.updateButtonStates();
         });
 
         this.statusManager.on('disconnected', () => {
-            console.log('📡 Disconnected callback triggered');
             this.updateConnectionStatus(false);
             this.updateButtonStates();
         });
 
         this.statusManager.on('sessionStarted', (data) => {
-            console.log('🔍 Scan started callback triggered');
             this.isScanning = true;
-            this.lockScanArea(); // Lock the area during scanning
+            this.lockScanArea();
             this.updateButtonStates();
         });
 
         this.statusManager.on('sessionCompleted', () => {
-            console.log('✅ Scan completed callback triggered');
             this.isScanning = false;
-            this.unlockScanArea(); // Unlock the area when scanning completes
+            this.unlockScanArea();
             this.updateButtonStates();
         });
 
@@ -171,9 +124,6 @@ class UnifiedREArchaeologyApp {
         });
         
         this.statusManager.on('lidarProgress', (progressData) => {
-            console.log('📊 LiDAR Progress:', progressData);
-            
-            // Update visual progress using correct field names
             if (this.statusUI && this.statusUI.updateLidarProgress) {
                 this.statusUI.updateLidarProgress(
                     progressData.processed_tiles || 0, 
@@ -184,12 +134,10 @@ class UnifiedREArchaeologyApp {
         });
         
         this.statusManager.on('lidarCompleted', (data) => {
-            console.log('✅ LiDAR tiling completed:', data.message);
             this.isScanning = false;
-            this.currentLidarSessionId = null; // Clear session ID
-            this.unlockScanArea(); // Unlock the area when LiDAR tiling completes
+            this.currentLidarSessionId = null;
+            this.unlockScanArea();
             
-            // Update button to completed state
             if (this.statusUI && this.statusUI.updateLidarButtonState) {
                 this.statusUI.updateLidarButtonState('completed', 1.0, 'Complete');
             }
@@ -228,19 +176,12 @@ class UnifiedREArchaeologyApp {
             const statusText = connectionStatus.querySelector('span');
             if (statusText) {
                 statusText.textContent = isConnected ? 'Connected' : 'Disconnected';
-                console.log(`✅ Updated connection status text to: ${statusText.textContent}`);
-            } else {
-                console.warn('⚠️ No span element found in connectionStatus');
             }
-        } else {
-            console.warn('⚠️ connectionStatus element not found');
         }
         
-        // Also update detailed status if it exists
         const detailedStatus = document.getElementById('detailedConnectionStatus');
         if (detailedStatus) {
             detailedStatus.textContent = isConnected ? 'Connected' : 'Disconnected';
-            console.log(`✅ Updated detailed connection status to: ${detailedStatus.textContent}`);
         }
     }
 
@@ -285,17 +226,12 @@ class UnifiedREArchaeologyApp {
     }
 
     setupDefaultScanArea() {
-        // Set up a default scan area centered on Zaanse Schans
         const defaultLat = 52.4751;
         const defaultLon = 4.8156;
-        const defaultRadiusKm = 1.0; // 1km radius
+        const defaultRadiusKm = 1.0;
         
-        console.log('📍 Setting up default scan area at:', defaultLat, defaultLon);
-        
-        // Create default scan area
         this.selectScanArea(defaultLat, defaultLon, defaultRadiusKm);
         
-        // Update UI inputs to reflect default values
         const centerLatInput = document.getElementById('centerLat');
         const centerLonInput = document.getElementById('centerLon');
         const radiusInput = document.getElementById('scanRadius');
@@ -390,31 +326,23 @@ class UnifiedREArchaeologyApp {
 
     async startScan() {
         if (this.isScanning) {
-            console.warn('⚠️ Already scanning, cannot start new scan');
             return;
         }
         
         try {
-            console.log('🔍 Starting regular discovery scan...');
-            
-            // Clear previous data before starting new scan
             if (this.mapVisualization && this.mapVisualization.clearPatches) {
                 this.mapVisualization.clearPatches();
-                console.log('🧹 Cleared previous patches');
             }
             
-            // Create default area if none selected
             if (!this.selectedArea) {
                 if (this.mapInstance) {
                     const center = this.mapInstance.getCenter();
                     this.selectScanArea(center.lat, center.lng);
                 } else {
-                    // Use default coordinates if map is not ready
                     this.selectScanArea(52.4751, 4.8156);
                 }
             }
 
-            // Get scan config
             const config = {
                 method: 'G2_dutch_windmill',
                 patch_size: 64,
@@ -426,16 +354,13 @@ class UnifiedREArchaeologyApp {
                 east_lon: this.selectedArea.bounds[1][1]
             };
 
-            // Start scan
             await this.statusManager.startDiscovery(config);
             this.isScanning = true;
             this.updateButtonStates();
             
-            console.log('✅ Regular discovery scan started');
-            
         } catch (error) {
-            console.error('❌ Failed to start scan:', error);
-            this.isScanning = false; // Reset on error
+            console.error('Failed to start scan:', error);
+            this.isScanning = false;
             this.updateButtonStates();
         }
     }
@@ -447,45 +372,30 @@ class UnifiedREArchaeologyApp {
             await this.statusManager.stopDiscovery();
             this.isScanning = false;
             this.updateButtonStates();
-            console.log('🛑 Scan stopped');
         } catch (error) {
-            console.error('❌ Failed to stop scan:', error);
+            console.error('Failed to stop scan:', error);
         }
     }
 
     async startLidarScan() {
-        console.log('🚀 startLidarScan method called');
-        console.log('Current scanning state:', this.isScanning);
-        
         if (this.isScanning) {
-            console.log('⚠️ Already scanning, returning');
             return;
         }
         
         try {
-            console.log('📡 Starting LiDAR tiling...');
-            
-            // Clear previous LiDAR heatmap data
             if (this.mapVisualization && this.mapVisualization.clearLidarHeatmap) {
                 this.mapVisualization.clearLidarHeatmap();
-                console.log('🧹 Cleared previous LiDAR heatmap');
             }
             
-            // Create default area if none selected
             if (!this.selectedArea) {
-                console.log('🎯 No area selected, creating default area');
-                console.log('🗺️ Map instance:', this.mapInstance);
-                
                 let centerLat, centerLon;
                 
                 if (this.mapInstance) {
                     const center = this.mapInstance.getCenter();
                     centerLat = center.lat;
                     centerLon = center.lng;
-                    console.log('📍 Using map center:', centerLat, centerLon);
                 } else {
-                    // Use default coordinates if map is not ready
-                    centerLat = 52.4751;  // Default to Netherlands
+                    centerLat = 52.4751;
                     centerLon = 4.8156;
                     console.log('📍 Using default coordinates:', centerLat, centerLon);
                 }

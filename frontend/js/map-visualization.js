@@ -1208,13 +1208,9 @@ class MapVisualization {
             console.log('📍 Scan area bounds set:', this.scanAreaBounds);
         }
         
-        // Add tile to queue for progressive rendering
         this.tileQueue.push(tileData);
-        console.log(`📥 Added tile ${tileData.tile_id} to queue (position: ${tileData.grid_row},${tileData.grid_col}), queue size: ${this.tileQueue.length}`);
         
-        // Start the wipe effect if not already running
         if (!this.isWiping) {
-            console.log('🎬 Starting smooth wipe effect...');
             this.startWipeEffect();
         }
         
@@ -1253,11 +1249,9 @@ class MapVisualization {
         const currentTile = this.tileQueue[0];
         if (!currentTile) return;
         
-        // Initialize tile animation if not started
         if (!currentTile.wipeStartTime) {
             currentTile.wipeStartTime = Date.now();
             currentTile.wipeProgress = 0;
-            console.log(`🎨 Starting wipe for tile ${currentTile.tile_id} at position (${currentTile.grid_row}, ${currentTile.grid_col})`);
         }
         
         // Calculate wipe progress for current tile only
@@ -1278,22 +1272,16 @@ class MapVisualization {
         // Update canvas to show current tile progress
         this.updateCanvasHeatmap();
         
-        // Check if current tile is complete
         if (currentTile.wipeProgress >= 1) {
-            // Tile completed, remove from queue and move to next
-            this.tileQueue.shift(); // Remove first element
-            console.log(`✅ Completed wipe for tile ${currentTile.tile_id}, ${this.tileQueue.length} tiles remaining`);
+            this.tileQueue.shift();
             
-            // Immediately start next tile if available
             if (this.tileQueue.length > 0) {
-                setTimeout(() => this.processWipeQueue(), 16); // Start next immediately
+                setTimeout(() => this.processWipeQueue(), 16);
             } else {
                 this.isWiping = false;
-                this.queueSorted = false; // Reset for next scan
-                console.log('🎨 Sequential wipe effect completed');
+                this.queueSorted = false;
             }
         } else {
-            // Continue animating current tile
             setTimeout(() => this.processWipeQueue(), 16); // 60fps for smooth animation
         }
     }
@@ -1605,20 +1593,12 @@ class MapVisualization {
      * Draw smooth elevation data on canvas with interpolation
      */
     drawSmoothElevationData(ctx, canvas, bounds, tilesArray, elevRange) {
-        console.log(`🎨 Drawing smooth elevation data (range: ${elevRange.min.toFixed(1)}m to ${elevRange.max.toFixed(1)}m)`);
-        console.log(`📊 Canvas size: ${canvas.width}x${canvas.height}, tiles: ${tilesArray.length}`);
-        
         const imageData = ctx.createImageData(canvas.width, canvas.height);
         const data = imageData.data;
         
-        // Create elevation grid for interpolation
         const elevGrid = this.createElevationGrid(bounds, tilesArray, canvas.width, canvas.height);
-        
-        // Count non-null pixels for debugging
         const nonNullPixels = elevGrid.filter(val => val !== null).length;
-        console.log(`📊 Elevation grid has ${nonNullPixels} non-null pixels out of ${elevGrid.length} total`);
         
-        // Apply minimal blur for archaeological features (sharper boundaries like working code)
         const smoothGrid = this.applyGaussianBlur(elevGrid, canvas.width, canvas.height, 0.5);
         
         // Convert elevation data to colors
@@ -1642,7 +1622,6 @@ class MapVisualization {
             }
         }
         
-        console.log(`🎨 Colored ${coloredPixels} pixels on canvas`);
         ctx.putImageData(imageData, 0, 0);
         console.log(`✅ Canvas elevation data drawn successfully`);
     }

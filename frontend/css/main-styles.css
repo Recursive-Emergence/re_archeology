@@ -24,7 +24,7 @@ html, body {
     color: var(--text-primary);
 }
 
-/* Header - Fixed at top */
+/* Header */
 .app-header {
     position: fixed;
     top: 0;
@@ -90,7 +90,7 @@ html, body {
     text-align: right;
 }
 
-/* Main content - Full screen below header */
+/* Main content */
 .main-content {
     position: fixed;
     top: var(--header-height);

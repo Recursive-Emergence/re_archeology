@@ -16,21 +16,17 @@ class DiscoveryAPI {
     async connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         
-        // Use unified API endpoint
         const apiBase = window.AppConfig ? window.AppConfig.apiBase : '/api/v1';
-        const baseUrl = apiBase.replace('/api/v1', ''); // Get base URL without API path
+        const baseUrl = apiBase.replace('/api/v1', '');
         
         const wsUrl = baseUrl ? 
             `${protocol}//${new URL(baseUrl).host}${apiBase}/ws/discovery` :
             `${protocol}//${window.location.host}/api/v1/ws/discovery`;
         
-        console.log('Attempting to connect to unified WebSocket:', wsUrl);
-        
         return new Promise((resolve, reject) => {
             this.websocket = new WebSocket(wsUrl);
             
             this.websocket.onopen = () => {
-                console.log('WebSocket connected successfully to unified API');
                 this.wasConnected = true;
                 resolve();
             };
@@ -67,7 +63,6 @@ class DiscoveryAPI {
      * Handle incoming WebSocket messages
      */
     handleMessage(data) {
-        console.log('Received WebSocket message:', data.type, data);
         switch (data.type) {
             case 'session_started':
                 this.triggerCallback('sessionStarted', data.session);

@@ -87,7 +87,6 @@
                         <div class="input-group">
                             <label>Sliding Step (m)</label>
                             <input type="number" id="slidingStep" value="1" step="1" min="1" max="10">
-                            <small class="help-text">Distance to move window each step (1m = fine scanning, 5m = faster)</small>
                         </div>
                     </div>
                 </div>
@@ -164,7 +163,6 @@
                         <div class="input-group">
                             <label>Tile Size (m)</label>
                             <input type="number" id="lidarTileSize" value="64" step="16" min="32" max="256">
-                            <small class="help-text">Smaller tiles = higher resolution streaming (32-128m recommended)</small>
                         </div>
                         <div class="input-group">
                             <label>Streaming Mode</label>
@@ -172,7 +170,6 @@
                                 <option value="true" selected>High-Resolution Streaming</option>
                                 <option value="false">Basic Tile Average</option>
                             </select>
-                            <small class="help-text">Streaming mode provides detailed elevation visualization</small>
                         </div>
                     </div>
                 </div>
@@ -207,13 +204,6 @@
                      data-size="medium" 
                      data-theme="outline" 
                      data-text="sign_in_with">
-                </div>
-        
-                <!-- OAuth Configuration Notice -->
-                <div id="oauth-config-notice" class="oauth-notice" style="display: none;">
-                    <small class="text-muted">
-                        <i>⚠️ OAuth configuration needed for production use</i>
-                    </small>
                 </div>
             </section>
             
@@ -263,58 +253,29 @@
     
     <!-- Application Configuration -->
     <script>
-        // Global configuration - Dynamic based on current domain
         window.AppConfig = {
             googleClientId: '555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com',
-            apiBase: `${window.location.origin}/api/v1`, // Dynamic URL based on current domain
-            log() {
-                console.log('%c🔧 RE-Archaeology Configuration', 'color: #2563eb; font-weight: bold; font-size: 14px;');
-                console.log(`%c   Google Client ID: %c${this.googleClientId}`, 'color: #64748b;', 'color: #0f172a;');
-                console.log(`%c   API Base: %c${this.apiBase}`, 'color: #64748b;', 'color: #0f172a;');
-                console.log(`%c   Current Origin: %c${window.location.origin}`, 'color: #64748b;', 'color: #0f172a;');
-            }
+            apiBase: `${window.location.origin}/api/v1`
         };
     </script>
     
-    <!-- Event Emitter Base Class -->
+    <!-- Core Scripts -->
     <script src="js/event-emitter.js"></script>
-    
-    <!-- Core Modules -->
     <script src="js/auth-manager.js"></script>
     <script src="js/discovery-manager.js"></script>
     <script src="js/map-manager.js"></script>
     <script src="js/chat-manager.js"></script>
     <script src="js/ui-manager.js"></script>
-    
-    <!-- Discovery API -->
     <script src="js/discovery-api.js"></script>
-    <!-- Enhanced Status Management -->
     <script src="js/status-manager.js"></script>
     <script src="js/status-ui-manager.js"></script>
-    <!-- Patch Visualization -->
     <script src="js/patch-visualization.js?v=13.2"></script>
-    
-    <!-- Map Visualization with Sliding Window Support -->
     <script src="js/map-visualization.js?v=2.0"></script>
-    
-    <!-- Main Application - Disabled to avoid conflicts -->
-    <!-- <script src="js/app.js"></script> -->
-    
-    <!-- Legacy Compatibility Layer - Now Primary App -->
     <script src="js/simple-legacy-app.js?v=2.0"></script>
-    
-    <!-- Global Utilities -->
     <script src="js/global-utils.js"></script>
-    
-    <!-- Application Bootstrap -->
     <script src="js/bootstrap.js"></script>
 
-    <!-- Patch Details Modal - DISABLED (using popup instead) -->
-    <div id="patchGrid" class="patch-details-modal" style="display: none !important; visibility: hidden !important;">
-        <!-- Modal content disabled - using professional popup instead -->
-    </div>
-
-    <!-- Chart.js Library for Histogram -->
+    <!-- Chart.js Library -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>
