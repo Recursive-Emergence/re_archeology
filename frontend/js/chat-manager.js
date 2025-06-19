@@ -178,7 +178,7 @@ class ChatManager extends EventEmitter {
         
         // Context-aware responses based on user input
         if (message.includes('scan') || message.includes('discover') || message.includes('search')) {
-            return "I can help you with archaeological discoveries! Use the Discovery Panel on the left to start scanning for structures. You can adjust the scan area by clicking on the map or changing the coordinates. What type of structures are you looking for?";
+            return "I can help you with archaeological discoveries! Use the Discovery Panel on the left to start detection for structures. LiDAR data is automatically loaded from cloud cache during the detection process. You can adjust the scan area by clicking on the map or changing the coordinates. What type of structures are you looking for?";
         }
         
         if (message.includes('patch') || message.includes('detection') || message.includes('result')) {
@@ -190,7 +190,7 @@ class ChatManager extends EventEmitter {
         }
         
         if (message.includes('help') || message.includes('how') || message.includes('tutorial')) {
-            return "I'd be happy to help! Here's how to get started:\n\n1. 📍 Click on the map to set your scan area\n2. ⚙️ Adjust detection settings in the Discovery Panel\n3. 🚀 Click 'Start Scan' to begin discovery\n4. 📊 Click on detected patches to see detailed analysis\n\nWhat would you like to explore first?";
+            return "I'd be happy to help! Here's how to get started:\n\n1. 📍 Click on the map to set your scan area\n2. ⚙️ Adjust detection settings in the Discovery Panel\n3. 🚀 Click 'Start Detection' to begin discovery\n4. 📊 Click on detected patches to see detailed analysis\n\nLiDAR data is automatically loaded from the cloud cache during detection. What would you like to explore first?";
         }
         
         if (message.includes('lidar') || message.includes('elevation') || message.includes('data')) {

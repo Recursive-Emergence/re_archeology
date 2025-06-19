@@ -5,10 +5,14 @@
 
 class MapVisualization {
     constructor(mapElementId, options = {}) {
-        this.mapElement = document.getElementById(mapElementId);
+        this.mapElement = mapElementId; // Store the ID/element reference
         this.map = null;
         this.layers = new Map();
         this.patches = new Map();
+        this.controlsAdded = false; // Flag to prevent duplicate controls
+        this.basicMapReady = false; // Flag to indicate basic map functionality is available
+        this.layerControl = null; // Reference to layer control to prevent duplicates
+        this.baseLayersAdded = false; // Flag to prevent duplicate base layers
         this.options = {
             center: [52.4751, 4.8156],
             zoom: 13,
@@ -17,8 +21,20 @@ class MapVisualization {
             ...options
         };
         
-        this.initMap();
-        this.setupEventHandlers();
+        // Initialize immediately but with error handling
+        try {
+            this.initMap();
+            // Only setup event handlers if map was created successfully
+            if (this.map) {
+                this.setupEventHandlers();
+            } else {
+                console.warn('⚠️ Map not created, event handlers will be set up later');
+            }
+        } catch (error) {
+            console.error('❌ Failed to initialize map in constructor:', error);
+            // Store error state for later retry
+            this.initError = error;
+        }
     }
 
     /**
@@ -42,13 +58,67 @@ class MapVisualization {
         }
 
         console.log('✅ Container found:', container);
+        
+        // Ensure container has dimensions before initializing map
+        if (!container.offsetWidth || !container.offsetHeight) {
+            console.warn('⚠️ Container has no dimensions, setting minimum size');
+            // Ensure the container is visible and has a parent
+            if (!container.offsetParent && container.parentElement) {
+                container.style.display = 'block';
+                container.style.position = 'relative';
+            }
+            
+            container.style.width = container.style.width || '100%';
+            container.style.height = container.style.height || '400px';
+            container.style.minHeight = '400px';
+            container.style.minWidth = '300px';
+            
+            // Force a layout recalculation
+            container.offsetHeight; // This forces a reflow
+        }
 
+        // Double-check dimensions after styling
+        if (!container.offsetWidth || !container.offsetHeight) {
+            console.error('❌ Container still has no dimensions after styling');
+            throw new Error('Map container must have valid dimensions');
+        }
+
+        // Wait for next frame to ensure DOM is fully rendered
+        requestAnimationFrame(() => {
+            try {
+                this.initializeLeafletMap(container);
+            } catch (error) {
+                console.error('❌ requestAnimationFrame map init failed:', error);
+                // Fallback: try direct initialization
+                setTimeout(() => {
+                    try {
+                        this.initializeLeafletMap(container);
+                    } catch (fallbackError) {
+                        console.error('❌ Fallback map init also failed:', fallbackError);
+                        this.initError = fallbackError;
+                    }
+                }, 100);
+            }
+        });
+    }
+    
+    /**
+     * Initialize Leaflet map instance with proper error handling
+     */
+    initializeLeafletMap(container) {
         if (container._leaflet_id) {
             console.warn('🗺️ Map container already has Leaflet instance, cleaning up...');
             
             try {
+                // Get existing map instance and properly remove it
+                const existingMap = container._leaflet_map;
+                if (existingMap) {
+                    existingMap.remove();
+                }
+                
                 // Clear the container's leaflet ID and content
                 delete container._leaflet_id;
+                delete container._leaflet_map;
                 container.innerHTML = '';
                 
                 // Remove any leaflet-specific classes
@@ -60,88 +130,285 @@ class MapVisualization {
                 // Force clear anyway
                 container.innerHTML = '';
                 delete container._leaflet_id;
+                delete container._leaflet_map;
             }
         }
         
-        // Create map using the container element (not the original this.mapElement)
-        this.map = L.map(container, {
-            center: this.options.center,
-            zoom: this.options.zoom,
-            minZoom: this.options.minZoom,
-            maxZoom: this.options.maxZoom,
-            zoomControl: true,
-            attributionControl: true
-        });
-
-        console.log('✅ New map instance created successfully');
-
-        // Add base layers
-        this.addBaseLayers();
+        // Verify container is still valid and has dimensions
+        if (!container.offsetParent && container.offsetWidth === 0) {
+            console.error('❌ Container is not visible or has no dimensions');
+            throw new Error('Map container must be visible and have dimensions');
+        }
         
-        // Add custom controls
-        this.addCustomControls();
+        try {
+            // Create map using the container element (not the original this.mapElement)
+            this.map = L.map(container, {
+                center: this.options.center,
+                zoom: this.options.zoom,
+                minZoom: this.options.minZoom,
+                maxZoom: this.options.maxZoom,
+                zoomControl: true,
+                attributionControl: true,
+                // Explicitly enable dragging and other interactions
+                dragging: true,
+                touchZoom: true,
+                doubleClickZoom: true,
+                scrollWheelZoom: true,
+                boxZoom: true,
+                keyboard: true,
+                // Add additional safety options
+                preferCanvas: false,
+                zoomSnap: 1,
+                zoomDelta: 1,
+                trackResize: true
+            });
+
+            console.log('✅ New map instance created successfully');
+
+            // Store reference to map in container for cleanup
+            container._leaflet_map = this.map;
+
+            // Wait for map to be ready before adding layers and controls
+            this.map.whenReady(() => {
+                // Wait much longer and perform comprehensive readiness checks
+                setTimeout(() => {
+                    this.initializeMapLayers();
+                }, 5000); // Increased delay to 5 seconds for more reliable initialization
+            });
+            
+        } catch (error) {
+            console.error('❌ Failed to create map instance:', error);
+            this.initError = error;
+            return;
+        }
+    }
+    
+    /**
+     * Initialize map layers with comprehensive validation
+     */
+    initializeMapLayers(retryCount = 0) {
+        const maxRetries = 5; // Limit retries to prevent infinite loops
         
-        // Initialize layer groups
-        this.initLayerGroups();
+        try {
+            // Comprehensive readiness check
+            if (!this.isMapFullyReady()) {
+                if (retryCount < maxRetries) {
+                    console.warn(`⚠️ Map not fully ready, scheduling retry ${retryCount + 1}/${maxRetries}...`);
+                    setTimeout(() => this.initializeMapLayers(retryCount + 1), 2000); // Increased delay
+                } else {
+                    console.error('❌ Map failed to initialize after maximum retries');
+                    // Don't fail completely - set a flag that basic map is ready
+                    this.basicMapReady = true;
+                }
+                return;
+            }
+            
+            // Prevent duplicate control creation
+            if (this.controlsAdded) {
+                console.log('✅ Controls already added, skipping duplicate creation');
+                return;
+            }
+            
+            // Add base layers
+            this.addBaseLayers();
+            
+            // Add custom controls  
+            this.addCustomControls();
+            
+            // Initialize layer groups
+            this.initLayerGroups();
+            
+            // Mark controls as added
+            this.controlsAdded = true;
+            this.basicMapReady = true;
+            
+            console.log('✅ Map layers and controls initialized');
+        } catch (error) {
+            console.error('❌ Failed to initialize map layers:', error);
+            // Only retry if we haven't hit the limit
+            if (retryCount < maxRetries) {
+                setTimeout(() => this.initializeMapLayers(retryCount + 1), 2000);
+            } else {
+                console.error('❌ Max retries reached for map layer initialization');
+                // Still mark as basically ready so app can function
+                this.basicMapReady = true;
+            }
+        }
+    }
+    
+    /**
+     * Check if map is fully ready for layer operations
+     */
+    isMapFullyReady() {
+        if (!this.map) {
+            console.debug('Map readiness check: no map instance');
+            return false;
+        }
+        
+        const container = this.map.getContainer();
+        if (!container) {
+            console.debug('Map readiness check: no container');
+            return false;
+        }
+        
+        // Basic checks only - no coordinate system testing to avoid _leaflet_pos error
+        try {
+            // Wait for map to be fully rendered
+            if (!this.map._loaded) {
+                console.debug('Map readiness check: map not loaded yet');
+                return false;
+            }
+            
+            // Check if map has valid bounds without coordinate conversion
+            try {
+                const bounds = this.map.getBounds();
+                if (!bounds) {
+                    console.debug('Map readiness check: no bounds available');
+                    return false;
+                }
+            } catch (e) {
+                console.debug('Map readiness check: bounds error', e.message);
+                return false;
+            }
+            
+        } catch (e) {
+            console.debug('Map readiness check: error', e.message);
+            return false;
+        }
+        
+        // Don't test coordinate conversion - it causes _leaflet_pos errors
+        console.debug('✅ Map basic readiness confirmed');
+        return true;
     }
 
     /**
      * Add base map layers
      */
     addBaseLayers() {
+        // Prevent duplicate layer addition
+        if (this.baseLayersAdded) {
+            console.log('ℹ️ Base layers already added, skipping duplicate creation');
+            return;
+        }
+        
         const baseLayers = {
-            'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 19
-            }),
-            'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            '🛰️ Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 attribution: 'Tiles © Esri',
                 maxZoom: 19
             }),
-            'Terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            '🗺️ OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }),
+            '🏔️ Terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
                 attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap',
                 maxZoom: 17
             })
         };
 
-        // Add default layer
-        baseLayers['OpenStreetMap'].addTo(this.map);
+        // Add default layer (Satellite) with graceful error handling
+        try {
+            baseLayers['🛰️ Satellite'].addTo(this.map);
+            console.log('✅ Satellite layer added successfully');
+        } catch (layerError) {
+            console.error('❌ Failed to add satellite layer:', layerError);
+            // Continue anyway - other components might still work
+        }
 
-        // Add layer control
-        L.control.layers(baseLayers).addTo(this.map);
+        // Add layer control with graceful error handling
+        try {
+            // Check if layer control already exists
+            if (this.layerControl) {
+                console.log('ℹ️ Layer control already exists, skipping duplicate creation');
+                return;
+            }
+            
+            const layerControl = L.control.layers(baseLayers, null, {
+                position: 'topright',
+                collapsed: false
+            }).addTo(this.map);
+            
+            // Store reference to prevent duplicates
+            this.layerControl = layerControl;
+            
+            console.log('✅ Layer control added successfully');
+        } catch (controlError) {
+            console.error('❌ Failed to add layer control:', controlError);
+            // Continue anyway
+        }
+        
+        // Add custom styling after control is added
+        setTimeout(() => {
+            this.enhanceLayerControl();
+        }, 100);
+        
+        // Mark base layers as added
+        this.baseLayersAdded = true;
     }
 
     /**
      * Add custom map controls
      */
     addCustomControls() {
-        // Scale control
-        L.control.scale({
-            position: 'bottomleft',
-            imperial: false
-        }).addTo(this.map);
-
-        // Coordinates display
-        const coordsControl = L.control({position: 'bottomleft'});
-        coordsControl.onAdd = () => {
-            const div = L.DomUtil.create('div', 'coords-display');
-            div.style.background = 'rgba(0, 0, 0, 0.8)';
-            div.style.color = '#fff';
-            div.style.padding = '4px 8px';
-            div.style.borderRadius = '4px';
-            div.style.fontSize = '12px';
-            div.innerHTML = 'Lat: --, Lon: --';
-            return div;
-        };
-        coordsControl.addTo(this.map);
-
-        // Update coordinates on mouse move
-        this.map.on('mousemove', (e) => {
-            const coordsDiv = document.querySelector('.coords-display');
-            if (coordsDiv) {
-                coordsDiv.innerHTML = `Lat: ${e.latlng.lat.toFixed(6)}, Lon: ${e.latlng.lng.toFixed(6)}`;
+        try {
+            // Use the comprehensive readiness check
+            if (!this.isMapFullyReady()) {
+                throw new Error('Map not ready for custom controls');
             }
-        });
+            
+            // Scale control with error handling
+            try {
+                L.control.scale({
+                    position: 'bottomleft',
+                    imperial: false
+                }).addTo(this.map);
+                console.log('✅ Scale control added successfully');
+            } catch (scaleError) {
+                console.error('❌ Failed to add scale control:', scaleError);
+            }
+
+            // Coordinates display with error handling
+            try {
+                const coordsControl = L.control({position: 'bottomleft'});
+                coordsControl.onAdd = () => {
+                    const div = L.DomUtil.create('div', 'coords-display');
+                    div.style.background = 'rgba(0, 0, 0, 0.8)';
+                    div.style.color = '#fff';
+                    div.style.padding = '4px 8px';
+                    div.style.borderRadius = '4px';
+                    div.style.fontSize = '12px';
+                    div.innerHTML = 'Lat: --, Lon: --';
+                    return div;
+                };
+                coordsControl.addTo(this.map);
+                console.log('✅ Coordinates control added successfully');
+            } catch (coordsError) {
+                console.error('❌ Failed to add coordinates control:', coordsError);
+            }
+        } catch (error) {
+            console.error('❌ Failed to add custom controls:', error);
+            // Retry after delay
+            setTimeout(() => {
+                try {
+                    if (this.map && this.map.getContainer()) {
+                        this.addCustomControls();
+                        console.log('✅ Custom controls added on retry');
+                    }
+                } catch (retryError) {
+                    console.error('❌ Custom controls retry failed:', retryError);
+                }
+            }, 1500);
+        }
+
+        // Update coordinates on mouse move (only if map exists)
+        if (this.map) {
+            this.map.on('mousemove', (e) => {
+                const coordsDiv = document.querySelector('.coords-display');
+                if (coordsDiv) {
+                    coordsDiv.innerHTML = `Lat: ${e.latlng.lat.toFixed(6)}, Lon: ${e.latlng.lng.toFixed(6)}`;
+                }
+            });
+        }
     }
 
     /**
@@ -183,6 +450,11 @@ class MapVisualization {
      * Set up map event handlers
      */
     setupEventHandlers() {
+        if (!this.map) {
+            console.warn('⚠️ Cannot setup event handlers: map is null');
+            return;
+        }
+        
         this.map.on('click', (e) => {
             this.onMapClick(e);
         });
@@ -1195,7 +1467,7 @@ class MapVisualization {
         
         // Check for duplicate tiles to prevent sync issues
         if (this.processedTileIds.has(tileData.tile_id)) {
-            console.warn(`⚠️ Duplicate tile detected: ${tileData.tile_id}, skipping`);
+            // console.warn(`⚠️ Duplicate tile detected: ${tileData.tile_id}, skipping`); // Reduced log noise
             return null;
         }
         
@@ -1848,6 +2120,50 @@ class MapVisualization {
         }
         
         console.log('🧹 Cleared LiDAR heatmap, wipe effect state, and sync tracking');
+    }
+
+    /**
+     * Enhance the layer control with better visual styling
+     */
+    enhanceLayerControl() {
+        const layerControls = document.querySelectorAll('.leaflet-control-layers');
+        layerControls.forEach(control => {
+            // Add a title to the control
+            if (!control.querySelector('.layer-control-title')) {
+                const title = document.createElement('div');
+                title.className = 'layer-control-title';
+                title.style.cssText = `
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: var(--accent-color);
+                    margin-bottom: 12px;
+                    text-align: center;
+                    border-bottom: 1px solid rgba(0, 255, 136, 0.2);
+                    padding-bottom: 8px;
+                `;
+                title.textContent = 'Map Layers';
+                
+                const form = control.querySelector('form');
+                if (form) {
+                    form.insertBefore(title, form.firstChild);
+                }
+            }
+            
+            // Add hover effects to layer options
+            const labels = control.querySelectorAll('label');
+            labels.forEach(label => {
+                label.style.transition = 'all 0.2s ease';
+                label.addEventListener('mouseenter', () => {
+                    label.style.backgroundColor = 'rgba(0, 255, 136, 0.1)';
+                    label.style.borderRadius = '4px';
+                    label.style.padding = '4px 8px';
+                });
+                label.addEventListener('mouseleave', () => {
+                    label.style.backgroundColor = 'transparent';
+                    label.style.padding = '0';
+                });
+            });
+        });
     }
 }
 

@@ -58,7 +58,7 @@ class StatusUIManager {
         };
         
         this.createAdvancedStatusPanels();
-        // this.createFloatingStatusWidget(); // Removed - status now in compact controls
+        this.createFloatingStatusWidget();
         this.createProgressIndicator();
     }
     
@@ -345,8 +345,8 @@ class StatusUIManager {
      */
     updateConnectionStatus(status) {
         const { connection, connectionDot, connectionText } = this.elements;
-        // const floatingDot = document.getElementById('floatingConnectionDot'); // Removed
-        // const floatingText = document.getElementById('floatingConnectionText'); // Removed
+        const floatingDot = document.getElementById('floatingConnectionDot');
+        const floatingText = document.getElementById('floatingConnectionText');
         
         if (connection) {
             connection.className = `connection-status ${status}`;
@@ -356,26 +356,19 @@ class StatusUIManager {
             connectionDot.className = `connection-dot ${status}`;
         }
         
-        // Floating elements removed - status now in compact controls
-        // if (floatingDot) {
-        //     floatingDot.className = `status-dot ${status}`;
-        // }
+        if (floatingDot) {
+            floatingDot.className = `status-dot ${status}`;
+        }
         
         const statusText = this.getStatusText(status);
         if (connectionText) connectionText.textContent = statusText;
-        // if (floatingText) floatingText.textContent = statusText; // Removed
+        if (floatingText) floatingText.textContent = statusText;
         
         // Update detailed status
         const wsStatus = document.getElementById('wsStatus');
         if (wsStatus) {
             wsStatus.textContent = statusText;
             wsStatus.className = status;
-        }
-        
-        // Update compact controls if they exist (integrated status)
-        if (window.mapManager && window.mapManager.updateConnectionStatus) {
-            const isConnected = status === 'connected';
-            window.mapManager.updateConnectionStatus(isConnected, statusText);
         }
     }
     

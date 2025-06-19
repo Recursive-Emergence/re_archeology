@@ -26,11 +26,14 @@ class UnifiedREArchaeologyApp {
             
             this.initControls();
             
+            // Initialize compact controls after map is ready            
+            if (this.mapManager && this.mapInstance) {
+                this.setupCompactControlEvents();
+                // Note: updateScanArea is now called in finishMapSetup after proper initialization
+            }
+            
             if (typeof StatusUIManager !== 'undefined') {
                 this.statusUI = new StatusUIManager(this.statusManager);
-                if (this.statusUI.updateLidarButtonState) {
-                    this.statusUI.updateLidarButtonState('idle', 0, '');
-                }
             }
             
             this.updateButtonStates();
@@ -38,6 +41,7 @@ class UnifiedREArchaeologyApp {
             
             if (typeof window !== 'undefined') {
                 window.debugReset = () => this.forceResetScanningState();
+                window.app = this; // Make app globally available for compact controls
             }
         } catch (error) {
             console.error('Failed to initialize app:', error);
@@ -45,6 +49,7 @@ class UnifiedREArchaeologyApp {
     }
 
     initMap() {
+        // Clean up existing map
         if (this.mapVisualization) {
             try {
                 this.mapVisualization.destroy();
@@ -60,19 +65,82 @@ class UnifiedREArchaeologyApp {
             throw new Error('MapVisualization class not defined');
         }
         
+        // Initialize MapVisualization first
         this.mapVisualization = new MapVisualization('map', {
             center: [52.4751, 4.8156],
             zoom: 13
         });
         
+        // Check if map was initialized successfully
+        if (!this.mapVisualization.map) {
+            // Retry initialization if it failed
+            console.warn('⚠️ Map not ready immediately, retrying...');
+            setTimeout(() => {
+                if (!this.mapVisualization.map && this.mapVisualization.initError) {
+                    console.log('🔄 Retrying map initialization...');
+                    try {
+                        this.mapVisualization.initMap();
+                        // Setup event handlers only if map was created successfully
+                        if (this.mapVisualization.map) {
+                            this.mapVisualization.setupEventHandlers();
+                        }
+                    } catch (retryError) {
+                        console.error('❌ Map retry failed:', retryError);
+                        throw retryError;
+                    }
+                }
+                this.finishMapSetup();
+            }, 100);
+        } else {
+            this.finishMapSetup();
+        }
+    }
+    
+    finishMapSetup() {
         this.mapInstance = this.mapVisualization.map;
+        console.log('✅ MapVisualization created, map instance:', this.mapInstance ? 'EXISTS' : 'NULL');
+        console.log('✅ Map container _leaflet_id:', document.getElementById('map')?._leaflet_id);
+        console.log('🎯 Map interaction tip: Use Ctrl+Click to select scan areas, drag to pan normally');
         
-        this.setupDefaultScanArea();
+        if (!this.mapInstance) {
+            console.error('❌ Map instance is null after initialization');
+            throw new Error('Failed to create map instance');
+        }
+        
+        // Initialize MapManager with the existing map instance
+        console.log('🗺️ Initializing MapManager with compact controls...');
+        if (!this.mapManager) {
+            this.mapManager = new MapManager();
+            console.log('🗺️ Passing existing map to MapManager...');
+            // Initialize with the existing map instance
+            this.mapManager.init(this.mapInstance);
+            console.log('✅ MapManager initialized with existing map');
+        }
+        
+        // Setup compact control events if available
+        if (this.mapManager && this.mapInstance) {
+            this.setupCompactControlEvents();
+        }
+        
+        // Update scan area after MapManager is fully initialized
+        setTimeout(() => {
+            if (this.mapManager && this.mapManager.updateScanArea) {
+                this.mapManager.updateScanArea({ lat: 52.4751, lon: 4.8156, radius: 2 });
+            }
+        }, 500);
+        
+        // Delay setupDefaultScanArea to ensure map is fully ready
+        setTimeout(() => {
+            this.setupDefaultScanArea();
+        }, 1200); // Increased delay to ensure map coordinate system is ready
         
         if (this.mapInstance) {
             this.mapInstance.on('click', (e) => {
-                if (!this.isScanning && (!this.selectedArea || !this.selectedArea.isLocked)) {
+                // Require Ctrl+Click for region selection to avoid interfering with map dragging
+                if (!this.isScanning && (!this.selectedArea || !this.selectedArea.isLocked) && 
+                    (e.originalEvent.ctrlKey || e.originalEvent.metaKey)) {
                     this.selectScanArea(e.latlng.lat, e.latlng.lng);
+                    console.log('🎯 Scan area selected via Ctrl+Click');
                 }
             });
             
@@ -124,13 +192,8 @@ class UnifiedREArchaeologyApp {
         });
         
         this.statusManager.on('lidarProgress', (progressData) => {
-            if (this.statusUI && this.statusUI.updateLidarProgress) {
-                this.statusUI.updateLidarProgress(
-                    progressData.processed_tiles || 0, 
-                    progressData.total_tiles || 0, 
-                    progressData.message || ''
-                );
-            }
+            // LiDAR progress is now handled transparently by the backend
+            console.log('📊 LiDAR loading progress:', progressData);
         });
         
         this.statusManager.on('lidarCompleted', (data) => {
@@ -138,10 +201,7 @@ class UnifiedREArchaeologyApp {
             this.currentLidarSessionId = null;
             this.unlockScanArea();
             
-            if (this.statusUI && this.statusUI.updateLidarButtonState) {
-                this.statusUI.updateLidarButtonState('completed', 1.0, 'Complete');
-            }
-            
+            console.log('✅ LiDAR loading completed');
             this.updateButtonStates();
         });
         
@@ -150,11 +210,6 @@ class UnifiedREArchaeologyApp {
             this.isScanning = false;
             this.currentLidarSessionId = null; // Clear session ID
             this.unlockScanArea(); // Unlock the area if there's an error
-            
-            // Reset button to idle state on error
-            if (this.statusUI && this.statusUI.updateLidarButtonState) {
-                this.statusUI.updateLidarButtonState('idle', 0, 'Error');
-            }
             
             this.updateButtonStates();
         });
@@ -242,6 +297,37 @@ class UnifiedREArchaeologyApp {
     }
 
     selectScanArea(lat, lon, radiusKm = null) {
+        // Always delegate to MapManager if it exists - it handles the scan area display
+        if (this.mapManager) {
+            console.log('📍 Delegating scan area to MapManager (no duplicate rectangle)');
+            this.mapManager.updateScanArea({ lat, lon, radius: radiusKm || 1 });
+            
+            // Only set our local selectedArea for data reference (no visual rectangle)
+            const radiusValue = radiusKm || 1;
+            const radius = radiusValue * 1000; // Convert to meters
+            const latDelta = radius / 111320;
+            const lonDelta = radius / (111320 * Math.cos(lat * Math.PI / 180));
+            
+            this.selectedArea = {
+                lat, 
+                lon, 
+                radius: radiusValue,
+                bounds: [
+                    [lat - latDelta, lon - lonDelta], // southwest
+                    [lat + latDelta, lon + lonDelta]  // northeast
+                ],
+                rectangle: this.mapManager.scanAreaRectangle, // Reference to manager's rectangle
+                isLocked: false
+            };
+            
+            console.log('✅ selectedArea data set (visual handled by MapManager)');
+            this.updateButtonStates();
+            return;
+        }
+        
+        // Only create our own rectangle if MapManager doesn't exist (fallback mode)
+        console.log('⚠️ MapManager not available, creating fallback rectangle');
+        
         // Clear existing area
         if (this.selectedArea && this.selectedArea.rectangle && this.mapInstance) {
             this.mapInstance.removeLayer(this.selectedArea.rectangle);
@@ -272,27 +358,77 @@ class UnifiedREArchaeologyApp {
         
         // Create rectangle with geographic bounds (will scale properly with zoom)
         if (this.mapInstance) {
-            this.selectedArea.rectangle = L.rectangle(bounds, {
-                color: '#00ff88',
-                weight: 3,
-                opacity: 0.8,
-                fillOpacity: 0, // No fill - border only
-                interactive: !this.isScanning, // Lock during scanning
-                pane: 'overlayPane' // Ensure proper layering
-            }).addTo(this.mapInstance);
-            
-            // Add click handler only when not scanning
-            if (!this.isScanning) {
-                this.selectedArea.rectangle.on('click', (e) => {
-                    if (!this.selectedArea.isLocked) {
-                        // Allow repositioning when not locked
-                        this.selectScanArea(e.latlng.lat, e.latlng.lng, radiusValue);
+            // Wait for map to be ready before adding layers
+            this.mapInstance.whenReady(() => {
+                // Add extra delay to ensure renderer and coordinate system are ready
+                setTimeout(() => {
+                    try {
+                        // Validate map state before proceeding
+                        if (!this.mapInstance || !this.mapInstance.getContainer()) {
+                            throw new Error('Map instance not properly initialized');
+                        }
+                        
+                        // Test coordinate operations with better validation
+                        // Comprehensive coordinate system validation
+                        try {
+                            if (!this.mapInstance || !this.mapInstance.getContainer()) {
+                                throw new Error('Map instance not available');
+                            }
+                            
+                            const center = this.mapInstance.getCenter();
+                            const zoom = this.mapInstance.getZoom();
+                            
+                            // Verify we got valid coordinate results
+                            if (!center || typeof center.lat !== 'number' || typeof center.lng !== 'number' || 
+                                typeof zoom !== 'number') {
+                                throw new Error('Map coordinate system returned invalid values');
+                            }
+                            
+                            console.log('✅ Map coordinate system verified for scan area');
+                        } catch (coordError) {
+                            throw new Error('Map coordinate system not ready: ' + coordError.message);
+                        }
+                        
+                        this.selectedArea.rectangle = L.rectangle(bounds, {
+                            color: '#00ff88',
+                            weight: 3,
+                            opacity: 0.8,
+                            fillOpacity: 0, // No fill - border only
+                            interactive: !this.isScanning, // Lock during scanning
+                            pane: 'overlayPane' // Ensure proper layering
+                        }).addTo(this.mapInstance);
+                        
+                        // Add click handler only when not scanning
+                        if (!this.isScanning) {
+                            this.selectedArea.rectangle.on('click', (e) => {
+                                if (!this.selectedArea.isLocked) {
+                                    // Allow repositioning when not locked
+                                    this.selectScanArea(e.latlng.lat, e.latlng.lng, radiusValue);
+                                }
+                            });
+                        }
+                        
+                        // Ensure rectangle stays on top and updates with zoom
+                        this.selectedArea.rectangle.bringToFront();
+                        console.log('✅ Scan area rectangle created successfully');
+                    } catch (error) {
+                        console.error('❌ Failed to create scan area rectangle:', error);
+                        // Retry with exponential backoff
+                        setTimeout(() => {
+                            try {
+                                if (this.mapInstance && this.mapInstance.getContainer()) {
+                                    console.log('🔄 Retrying scan area rectangle creation...');
+                                    this.selectScanArea(lat, lon, radiusKm);
+                                } else {
+                                    console.error('❌ Map still not available for rectangle creation');
+                                }
+                            } catch (retryError) {
+                                console.error('❌ Scan area rectangle retry failed:', retryError);
+                            }
+                        }, 3000); // Increased retry delay
                     }
-                });
-            }
-            
-            // Ensure rectangle stays on top and updates with zoom
-            this.selectedArea.rectangle.bringToFront();
+                }, 2000); // Increased initial delay
+            });
         }
 
         this.updateButtonStates();
@@ -330,8 +466,12 @@ class UnifiedREArchaeologyApp {
         }
         
         try {
+            // Clear previous visualizations
             if (this.mapVisualization && this.mapVisualization.clearPatches) {
                 this.mapVisualization.clearPatches();
+            }
+            if (this.mapVisualization && this.mapVisualization.clearLidarHeatmap) {
+                this.mapVisualization.clearLidarHeatmap();
             }
             
             if (!this.selectedArea) {
@@ -343,23 +483,35 @@ class UnifiedREArchaeologyApp {
                 }
             }
 
+            console.log('🚀 Starting detection with automatic LiDAR loading...');
+            
+            // Detection config with automatic LiDAR integration (handled by backend)
             const config = {
                 method: 'G2_dutch_windmill',
-                patch_size: 64,
-                sliding_step: 1,
+                patch_size: parseInt(document.getElementById('patchSize')?.value || '64'),
+                sliding_step: parseInt(document.getElementById('slidingStep')?.value || '1'),
                 use_bounds: true,
-                north_lat: this.selectedArea.bounds[0][0],
-                west_lon: this.selectedArea.bounds[0][1], 
-                south_lat: this.selectedArea.bounds[1][0],
-                east_lon: this.selectedArea.bounds[1][1]
+                north_lat: this.selectedArea.bounds[1][0],
+                south_lat: this.selectedArea.bounds[0][0], 
+                east_lon: this.selectedArea.bounds[1][1],
+                west_lon: this.selectedArea.bounds[0][1],
+                // LiDAR is automatically loaded by backend during detection
+                auto_load_lidar: true,
+                lidar_tile_size: 64,
+                lidar_data_type: 'DSM',
+                streaming_mode: true
             };
 
+            console.log('🎯 Detection config with backend LiDAR auto-loading:', config);
+            
             await this.statusManager.startDiscovery(config);
             this.isScanning = true;
             this.updateButtonStates();
             
+            console.log('✅ Detection started with backend LiDAR auto-loading');
+            
         } catch (error) {
-            console.error('Failed to start scan:', error);
+            console.error('Failed to start integrated scan:', error);
             this.isScanning = false;
             this.updateButtonStates();
         }
@@ -406,15 +558,53 @@ class UnifiedREArchaeologyApp {
                 console.log(`📏 Created default scan area with ${defaultRadius}km radius`);
             }
 
-            // Get scan config for LiDAR streaming
+            // Double-check we have valid selectedArea with bounds
+            if (!this.selectedArea || !this.selectedArea.bounds || !Array.isArray(this.selectedArea.bounds) || this.selectedArea.bounds.length < 2) {
+                console.error('❌ Invalid selectedArea after setup:', this.selectedArea);
+                throw new Error('Invalid scan area configuration - bounds not properly set');
+            }
+
+            // Get scan config for LiDAR streaming using exact rectangle bounds
+            let scanBounds;
+            
+            // If MapManager exists, use its current rectangle bounds for precision
+            if (this.mapManager && this.mapManager.getCurrentScanBounds) {
+                scanBounds = this.mapManager.getCurrentScanBounds();
+                console.log('🎯 Using MapManager bounds for LiDAR scan:', scanBounds);
+            } else {
+                // Fallback to selectedArea bounds
+                scanBounds = {
+                    north: this.selectedArea.bounds[1][0],  // northeast lat
+                    south: this.selectedArea.bounds[0][0],  // southwest lat
+                    east: this.selectedArea.bounds[1][1],   // northeast lon
+                    west: this.selectedArea.bounds[0][1],   // southwest lon
+                    center_lat: (this.selectedArea.bounds[0][0] + this.selectedArea.bounds[1][0]) / 2,
+                    center_lon: (this.selectedArea.bounds[0][1] + this.selectedArea.bounds[1][1]) / 2,
+                    radius_km: this.calculateRadius()
+                };
+                console.log('🎯 Using selectedArea bounds for LiDAR scan:', scanBounds);
+            }
+            
             const config = {
-                center_lat: (this.selectedArea.bounds[0][0] + this.selectedArea.bounds[1][0]) / 2,
-                center_lon: (this.selectedArea.bounds[0][1] + this.selectedArea.bounds[1][1]) / 2,
-                radius_km: this.calculateRadius(),
-                tile_size_m: parseInt(document.getElementById('lidarTileSize')?.value || '64'),
-                data_type: document.getElementById('lidarDataType')?.value || 'DSM',
-                streaming_mode: document.getElementById('lidarStreamingMode')?.value === 'true'
+                // Use exact rectangle bounds instead of center+radius
+                north: scanBounds.north,
+                south: scanBounds.south,
+                east: scanBounds.east,
+                west: scanBounds.west,
+                // Also include center and radius for backward compatibility
+                center_lat: scanBounds.center_lat,
+                center_lon: scanBounds.center_lon,
+                radius_km: scanBounds.radius_km,
+                tile_size_m: 64, // Default tile size since controls removed
+                data_type: 'DSM', // Default data type since controls removed
+                streaming_mode: true // Default streaming mode since controls removed
             };
+            
+            console.log('🎯 Final LiDAR scan config:', {
+                bounds: `N:${config.north.toFixed(6)} S:${config.south.toFixed(6)} E:${config.east.toFixed(6)} W:${config.west.toFixed(6)}`,
+                center: [config.center_lat.toFixed(6), config.center_lon.toFixed(6)],
+                radius_km: config.radius_km.toFixed(3)
+            });
             console.log('🌐 API base URL:', this.statusManager.apiBaseUrl);
             
             // Get API base URL with fallback
@@ -567,6 +757,70 @@ class UnifiedREArchaeologyApp {
         }
     }
 
+    /**
+     * Stop LiDAR tiling session
+     */
+    async stopLidarScan() {
+        if (!this.currentLidarSessionId) {
+            console.log('⚠️ No active LiDAR session to stop');
+            return;
+        }
+        
+        try {
+            console.log('⏹️ Stopping LiDAR tiling...');
+            console.log('🔧 Current session ID:', this.currentLidarSessionId);
+            
+            // Update UI state
+            if (this.statusUI && this.statusUI.updateLidarButtonState) {
+                this.statusUI.updateLidarButtonState('stopping', 0, 'Stopping...');
+            }
+            
+            // Call backend stop endpoint with session_id
+            const apiBaseUrl = this.statusManager.apiBaseUrl || '/api/v1';
+            const requestData = { session_id: this.currentLidarSessionId };
+            console.log('📡 Sending stop request:', requestData);
+            
+            const response = await fetch(`${apiBaseUrl}/discovery/stop-lidar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+            
+            console.log('📡 Stop response status:', response.status);
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ LiDAR tiling stopped:', result);
+                
+                // Clear session
+                this.currentLidarSessionId = null;
+                this.isScanning = false;
+                
+                // Update UI
+                if (this.statusUI && this.statusUI.updateLidarButtonState) {
+                    this.statusUI.updateLidarButtonState('idle', 0, 'Stopped');
+                }
+                
+                this.updateButtonStates();
+            } else {
+                const errorText = await response.text();
+                console.error('❌ Stop request failed:', response.status, errorText);
+                throw new Error(`Failed to stop: ${response.statusText}`);
+            }
+            
+        } catch (error) {
+            console.error('❌ Failed to stop LiDAR tiling:', error);
+            
+            // Force reset UI on error
+            this.currentLidarSessionId = null;
+            this.isScanning = false;
+            if (this.statusUI && this.statusUI.updateLidarButtonState) {
+                this.statusUI.updateLidarButtonState('idle', 0, 'Error');
+            }
+            this.updateButtonStates();
+        }
+    }
+
     calculateRadius() {
         if (!this.selectedArea) return 2; // Default 2km
         
@@ -648,6 +902,42 @@ class UnifiedREArchaeologyApp {
         this.unlockScanArea();
         this.updateButtonStates();
         console.log('✅ Scanning state reset complete');
+    }
+
+    // Setup compact control events integration
+    setupCompactControlEvents() {
+        if (!this.mapManager) return;
+        
+        // Detection events only (LiDAR events removed)
+        this.mapManager.on('scanStart', () => {
+            console.log('� Detection started from compact control');
+            this.startScan();
+        });
+        
+        // Detection scan events
+        this.mapManager.on('scanPause', () => {
+            console.log('🔍 Detection scan paused from compact control');
+            this.stopScan(); // Use existing stop method for pause
+        });
+        
+        this.mapManager.on('scanResume', () => {
+            console.log('🔍 Detection scan resumed from compact control');
+            this.startScan(); // Use existing start method for resume
+        });
+        
+        this.mapManager.on('scanStop', () => {
+            console.log('🔍 Detection scan stopped from compact control');
+            this.stopScan();
+        });
+        
+        // Area selection from compact controls
+        this.mapManager.on('areaSelected', (bounds) => {
+            const centerLat = (bounds.north + bounds.south) / 2;
+            const centerLon = (bounds.east + bounds.west) / 2;
+            if (!this.isScanning && (!this.selectedArea || !this.selectedArea.isLocked)) {
+                this.selectScanArea(centerLat, centerLon);
+            }
+        });
     }
 }
 

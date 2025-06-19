@@ -28,9 +28,7 @@
                 <h1><a href="#" onclick="window.unifiedApp.goToHomepage(); return false;">RE-Archaeology Framework</a></h1>
             </div>
             <div class="header-actions">
-                <div class="status-info">
-                    <span id="scanningStatusIndicator">Community Project by RE, Kaggle and OpenAI, etc.</span>
-                </div>
+                <!-- Clean header - all status moved to compact controls -->
                 <!-- Hidden elements to store data for status updates -->
                 <div style="display: none;">
                     <span id="sessionStatus">Idle</span>
@@ -49,18 +47,28 @@
         <div class="map-container">
             <div id="map"></div>
             
-            <!-- Connection Status -->
-            <div class="connection-status disconnected" id="connectionStatus">
+            <!-- Map Controls Help -->
+            <div class="map-controls-help" style="position: absolute; bottom: 100px; left: 20px; background: rgba(0, 0, 0, 0.8); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 11px; z-index: 1000; max-width: 200px;">
+                <strong>🗺️ Map Controls:</strong><br>
+                • <span style="color: #00ff88;">Drag to pan</span> the map<br>
+                • <span style="color: #00ff88;">Double-click</span> to zoom<br>
+                • <span style="color: #ffaa00;">Ctrl+Click</span> to select scan area<br>
+                • <span style="color: #00ff88;">Mouse wheel</span> to zoom<br>
+                • All map interactions now work properly!
+            </div>
+            
+            <!-- Connection Status - now integrated into compact controls -->
+            <!-- <div class="connection-status disconnected" id="connectionStatus">
                 <div class="connection-dot"></div>
                 <span>Disconnected</span>
-            </div>
+            </div> -->
         </div>
         
         <!-- Discovery Panel (Floating Left) -->
         <div class="discovery-panel">
             <div class="discovery-header">
                 <h1>🏛️ Structure Discovery</h1>
-                <p>Real-time archaeological structure detection using G₂ modular kernel system with advanced feature analysis</p>
+                <p>Real-time archaeological structure detection using sliding window approach with automatic LiDAR data loading</p>
             </div>
             
             <div class="discovery-controls">
@@ -78,7 +86,7 @@
                         </div>
                         <div class="input-group">
                             <label>Scan Radius (km)</label>
-                            <input type="number" id="scanRadius" value="2" step="0.5" min="0.5" max="10">
+                            <input type="number" id="scanRadius" value="1" step="0.5" min="0.5" max="10">
                         </div>
                         <div class="input-group">
                             <label>Patch Size (m)</label>
@@ -87,6 +95,7 @@
                         <div class="input-group">
                             <label>Sliding Step (m)</label>
                             <input type="number" id="slidingStep" value="1" step="1" min="1" max="10">
+                            <small class="help-text">Small steps for comprehensive coverage</small>
                         </div>
                     </div>
                 </div>
@@ -119,11 +128,12 @@
                 <div class="control-group">
                     <h3>🚀 Actions</h3>
                     <div class="button-grid">
-                        <button class="btn btn-lidar" id="lidarScanBtn">�️ LiDAR Tiling</button>
-                        <button class="btn btn-primary" id="startScanBtn">Start Scan</button>
+                        <button class="btn btn-primary" id="startScanBtn">Start Detection</button>
                         <button class="btn btn-stop" id="stopScanBtn" disabled>Stop</button>
                         <button class="btn btn-secondary" id="clearResultsBtn">Clear</button>
-
+                    </div>
+                    <div class="info-text">
+                        <small>🗂️ LiDAR data automatically loaded from cloud cache during detection</small>
                     </div>
                 </div>
                 
@@ -145,31 +155,6 @@
                             <label>
                                 <input type="checkbox" id="showScanAnimation"> Show scan animation
                             </label>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- LiDAR Tiling Settings -->
-                <div class="control-group" data-collapsible="true">
-                    <h3 onclick="toggleControlGroup(this)">�️ LiDAR Tiling Settings <span class="toggle-icon">▼</span></h3>
-                    <div class="control-content">
-                        <div class="input-group">
-                            <label>Data Type</label>
-                            <select id="lidarDataType">
-                                <option value="DSM" selected>DSM (Digital Surface Model)</option>
-                                <option value="DTM">DTM (Digital Terrain Model)</option>
-                            </select>
-                        </div>
-                        <div class="input-group">
-                            <label>Tile Size (m)</label>
-                            <input type="number" id="lidarTileSize" value="64" step="16" min="32" max="256">
-                        </div>
-                        <div class="input-group">
-                            <label>Streaming Mode</label>
-                            <select id="lidarStreamingMode">
-                                <option value="true" selected>High-Resolution Streaming</option>
-                                <option value="false">Basic Tile Average</option>
-                            </select>
                         </div>
                     </div>
                 </div>

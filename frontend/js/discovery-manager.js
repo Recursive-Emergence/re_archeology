@@ -38,15 +38,35 @@ class DiscoveryManager extends EventEmitter {
             this.currentSession = session;
             this.isScanning = true;
             this.emit('sessionStarted', session);
+            
+            // Update compact control status
+            if (this.mapManager) {
+                this.mapManager.updateControlStatus('scan', 'Running', 0);
+            }
         });
         
         this.statusManager.on('sessionCompleted', () => {
             this.isScanning = false;
             this.emit('sessionCompleted');
+            
+            // Update compact control status and re-enable controls
+            if (this.mapManager) {
+                this.mapManager.updateControlStatus('scan', 'Completed', 100);
+                setTimeout(() => {
+                    this.mapManager.showCompactControlsAfterOperation();
+                    this.mapManager.updateControlStatus('scan', 'Ready', null);
+                }, 2000);
+            }
         });
         
         this.statusManager.on('patchResult', (patch) => {
             this.handlePatchResult(patch);
+            
+            // Update progress in compact controls
+            if (this.mapManager && this.currentSession) {
+                const progress = Math.round((this.stats.processedPatches / (this.currentSession.total_patches || 100)) * 100);
+                this.mapManager.updateControlStatus('scan', 'Running', progress);
+            }
         });
         
         this.statusManager.on('statusUpdate', (status) => {
@@ -151,6 +171,20 @@ class DiscoveryManager extends EventEmitter {
         } catch (error) {
             console.error('❌ Failed to stop discovery scan:', error);
             this.emit('scanError', error);
+        }
+    }
+    
+    pauseScan() {
+        if (this.isScanning && this.statusManager) {
+            this.statusManager.pauseSession();
+            console.log('⏸️ Discovery scan paused');
+        }
+    }
+    
+    resumeScan() {
+        if (this.isScanning && this.statusManager) {
+            this.statusManager.resumeSession();
+            console.log('▶️ Discovery scan resumed');
         }
     }
     

@@ -94,6 +94,47 @@ class REArchaeologyApp {
             this.discovery.setScanArea(bounds);
         });
         
+        // Compact control events from map manager
+        this.map.on('lidarStart', () => {
+            console.log('🌍 LiDAR tiling started');
+            this.ui.updateDiscoveryStatus('lidar-tiling');
+        });
+        
+        this.map.on('lidarPause', () => {
+            console.log('🌍 LiDAR tiling paused');
+            this.ui.updateDiscoveryStatus('lidar-paused');
+        });
+        
+        this.map.on('lidarResume', () => {
+            console.log('🌍 LiDAR tiling resumed');
+            this.ui.updateDiscoveryStatus('lidar-tiling');
+        });
+        
+        this.map.on('lidarStop', () => {
+            console.log('🌍 LiDAR tiling stopped');
+            this.ui.updateDiscoveryStatus('idle');
+        });
+        
+        this.map.on('scanStart', () => {
+            console.log('🔍 Detection scan started');
+            this.discovery.startScan();
+        });
+        
+        this.map.on('scanPause', () => {
+            console.log('🔍 Detection scan paused');
+            this.discovery.pauseScan();
+        });
+        
+        this.map.on('scanResume', () => {
+            console.log('🔍 Detection scan resumed');
+            this.discovery.resumeScan();
+        });
+        
+        this.map.on('scanStop', () => {
+            console.log('🔍 Detection scan stopped');
+            this.discovery.stopScan();
+        });
+        
         // UI events
         this.ui.on('startScan', () => {
             this.discovery.startScan();

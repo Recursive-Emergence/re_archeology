@@ -119,7 +119,7 @@ html, body {
     height: 100%;
 }
 
-/* Discovery Panel - Floating left */
+/* Discovery Panel - Floating left - Now minimized/hidden since we have compact controls */
 .discovery-panel {
     position: absolute;
     top: 80px;
@@ -130,12 +130,17 @@ html, body {
     backdrop-filter: blur(10px);
     border: 1px solid rgba(64, 64, 64, 0.8);
     border-radius: 12px;
-    display: flex;
+    display: none; /* Hidden by default - use compact controls instead */
     flex-direction: column;
     overflow: hidden;
     z-index: 1001;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* Show old panel when compact controls are insufficient */
+.discovery-panel.fallback-mode {
+    display: flex;
 }
 
 .discovery-panel:hover {
@@ -953,36 +958,256 @@ html, body {
     opacity: 0.1 !important;
 }
 
-/* Responsive Design */
-@media (max-width: 1200px) {
-    :root {
-        --discovery-panel-width: 280px;
-        --chat-panel-width: 280px;
+/* Compact Controls - overlay on detection area rim */
+.compact-controls-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.compact-control {
+    position: absolute;
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: #ffffff;
+    pointer-events: auto;
+    backdrop-filter: blur(10px);
+    min-width: 120px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.compact-control:hover {
+    background: rgba(26, 26, 26, 0.98);
+    border-color: rgba(0, 255, 136, 0.6);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.control-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 10px;
+    padding: 2px;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+}
+
+.control-btn:hover {
+    transform: scale(1.1);
+}
+
+.control-status {
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.control-symbol {
+    display: inline-block;
+    font-size: 14px;
+    font-weight: bold;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    transition: transform 0.2s ease;
+}
+
+.control-symbol:hover {
+    transform: scale(1.1);
+}
+
+/* Settings panel styling */
+.settings-panel {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(26, 26, 26, 0.98);
+    border: 1px solid rgba(0, 255, 136, 0.5);
+    border-radius: 8px;
+    padding: 16px;
+    min-width: 300px;
+    max-width: 400px;
+    color: #ffffff;
+    pointer-events: auto;
+    backdrop-filter: blur(15px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    z-index: 2000;
+}
+
+.settings-panel h3 {
+    margin: 0 0 12px 0;
+    color: #00ff88;
+    font-size: 14px;
+}
+
+.setting-group {
+    margin-bottom: 8px;
+}
+
+.setting-group label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: #ccc;
+}
+
+.setting-group input,
+.setting-group select {
+    width: 100%;
+    padding: 4px;
+    background: rgba(64, 64, 64, 0.8);
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #fff;
+    font-size: 12px;
+}
+
+.setting-group input:focus,
+.setting-group select:focus {
+    border-color: #00ff88;
+    outline: none;
+}
+
+/* Animations for compact controls */
+@keyframes controlPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.compact-control.running .control-status {
+    animation: controlPulse 1.5s ease-in-out infinite;
+}
+
+/* Keep scan area border thin and consistent at all zoom levels */
+.scan-area-rectangle {
+    stroke-width: 2 !important;
+    stroke: #00ff88 !important;
+    stroke-opacity: 1.0 !important;
+    vector-effect: non-scaling-stroke !important; /* Prevent scaling with zoom */
+}
+
+.scan-area-circle {
+    stroke-width: 2 !important;
+    stroke: #00ff88 !important;
+    stroke-opacity: 1.0 !important;
+    vector-effect: non-scaling-stroke !important; /* Prevent scaling with zoom */
+}
+
+/* Enhanced Leaflet Layer Control Styling */
+.leaflet-control-layers {
+    background: rgba(26, 26, 26, 0.95) !important;
+    border: 1px solid rgba(0, 255, 136, 0.3) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+    backdrop-filter: blur(10px) !important;
+    padding: 12px !important;
+    min-width: 180px !important;
+    transition: all 0.3s ease !important;
+    transform: scale(1) !important;
+}
+
+.leaflet-control-layers:hover {
+    transform: scale(1.02) !important;
+    box-shadow: 0 6px 16px rgba(0, 255, 136, 0.2) !important;
+}
+
+.leaflet-control-layers-expanded {
+    animation: layerControlExpand 0.3s ease !important;
+}
+
+@keyframes layerControlExpand {
+    from {
+        opacity: 0;
+        transform: translateY(-10px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
     }
 }
 
-@media (max-width: 900px) {
-    :root {
-        --discovery-panel-width: 250px;
-        --chat-panel-width: 250px;
-    }
+/* Layer selection feedback */
+.leaflet-control-layers input[type="radio"]:checked + span {
+    color: var(--accent-color) !important;
+    font-weight: 600 !important;
 }
 
-@media (max-width: 600px) {
-    .discovery-panel {
-        top: 10px;
-        left: 10px;
-        right: 10px;
-        width: calc(100vw - 20px);
-        max-height: 200px;
+.leaflet-control-layers input[type="checkbox"]:checked + span {
+    color: var(--accent-color) !important;
+    font-weight: 600 !important;
+}
+
+/* Improved layer control positioning for mobile */
+@media (max-width: 768px) {
+    .leaflet-control-layers {
+        min-width: 160px !important;
+        font-size: 13px !important;
     }
     
-    .chat-panel {
-        bottom: 10px;
-        left: 10px;
-        right: 10px;
-        top: auto;
-        width: calc(100vw - 20px);
-        max-height: 200px;
+    .leaflet-control-layers label {
+        font-size: 13px !important;
+        margin-bottom: 6px !important;
     }
+}
+
+/* Additional visual improvements */
+.leaflet-control-layers-separator {
+    background: rgba(0, 255, 136, 0.2) !important;
+    height: 1px !important;
+    margin: 8px 0 !important;
+}
+
+/* Custom layer icons */
+.leaflet-control-layers label[title*="Satellite"]:before {
+    content: '🛰️ ';
+    margin-right: 4px;
+}
+
+.leaflet-control-layers label[title*="Street"]:before {
+    content: '🗺️ ';
+    margin-right: 4px;
+}
+
+.leaflet-control-layers label[title*="Terrain"]:before {
+    content: '🏔️ ';
+    margin-right: 4px;
+}
+
+.leaflet-control-layers label[title*="LiDAR"]:before {
+    content: '📊 ';
+    margin-right: 4px;
+}
+
+/* Info text styling for simplified UI */
+.info-text {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(0, 255, 136, 0.1);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    border-radius: 6px;
+    text-align: center;
+}
+
+.info-text small {
+    color: rgba(0, 255, 136, 0.9);
+    font-size: 0.8em;
+}
+
+.help-text {
+    display: block;
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.75em;
+    font-style: italic;
 }

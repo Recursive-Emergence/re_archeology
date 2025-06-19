@@ -4,6 +4,7 @@ from typing import Dict, Optional, List, Any
 
 from .registry import METADATA_REGISTRY, DatasetMetadata, get_dataset_by_name
 from .connectors import CONNECTOR_MAP, LidarConnector
+from .cloud_cache import LidarTileCache
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -11,8 +12,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DATA_TYPE = "DSM" # Default data type to fetch if not specified
 
+# Global cache instance
+_cache_instance: Optional[LidarTileCache] = None
+
+def get_cache() -> LidarTileCache:
+    """Get or create global cache instance."""
+    global _cache_instance
+    if _cache_instance is None:
+        _cache_instance = LidarTileCache()
+    return _cache_instance
+
 class LidarMapFactory:
-    """Factory to select and retrieve LIDAR data patches from various sources."""
+    """Factory to select and retrieve LIDAR data patches from various sources with cloud caching."""
 
     @staticmethod
     def _in_bounds(ds_meta: DatasetMetadata, lat: float, lon: float) -> bool:
@@ -26,12 +37,14 @@ class LidarMapFactory:
                   size_m: int = 128, 
                   preferred_resolution_m: Optional[float] = None,
                   exact_dataset_name: Optional[str] = None,
-                  preferred_data_type: Optional[str] = None) -> Optional[np.ndarray]:
+                  preferred_data_type: Optional[str] = None,
+                  use_cache: bool = True) -> Optional[np.ndarray]:
         """
-        Fetches a LIDAR data patch for the given location and parameters.
+        Fetches a LIDAR data patch for the given location and parameters with cloud caching.
 
         It selects the most suitable dataset based on availability, location,
-        resolution, and requested data type (e.g., DSM, DTM).
+        resolution, and requested data type (e.g., DSM, DTM). Results are automatically
+        cached in Google Cloud Storage for faster subsequent access.
 
         Args:
             lat: Center latitude of the patch.
@@ -43,6 +56,8 @@ class LidarMapFactory:
             exact_dataset_name: If specified, only this dataset will be considered.
             preferred_data_type: The desired data product type (e.g., "DSM", "DTM").
                                  Defaults to DEFAULT_DATA_TYPE if None.
+            use_cache: Whether to use cache for this request.
+            cache_strategy: Cache strategy to use ("local", "gcs", "hybrid").
 
         Returns:
             A NumPy array containing the elevation data, or None if no suitable
@@ -52,6 +67,9 @@ class LidarMapFactory:
         data_type_to_fetch = (preferred_data_type or DEFAULT_DATA_TYPE).upper()
         logger.info(f"Requesting patch at ({lat:.4f}, {lon:.4f}), size: {size_m}m, type: {data_type_to_fetch}, pref_res: {preferred_resolution_m}m/px")
 
+        # Initialize cloud cache
+        cache = get_cache() if use_cache else None
+        
         candidate_datasets: List[DatasetMetadata] = []
 
         if exact_dataset_name:
@@ -85,6 +103,21 @@ class LidarMapFactory:
 
         # Attempt to fetch data using the sorted candidates
         for ds_meta in candidate_datasets:
+            target_res_for_fetch = preferred_resolution_m if preferred_resolution_m is not None else ds_meta.resolution_m
+            
+            # Check cache first
+            if cache:
+                cached_data = cache.get(
+                    lat=lat,
+                    lon=lon, 
+                    size_m=size_m,
+                    resolution_m=target_res_for_fetch,
+                    data_type=data_type_to_fetch,
+                    source=ds_meta.name
+                )
+                if cached_data is not None:
+                    return cached_data
+            
             logger.info(f"Attempting to use dataset: {ds_meta.name} (Resolution: {ds_meta.resolution_m}m) for data type '{data_type_to_fetch}'")
             ConnectorClass = CONNECTOR_MAP.get(ds_meta.access_method)
 
@@ -98,14 +131,25 @@ class LidarMapFactory:
                 if ds_meta.access_method == "GEE" and not connector_instance.ee_initialized:
                     logger.warning(f"GEE connector for {ds_meta.name} not initialized. Skipping.")
                     continue
-                
-                target_res_for_fetch = preferred_resolution_m if preferred_resolution_m is not None else ds_meta.resolution_m
 
-                # Pass the data_type_to_fetch to the connector
+                # Fetch from source
                 patch_data = connector_instance.fetch_patch(lat, lon, size_m, target_res_for_fetch, data_type_to_fetch)
 
                 if patch_data is not None and patch_data.size > 0:
                     logger.info(f"✅ Successfully fetched '{data_type_to_fetch}' patch from {ds_meta.name}. Shape: {patch_data.shape}")
+                    
+                    # Store in cache for future use
+                    if cache:
+                        cache.put(
+                            lat=lat,
+                            lon=lon,
+                            size_m=size_m,
+                            resolution_m=target_res_for_fetch,
+                            data_type=data_type_to_fetch,
+                            source=ds_meta.name,
+                            tile_data=patch_data
+                        )
+                    
                     return patch_data
                 else:
                     logger.warning(f"Failed to fetch '{data_type_to_fetch}' patch from {ds_meta.name} or data was empty. Trying next candidate.")
@@ -116,20 +160,88 @@ class LidarMapFactory:
         logger.error(f"Exhausted all {len(candidate_datasets)} candidate datasets. Could not fetch '{data_type_to_fetch}' LIDAR data for location ({lat:.4f}, {lon:.4f}).")
         return None
 
-if __name__ == '__main__':
-    print("--- LIDAR Map Factory Test (v2 with Data Type Handling) --- ")
+    @staticmethod
+    def get_cache_stats() -> Dict[str, Any]:
+        """Get cache statistics and status."""
+        cache = get_cache()
+        return cache.get_cache_stats()
+    
+    @staticmethod
+    def clear_cache(source_filter: Optional[str] = None) -> int:
+        """
+        Clear cache tiles, optionally filtered by source.
+        
+        Args:
+            source_filter: If provided, only clear tiles from this source
+            
+        Returns:
+            Number of tiles cleared
+        """
+        cache = get_cache()
+        return cache.clear_cache(source_filter)
 
-    # Test Case 1: AHN4 (High-resolution, Netherlands)
+if __name__ == '__main__':
+    print("--- LIDAR Map Factory Test (v4 with Multi-Strategy Cache) --- ")
+    
+    # Test different cache strategies
+    strategies = ["local", "hybrid"]  # Skip GCS for now due to permissions
+    
+    for strategy in strategies:
+        print(f"\n🗄️  Testing Cache Strategy: {strategy}")
+        cache_stats = LidarMapFactory.get_cache_stats(strategy)
+        print(f"Cache Status: {cache_stats}")
+
+    # Test Case 1: AHN4 with local cache (fallback)
     zaanse_schans_lat, zaanse_schans_lon = 52.4746, 4.8163
     patch_size_m = 64
 
     print(f"\nAttempting to fetch AHN4 DSM data for Zaanse Schans ({zaanse_schans_lat}, {zaanse_schans_lon}), size={patch_size_m}m")
-    # Request DSM (default)
-    ahn4_patch_dsm_default = LidarMapFactory.get_patch(zaanse_schans_lat, zaanse_schans_lon, size_m=patch_size_m)
+    
+    # First request with local cache (should hit source)
+    import time
+    start_time = time.time()
+    ahn4_patch_dsm_default = LidarMapFactory.get_patch(
+        zaanse_schans_lat, zaanse_schans_lon, 
+        size_m=patch_size_m, 
+        cache_strategy="local"
+    )
+    first_fetch_time = time.time() - start_time
+    
     if ahn4_patch_dsm_default is not None:
-        print(f"AHN4 (Default DSM) - Patch shape: {ahn4_patch_dsm_default.shape}, Min: {np.nanmin(ahn4_patch_dsm_default):.2f}, Max: {np.nanmax(ahn4_patch_dsm_default):.2f}, Mean: {np.nanmean(ahn4_patch_dsm_default):.2f}")
+        print(f"AHN4 (First fetch - local cache) - Patch shape: {ahn4_patch_dsm_default.shape}, Min: {np.nanmin(ahn4_patch_dsm_default):.2f}, Max: {np.nanmax(ahn4_patch_dsm_default):.2f}, Mean: {np.nanmean(ahn4_patch_dsm_default):.2f}, Time: {first_fetch_time:.2f}s")
     else:
-        print("AHN4 (Default DSM) - Failed to get patch.")
+        print("AHN4 (First fetch) - Failed to get patch.")
+    
+    # Second request (should hit local cache)
+    print(f"\nSecond request for same location (should hit local cache)...")
+    start_time = time.time()
+    ahn4_patch_dsm_cached = LidarMapFactory.get_patch(
+        zaanse_schans_lat, zaanse_schans_lon, 
+        size_m=patch_size_m,
+        cache_strategy="local"
+    )
+    second_fetch_time = time.time() - start_time
+    
+    if ahn4_patch_dsm_cached is not None:
+        print(f"AHN4 (Cached) - Patch shape: {ahn4_patch_dsm_cached.shape}, Min: {np.nanmin(ahn4_patch_dsm_cached):.2f}, Max: {np.nanmax(ahn4_patch_dsm_cached):.2f}, Mean: {np.nanmean(ahn4_patch_dsm_cached):.2f}, Time: {second_fetch_time:.2f}s")
+        if first_fetch_time > 0 and second_fetch_time > 0:
+            speedup = first_fetch_time / second_fetch_time
+            print(f"📈 Local cache speedup: {speedup:.1f}x faster")
+    else:
+        print("AHN4 (Cached) - Failed to get patch.")
+
+    # Test hybrid cache strategy
+    print(f"\nTesting hybrid cache strategy...")
+    start_time = time.time()
+    ahn4_patch_hybrid = LidarMapFactory.get_patch(
+        zaanse_schans_lat, zaanse_schans_lon, 
+        size_m=patch_size_m,
+        cache_strategy="hybrid"
+    )
+    hybrid_fetch_time = time.time() - start_time
+    
+    if ahn4_patch_hybrid is not None:
+        print(f"AHN4 (Hybrid cache) - Time: {hybrid_fetch_time:.2f}s")
 
     # Request DSM explicitly
     ahn4_patch_dsm_explicit = LidarMapFactory.get_patch(zaanse_schans_lat, zaanse_schans_lon, size_m=patch_size_m, preferred_data_type="DSM")
@@ -139,7 +251,6 @@ if __name__ == '__main__':
         print("AHN4 (Explicit DSM) - Failed to get patch.")
 
     # Test requesting a DTM (assuming AHN4 in registry only has DSM for now, this should fail gracefully or pick SRTM if it had DTM)
-    # For a real test of DTM, METADATA_REGISTRY would need an entry with DTM product.
     print(f"\nAttempting to fetch DTM data for Zaanse Schans (expect failure or different dataset if DTM was available elsewhere)")
     ahn4_patch_dtm_request = LidarMapFactory.get_patch(zaanse_schans_lat, zaanse_schans_lon, size_m=patch_size_m, preferred_data_type="DTM")
     if ahn4_patch_dtm_request is not None:
@@ -163,5 +274,11 @@ if __name__ == '__main__':
         print(f"Germany (Default DSM) - Patch shape: {german_patch_dsm_default.shape}, Min: {np.nanmin(german_patch_dsm_default):.2f}, Max: {np.nanmax(german_patch_dsm_default):.2f}, Mean: {np.nanmean(german_patch_dsm_default):.2f}")
     else:
         print("Germany (Default DSM) - Failed to get patch.")
+    
+    # Final cache stats for all strategies
+    print(f"\n🗄️  Final Cache Statistics:")
+    for strategy in strategies:
+        final_stats = LidarMapFactory.get_cache_stats(strategy)
+        print(f"{strategy.upper()}: {final_stats}")
 
     print("\n--- Test Complete ---")
