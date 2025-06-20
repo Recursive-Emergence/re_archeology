@@ -71,27 +71,15 @@ class UnifiedREArchaeologyApp {
             zoom: 13
         });
         
-        // Check if map was initialized successfully
+        // Check if map was initialized successfully - NO RETRY to prevent container conflicts
         if (!this.mapVisualization.map) {
-            // Retry initialization if it failed
-            console.warn('⚠️ Map not ready immediately, retrying...');
-            setTimeout(() => {
-                if (!this.mapVisualization.map && this.mapVisualization.initError) {
-                    console.log('🔄 Retrying map initialization...');
-                    try {
-                        this.mapVisualization.initMap();
-                        // Setup event handlers only if map was created successfully
-                        if (this.mapVisualization.map) {
-                            this.mapVisualization.setupEventHandlers();
-                        }
-                    } catch (retryError) {
-                        console.error('❌ Map retry failed:', retryError);
-                        throw retryError;
-                    }
-                }
-                this.finishMapSetup();
-            }, 100);
+            console.error('❌ Map initialization failed on first attempt');
+            if (this.mapVisualization.initError) {
+                console.error('Init error:', this.mapVisualization.initError);
+            }
+            throw new Error('Failed to initialize map - no retry to prevent DOM conflicts');
         } else {
+            console.log('✅ Map initialized successfully on first attempt');
             this.finishMapSetup();
         }
     }
@@ -122,17 +110,16 @@ class UnifiedREArchaeologyApp {
             this.setupCompactControlEvents();
         }
         
-        // Update scan area after MapManager is fully initialized
+        // Setup default scan area after MapManager is fully initialized - only do this once
         setTimeout(() => {
+            console.log('🔧 Setting up default scan area via setupDefaultScanArea...');
             if (this.mapManager && this.mapManager.updateScanArea) {
-                this.mapManager.updateScanArea({ lat: 52.4751, lon: 4.8156, radius: 2 });
+                console.log('✅ MapManager ready, calling setupDefaultScanArea');
+                this.setupDefaultScanArea();
+            } else {
+                console.error('❌ MapManager not ready for default scan area setup');
             }
-        }, 500);
-        
-        // Delay setupDefaultScanArea to ensure map is fully ready
-        setTimeout(() => {
-            this.setupDefaultScanArea();
-        }, 1200); // Increased delay to ensure map coordinate system is ready
+        }, 1200); // Single call to setupDefaultScanArea
         
         if (this.mapInstance) {
             this.mapInstance.on('click', (e) => {
@@ -297,6 +284,8 @@ class UnifiedREArchaeologyApp {
     }
 
     selectScanArea(lat, lon, radiusKm = null) {
+        console.log('🔧 selectScanArea called with:', { lat, lon, radiusKm, mapManagerExists: !!this.mapManager });
+        
         // Always delegate to MapManager if it exists - it handles the scan area display
         if (this.mapManager) {
             console.log('📍 Delegating scan area to MapManager (no duplicate rectangle)');
@@ -322,7 +311,7 @@ class UnifiedREArchaeologyApp {
             
             console.log('✅ selectedArea data set (visual handled by MapManager)');
             this.updateButtonStates();
-            return;
+            return; // CRITICAL: Exit here to prevent fallback rectangle creation
         }
         
         // Only create our own rectangle if MapManager doesn't exist (fallback mode)

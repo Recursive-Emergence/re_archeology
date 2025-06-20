@@ -4,15 +4,20 @@
  */
 
 class MapVisualization {
-    constructor(mapElementId, options = {}) {
-        this.mapElement = mapElementId; // Store the ID/element reference
-        this.map = null;
+    constructor(mapInstance, options = {}) {
+        // Accept existing map instance instead of creating a new one
+        if (mapInstance && typeof mapInstance.getContainer === 'function') {
+            this.map = mapInstance;
+            this.mapElement = mapInstance.getContainer();
+            console.log('✅ MapVisualization initialized with existing map instance');
+        } else {
+            throw new Error('MapVisualization requires a valid Leaflet map instance');
+        }
+        
         this.layers = new Map();
         this.patches = new Map();
-        this.controlsAdded = false; // Flag to prevent duplicate controls
-        this.basicMapReady = false; // Flag to indicate basic map functionality is available
-        this.layerControl = null; // Reference to layer control to prevent duplicates
-        this.baseLayersAdded = false; // Flag to prevent duplicate base layers
+        this.controlsAdded = false;
+        this.basicMapReady = true; // Map is already ready since it's passed in
         this.options = {
             center: [52.4751, 4.8156],
             zoom: 13,
@@ -21,18 +26,11 @@ class MapVisualization {
             ...options
         };
         
-        // Initialize immediately but with error handling
+        // Setup event handlers on the existing map
         try {
-            this.initMap();
-            // Only setup event handlers if map was created successfully
-            if (this.map) {
-                this.setupEventHandlers();
-            } else {
-                console.warn('⚠️ Map not created, event handlers will be set up later');
-            }
+            this.setupEventHandlers();
         } catch (error) {
-            console.error('❌ Failed to initialize map in constructor:', error);
-            // Store error state for later retry
+            console.error('❌ Failed to setup event handlers:', error);
             this.initError = error;
         }
     }
@@ -43,63 +41,104 @@ class MapVisualization {
     initMap() {
         console.log('🗺️ Initializing map on element:', this.mapElement);
         
-        // Handle both string ID and DOM element
+        // Wait for DOM to be fully loaded
+        if (document.readyState !== 'complete' && document.readyState !== 'interactive') {
+            console.log('⏳ DOM not ready, waiting...');
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log('✅ DOM ready, retrying map init');
+                this.initMap();
+            });
+            return;
+        }
+        
+        // Handle both string ID and DOM element with enhanced validation
         let container;
         if (typeof this.mapElement === 'string') {
             container = document.getElementById(this.mapElement);
+            console.log('🔍 Looking for container by ID:', this.mapElement);
         } else if (this.mapElement instanceof HTMLElement) {
             container = this.mapElement;
+            console.log('🔍 Using provided HTML element');
         } else {
             throw new Error(`Invalid map element: ${this.mapElement}. Must be string ID or DOM element.`);
         }
         
         if (!container) {
+            console.error('❌ Container not found in DOM:', {
+                mapElement: this.mapElement,
+                documentReady: document.readyState,
+                bodyChildren: document.body ? Array.from(document.body.children).map(el => el.id || el.tagName) : 'no body'
+            });
             throw new Error(`Map container element not found: ${this.mapElement}`);
         }
 
-        console.log('✅ Container found:', container);
-        
-        // Ensure container has dimensions before initializing map
-        if (!container.offsetWidth || !container.offsetHeight) {
-            console.warn('⚠️ Container has no dimensions, setting minimum size');
-            // Ensure the container is visible and has a parent
-            if (!container.offsetParent && container.parentElement) {
-                container.style.display = 'block';
-                container.style.position = 'relative';
-            }
-            
-            container.style.width = container.style.width || '100%';
-            container.style.height = container.style.height || '400px';
-            container.style.minHeight = '400px';
-            container.style.minWidth = '300px';
-            
-            // Force a layout recalculation
-            container.offsetHeight; // This forces a reflow
+        // Verify container is actually in the DOM
+        if (!container.parentElement && !document.body.contains(container)) {
+            console.error('❌ Container exists but not in DOM tree:', {
+                container: container,
+                parentElement: container.parentElement,
+                isInDocument: document.body.contains(container)
+            });
+            throw new Error('Map container is not attached to the DOM');
         }
 
-        // Double-check dimensions after styling
-        if (!container.offsetWidth || !container.offsetHeight) {
-            console.error('❌ Container still has no dimensions after styling');
-            throw new Error('Map container must have valid dimensions');
-        }
-
-        // Wait for next frame to ensure DOM is fully rendered
-        requestAnimationFrame(() => {
-            try {
-                this.initializeLeafletMap(container);
-            } catch (error) {
-                console.error('❌ requestAnimationFrame map init failed:', error);
-                // Fallback: try direct initialization
-                setTimeout(() => {
-                    try {
-                        this.initializeLeafletMap(container);
-                    } catch (fallbackError) {
-                        console.error('❌ Fallback map init also failed:', fallbackError);
-                        this.initError = fallbackError;
-                    }
-                }, 100);
-            }
+        console.log('✅ Container found and validated:', {
+            element: container,
+            parentElement: container.parentElement,
+            isInDocument: document.body.contains(container)
         });
+        
+        // Force container setup - skip all async operations
+        console.log('🔧 Force-setting up container with guaranteed dimensions...');
+        
+        // Ensure container is visible and in the DOM
+        if (!document.body.contains(container)) {
+            console.error('❌ Container not in DOM, cannot proceed');
+            throw new Error('Map container is not attached to the document');
+        }
+        
+        // Force absolute positioning and dimensions
+        container.style.cssText = `
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 1 !important;
+            display: block !important;
+            visibility: visible !important;
+        `;
+        
+        // Force layout recalculation multiple times
+        container.offsetHeight;
+        container.offsetWidth;
+        document.body.offsetHeight; // Force full document reflow
+        
+        // Final dimension check
+        console.log('🔍 Final container dimensions:', {
+            offsetWidth: container.offsetWidth,
+            offsetHeight: container.offsetHeight,
+            parentElement: container.parentElement,
+            isInDocument: document.body.contains(container),
+            computedWidth: window.getComputedStyle(container).width,
+            computedHeight: window.getComputedStyle(container).height
+        });
+        
+        if (!container.offsetWidth || !container.offsetHeight) {
+            console.error('❌ Container STILL has no dimensions after force styling');
+            throw new Error('Cannot force container to have dimensions - CSS or DOM issue');
+        }
+        
+        console.log('✅ Container successfully forced to have dimensions, proceeding directly');
+        
+        // Initialize map immediately without async operations
+        try {
+            this.initializeLeafletMap(container);
+        } catch (error) {
+            console.error('❌ Direct map initialization failed:', error);
+            this.initError = error;
+            throw error;
+        }
     }
     
     /**
@@ -116,10 +155,10 @@ class MapVisualization {
                     existingMap.remove();
                 }
                 
-                // Clear the container's leaflet ID and content
+                // Clear the container's leaflet ID but preserve content
                 delete container._leaflet_id;
                 delete container._leaflet_map;
-                container.innerHTML = '';
+                // DO NOT clear innerHTML to preserve container structure
                 
                 // Remove any leaflet-specific classes
                 container.className = container.className.replace(/leaflet-[^\s]*/g, '');
@@ -127,17 +166,43 @@ class MapVisualization {
                 console.log('✅ Existing map instance cleaned up');
             } catch (cleanupError) {
                 console.warn('⚠️ Error during map cleanup:', cleanupError);
-                // Force clear anyway
-                container.innerHTML = '';
+                // Force clear IDs but preserve container structure
                 delete container._leaflet_id;
                 delete container._leaflet_map;
             }
         }
         
-        // Verify container is still valid and has dimensions
-        if (!container.offsetParent && container.offsetWidth === 0) {
-            console.error('❌ Container is not visible or has no dimensions');
-            throw new Error('Map container must be visible and have dimensions');
+        // Verify container is still valid and has dimensions - with retry logic
+        if (!container.offsetWidth || !container.offsetHeight) {
+            console.warn('⚠️ Container has no dimensions, applying emergency styles and retrying:', {
+                offsetWidth: container.offsetWidth,
+                offsetHeight: container.offsetHeight,
+                offsetParent: container.offsetParent
+            });
+            
+            // Emergency container styling
+            container.style.display = 'block';
+            container.style.position = 'relative';
+            container.style.width = '100%';
+            container.style.height = '100vh';
+            container.style.minHeight = '400px';
+            container.style.minWidth = '300px';
+            
+            // Force layout recalculation
+            container.offsetHeight;
+            
+            // Final check
+            if (!container.offsetWidth || !container.offsetHeight) {
+                console.error('❌ Container still has no dimensions after emergency styling:', {
+                    offsetWidth: container.offsetWidth,
+                    offsetHeight: container.offsetHeight,
+                    parentElement: container.parentElement,
+                    computedStyle: window.getComputedStyle(container)
+                });
+                throw new Error('Map container must be visible and have dimensions');
+            }
+            
+            console.log('✅ Emergency styling successful, proceeding with map creation');
         }
         
         try {
@@ -164,6 +229,34 @@ class MapVisualization {
             });
 
             console.log('✅ New map instance created successfully');
+
+            // Ensure map control corners are initialized - force manual creation for reliability
+            console.log('🔧 Force-initializing map control corners...');
+            const mapContainer = this.map.getContainer();
+            this.map._controlCorners = {};
+            this.map._controlContainer = mapContainer;
+            
+            const corners = ['topleft', 'topright', 'bottomleft', 'bottomright'];
+            const classNames = {
+                topleft: 'leaflet-top leaflet-left',
+                topright: 'leaflet-top leaflet-right', 
+                bottomleft: 'leaflet-bottom leaflet-left',
+                bottomright: 'leaflet-bottom leaflet-right'
+            };
+            
+            corners.forEach(corner => {
+                this.map._controlCorners[corner] = L.DomUtil.create('div', classNames[corner], mapContainer);
+                console.log(`✅ Created control corner: ${corner}`, this.map._controlCorners[corner]);
+            });
+            
+            console.log('✅ All control corners created:', this.map._controlCorners);
+            
+            // Verify they exist
+            if (this.map._controlCorners.topright && this.map._controlCorners.bottomleft) {
+                console.log('✅ Control corners verification passed');
+            } else {
+                console.error('❌ Control corners verification failed', this.map._controlCorners);
+            }
 
             // Store reference to map in container for cleanup
             container._leaflet_map = this.map;
@@ -208,9 +301,6 @@ class MapVisualization {
                 console.log('✅ Controls already added, skipping duplicate creation');
                 return;
             }
-            
-            // Add base layers
-            this.addBaseLayers();
             
             // Add custom controls  
             this.addCustomControls();
@@ -279,71 +369,6 @@ class MapVisualization {
         // Don't test coordinate conversion - it causes _leaflet_pos errors
         console.debug('✅ Map basic readiness confirmed');
         return true;
-    }
-
-    /**
-     * Add base map layers
-     */
-    addBaseLayers() {
-        // Prevent duplicate layer addition
-        if (this.baseLayersAdded) {
-            console.log('ℹ️ Base layers already added, skipping duplicate creation');
-            return;
-        }
-        
-        const baseLayers = {
-            '🛰️ Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles © Esri',
-                maxZoom: 19
-            }),
-            '🗺️ OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 19
-            }),
-            '🏔️ Terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-                attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap',
-                maxZoom: 17
-            })
-        };
-
-        // Add default layer (Satellite) with graceful error handling
-        try {
-            baseLayers['🛰️ Satellite'].addTo(this.map);
-            console.log('✅ Satellite layer added successfully');
-        } catch (layerError) {
-            console.error('❌ Failed to add satellite layer:', layerError);
-            // Continue anyway - other components might still work
-        }
-
-        // Add layer control with graceful error handling
-        try {
-            // Check if layer control already exists
-            if (this.layerControl) {
-                console.log('ℹ️ Layer control already exists, skipping duplicate creation');
-                return;
-            }
-            
-            const layerControl = L.control.layers(baseLayers, null, {
-                position: 'topright',
-                collapsed: false
-            }).addTo(this.map);
-            
-            // Store reference to prevent duplicates
-            this.layerControl = layerControl;
-            
-            console.log('✅ Layer control added successfully');
-        } catch (controlError) {
-            console.error('❌ Failed to add layer control:', controlError);
-            // Continue anyway
-        }
-        
-        // Add custom styling after control is added
-        setTimeout(() => {
-            this.enhanceLayerControl();
-        }, 100);
-        
-        // Mark base layers as added
-        this.baseLayersAdded = true;
     }
 
     /**
@@ -2122,49 +2147,6 @@ class MapVisualization {
         console.log('🧹 Cleared LiDAR heatmap, wipe effect state, and sync tracking');
     }
 
-    /**
-     * Enhance the layer control with better visual styling
-     */
-    enhanceLayerControl() {
-        const layerControls = document.querySelectorAll('.leaflet-control-layers');
-        layerControls.forEach(control => {
-            // Add a title to the control
-            if (!control.querySelector('.layer-control-title')) {
-                const title = document.createElement('div');
-                title.className = 'layer-control-title';
-                title.style.cssText = `
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: var(--accent-color);
-                    margin-bottom: 12px;
-                    text-align: center;
-                    border-bottom: 1px solid rgba(0, 255, 136, 0.2);
-                    padding-bottom: 8px;
-                `;
-                title.textContent = 'Map Layers';
-                
-                const form = control.querySelector('form');
-                if (form) {
-                    form.insertBefore(title, form.firstChild);
-                }
-            }
-            
-            // Add hover effects to layer options
-            const labels = control.querySelectorAll('label');
-            labels.forEach(label => {
-                label.style.transition = 'all 0.2s ease';
-                label.addEventListener('mouseenter', () => {
-                    label.style.backgroundColor = 'rgba(0, 255, 136, 0.1)';
-                    label.style.borderRadius = '4px';
-                    label.style.padding = '4px 8px';
-                });
-                label.addEventListener('mouseleave', () => {
-                    label.style.backgroundColor = 'transparent';
-                    label.style.padding = '0';
-                });
-            });
-        });
-    }
 }
 
 // Export for use in other modules

@@ -29,6 +29,9 @@ class MapManager extends EventEmitter {
         this.initialized = false;
         this.scanAreaInitialized = false;
         
+        // Initialize compact controls object
+        this.compactControls = {};
+        
         // Throttle control updates to prevent excessive redraws
         this.updateControlsThrottled = this.throttle(this.updateControlPositions.bind(this), 16); // ~60fps
     }
@@ -85,8 +88,8 @@ class MapManager extends EventEmitter {
                 console.warn('⚠️ Error enabling map interactions:', interactionError);
             }
         } else if (!this.map) {
-            console.log('📍 No existing map provided and no this.map, creating new map instance');
-            this.initLeafletMap();
+            console.error('❌ No map provided to MapManager - MapManager requires an existing map instance');
+            throw new Error('MapManager requires an existing map instance - do not create maps independently');
         } else {
             console.log('📍 Using existing map instance from previous initialization');
         }
@@ -112,68 +115,7 @@ class MapManager extends EventEmitter {
         console.log('✅ MapManager initialization completed');
     }
     
-    initLeafletMap() {
-        // Only initialize map if not already provided
-        if (this.map) {
-            console.log('📍 Using existing map instance - skipping map creation');
-            return;
-        }
-        
-        console.log('📍 Creating new Leaflet map instance');
-        
-        // Check if map container is already in use
-        const mapContainer = document.getElementById('map');
-        if (mapContainer && mapContainer._leaflet_id) {
-            console.error('❌ Map container already has a Leaflet instance! This will cause conflicts.');
-            console.error('   This suggests MapVisualization already created a map on this container.');
-            console.error('   MapManager should receive the existing map instance instead of creating a new one.');
-            return;
-        }
-        
-        // Initialize the map
-        this.map = L.map('map', {
-            center: [52.4751, 4.8156],
-            zoom: 13,
-            // Explicitly enable all interactions
-            dragging: true,
-            touchZoom: true,
-            doubleClickZoom: true,
-            scrollWheelZoom: true,
-            boxZoom: true,
-            keyboard: true,
-            zoomControl: true,
-            attributionControl: true
-        });
-        
-        // Add base layers with satellite as default
-        this.layers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles &copy; Esri'
-        }).addTo(this.map);
-        
-        this.layers.street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        });
-        
-        // Add LiDAR elevation overlay for Netherlands region
-        this.layers.lidar = L.tileLayer('https://service.pdok.nl/rce/ahn/wmts/ahn4_05m_dsm/EPSG:3857/{z}/{x}/{y}.png', {
-            maxZoom: 16
-        });
-        
-        // Add layer control with better styling
-        const baseLayers = {
-            '🛰️ Satellite': this.layers.satellite,
-            '🗺️ Street': this.layers.street
-        };
-        
-        const overlayLayers = {
-            '📊 LiDAR Elevation': this.layers.lidar
-        };
-        
-        L.control.layers(baseLayers, overlayLayers, {
-            position: 'topright',
-            collapsed: false
-        }).addTo(this.map);
-    }
+    // MapManager no longer creates its own maps - it only manages existing ones
     
     initScanArea(retryCount = 0) {
         if (!this.map) {
@@ -191,28 +133,40 @@ class MapManager extends EventEmitter {
             // Add extra delay to ensure renderer is fully initialized
             setTimeout(() => {
                 try {
-                    // Double-check map is still valid and has proper bounds
-                    if (!this.map || !this.map.getContainer() || !this.map.getBounds) {
-                        throw new Error('Map not properly initialized');
+                    // Enhanced map readiness validation
+                    if (!this.map || !this.map.getContainer()) {
+                        throw new Error('Map instance or container not available');
                     }
                     
-                    // Test if the map can handle coordinate operations with better validation
-                    // Basic map readiness validation - simplified to avoid _leaflet_pos errors
-                    try {
-                        if (!this.map || !this.map.getContainer()) {
-                            throw new Error('Map instance not available');
-                        }
-                        
-                        // Wait for map to be fully loaded
-                        if (!this.map._loaded) {
-                            throw new Error('Map not fully loaded yet');
-                        }
-                        
-                        // Don't test bounds or coordinate system - just proceed if map is loaded
-                        console.log('✅ Map basic validation passed - proceeding with scan area creation');
-                    } catch (coordError) {
-                        throw new Error('Map coordinate system not ready: ' + coordError.message);
+                    // Wait for map to be fully loaded and renderer ready
+                    if (!this.map._loaded) {
+                        throw new Error('Map not fully loaded yet');
                     }
+                    
+                    // Check if map has a renderer ready for vector layers
+                    if (!this.map._renderer && !this.map.getRenderer) {
+                        throw new Error('Map renderer not initialized');
+                    }
+                    
+                    // Ensure the map's renderer pane exists or create it
+                    const container = this.map.getContainer();
+                    let overlayPane = this.map.getPane('overlayPane');
+                    if (!overlayPane) {
+                        console.log('⚠️ Overlay pane missing, attempting to create map panes...');
+                        try {
+                            // Force pane creation by triggering map initialization
+                            this.map._initPanes();
+                            overlayPane = this.map.getPane('overlayPane');
+                            if (!overlayPane) {
+                                throw new Error('Could not create overlay pane');
+                            }
+                            console.log('✅ Successfully created overlay pane');
+                        } catch (paneError) {
+                            throw new Error('Map overlay pane not ready and could not be created: ' + paneError.message);
+                        }
+                    }
+                    
+                    console.log('✅ Map and renderer validation passed - proceeding with scan area creation');
                     
                     // Add visible scan area RECTANGLE with proper square proportions
                     // At Amsterdam latitude (52.5°), adjust longitude to make a proper square
@@ -247,14 +201,14 @@ class MapManager extends EventEmitter {
                     
                     // Remove the old circle reference
                     this.scanAreaCircle = this.scanAreaRectangle;
-                    this.scanAreaInitialized = true;
                     
                     // Initial control positioning (important for initial display)
                     setTimeout(() => {
                         this.updateControlPositions();
+                        // Set initialization flag only after everything is complete
+                        this.scanAreaInitialized = true;
+                        console.log('✅ Scan area square fully initialized with compact controls');
                     }, 200);
-                    
-                    console.log('✅ Scan area square initialized with compact controls');
                 } catch (error) {
                     console.error('❌ Failed to initialize scan area:', error);
                     // Only retry if we haven't hit the limit
@@ -864,8 +818,19 @@ class MapManager extends EventEmitter {
         if (!area) return;
         
         if (!this.scanAreaRectangle) {
-            console.warn('⚠️ Cannot update scan area: scanAreaRectangle is null');
-            return;
+            console.warn('⚠️ Scan area not ready yet, attempting to initialize...');
+            // Try to initialize scan area if not done yet
+            if (!this.scanAreaInitialized) {
+                this.initScanArea();
+                // Queue the update for after initialization
+                setTimeout(() => {
+                    this.updateScanArea(area);
+                }, 6000); // Wait for initialization to complete
+                return;
+            } else {
+                console.warn('⚠️ Cannot update scan area: scanAreaRectangle is null but initialization flag is set');
+                return;
+            }
         }
         
         const { lat, lon, radius } = area;

@@ -18,24 +18,20 @@
     <link rel="stylesheet" href="css/status-enhancements.css">
     <link rel="stylesheet" href="css/visualization-enhancements.css">
     <link rel="stylesheet" href="css/main-styles.css">
+    
+
 </head>
 <body>
     <!-- Header -->
     <div class="app-header">
         <div class="header-content">
             <div class="header-logo">
-                <img src="images/site-logo.svg" alt="RE-Archaeology" class="site-logo">
-                <h1><a href="#" onclick="window.unifiedApp.goToHomepage(); return false;">RE-Archaeology Framework</a></h1>
+                <h1>RE-Archaeology Framework</h1>
             </div>
             <div class="header-actions">
-                <!-- Clean header - all status moved to compact controls -->
                 <!-- Hidden elements to store data for status updates -->
                 <div style="display: none;">
                     <span id="sessionStatus">Idle</span>
-                    <span id="processedPatches">0</span>
-                    <span id="totalDetections">0</span>
-                    <span id="highConfidenceDetections">0</span>
-                    <span id="kernelStatus">Unknown</span>
                 </div>
             </div>
         </div>
@@ -45,30 +41,14 @@
     <div class="main-content">
         <!-- Map Container (Full screen background) -->
         <div class="map-container">
-            <div id="map"></div>
-            
-            <!-- Map Controls Help -->
-            <div class="map-controls-help" style="position: absolute; bottom: 100px; left: 20px; background: rgba(0, 0, 0, 0.8); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 11px; z-index: 1000; max-width: 200px;">
-                <strong>🗺️ Map Controls:</strong><br>
-                • <span style="color: #00ff88;">Drag to pan</span> the map<br>
-                • <span style="color: #00ff88;">Double-click</span> to zoom<br>
-                • <span style="color: #ffaa00;">Ctrl+Click</span> to select scan area<br>
-                • <span style="color: #00ff88;">Mouse wheel</span> to zoom<br>
-                • All map interactions now work properly!
-            </div>
-            
-            <!-- Connection Status - now integrated into compact controls -->
-            <!-- <div class="connection-status disconnected" id="connectionStatus">
-                <div class="connection-dot"></div>
-                <span>Disconnected</span>
-            </div> -->
+            <div id="mapContainer"></div>
         </div>
         
         <!-- Discovery Panel (Floating Left) -->
         <div class="discovery-panel">
             <div class="discovery-header">
                 <h1>🏛️ Structure Discovery</h1>
-                <p>Real-time archaeological structure detection using sliding window approach with automatic LiDAR data loading</p>
+                <p>Real-time archaeological structure detection</p>
             </div>
             
             <div class="discovery-controls">
@@ -95,7 +75,6 @@
                         <div class="input-group">
                             <label>Sliding Step (m)</label>
                             <input type="number" id="slidingStep" value="1" step="1" min="1" max="10">
-                            <small class="help-text">Small steps for comprehensive coverage</small>
                         </div>
                     </div>
                 </div>
@@ -132,9 +111,6 @@
                         <button class="btn btn-stop" id="stopScanBtn" disabled>Stop</button>
                         <button class="btn btn-secondary" id="clearResultsBtn">Clear</button>
                     </div>
-                    <div class="info-text">
-                        <small>🗂️ LiDAR data automatically loaded from cloud cache during detection</small>
-                    </div>
                 </div>
                 
                 <!-- Visualization Options -->
@@ -168,21 +144,13 @@
                 <small>Guardian of Civilizations</small>
             </header>
             
-            <!-- Authentication - Login Only -->
+            <!-- Authentication -->
             <section class="auth-section" id="login-section">
                 <p class="login-prompt">Sign in to chat with Bella</p>
-                <!-- Google OAuth -->
                 <div id="g_id_onload"
                      data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
                      data-callback="handleGoogleLogin"
-                     data-error_callback="handleGoogleError"
-                     data-auto_prompt="false"
-                     data-cancel_on_tap_outside="false"
-                     data-use_fedcm_for_prompt="false"
-                     data-context="signin"
-                     data-ux_mode="popup"
-                     data-login_uri="/"
-                     data-itp_support="true">
+                     data-auto_prompt="false">
                 </div>
                 <div class="g_id_signin" 
                      data-type="standard" 
@@ -214,7 +182,7 @@
                 </form>
             </section>
             
-            <!-- User Profile - Bottom -->
+            <!-- User Profile -->
             <section class="user-profile-section" id="user-profile" style="display: none;">
                 <div class="user-profile-bottom">
                     <img id="user-avatar" class="user-avatar" src="" alt="">
@@ -236,6 +204,9 @@
     <!-- Leaflet JavaScript -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     <!-- Application Configuration -->
     <script>
         window.AppConfig = {
@@ -244,23 +215,10 @@
         };
     </script>
     
-    <!-- Core Scripts -->
-    <script src="js/event-emitter.js"></script>
-    <script src="js/auth-manager.js"></script>
-    <script src="js/discovery-manager.js"></script>
-    <script src="js/map-manager.js"></script>
-    <script src="js/chat-manager.js"></script>
-    <script src="js/ui-manager.js"></script>
-    <script src="js/discovery-api.js"></script>
-    <script src="js/status-manager.js"></script>
-    <script src="js/status-ui-manager.js"></script>
-    <script src="js/patch-visualization.js?v=13.2"></script>
-    <script src="js/map-visualization.js?v=2.0"></script>
-    <script src="js/simple-legacy-app.js?v=2.0"></script>
-    <script src="js/global-utils.js"></script>
-    <script src="js/bootstrap.js"></script>
-
-    <!-- Chart.js Library -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Map Visualization for LiDAR support -->
+    <script src="js/map-visualization.js"></script>
+    
+    <!-- New Clean Application -->
+    <script src="js/new-app.js"></script>
 </body>
 </html>
