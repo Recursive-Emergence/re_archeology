@@ -44,90 +44,32 @@
         <!-- Discovery Panel (Floating Left) -->
         <div class="discovery-panel">
             <div class="discovery-header">
-                <h1>🏛️ Structure Discovery</h1>
-                <p>Real-time archaeological structure detection</p>
+                <h1>🛰️ LiDAR Scan</h1>
+                <p>Real-time elevation scanning and structure detection</p>
             </div>
             
             <div class="discovery-controls">
-                <!-- Region Selection -->
-                <div class="control-group" data-collapsible="true">
-                    <h3 onclick="toggleControlGroup(this)">🗺️ Scan Region <span class="toggle-icon">▼</span></h3>
+                <!-- LiDAR Scan Controls -->
+                <div class="control-group">
                     <div class="control-content">
-                        <div class="input-group">
-                            <label>Center Latitude</label>
-                            <input type="number" id="centerLat" value="52.4751" step="0.0001">
+                        <div class="button-grid">
+                            <button class="btn btn-primary" id="startLidarScanBtn">Scan</button>
+                            <button class="btn btn-stop" id="stopLidarScanBtn" disabled>Stop</button>
+                            <button class="btn btn-secondary" id="clearLidarScanBtn">Clear</button>
                         </div>
                         <div class="input-group">
-                            <label>Center Longitude</label>
-                            <input type="number" id="centerLon" value="4.8156" step="0.0001">
+                            <label>
+                                <input type="checkbox" id="enableDetection"> Detection
+                            </label>
                         </div>
                         <div class="input-group">
-                            <label>Scan Radius (km)</label>
-                            <input type="number" id="scanRadius" value="1" step="0.5" min="0.5" max="10">
-                        </div>
-                        <div class="input-group">
-                            <label>Patch Size (m)</label>
-                            <input type="number" id="patchSize" value="40" step="16" min="32" max="256">
-                        </div>
-                        <div class="input-group">
-                            <label>Sliding Step (m)</label>
-                            <input type="number" id="slidingStep" value="1" step="1" min="1" max="10">
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Detection Settings -->
-                <div class="control-group" data-collapsible="true">
-                    <h3 onclick="toggleControlGroup(this)">🎯 Detection Settings <span class="toggle-icon">▼</span></h3>
-                    <div class="control-content">
-                        <div class="input-group">
-                            <label>φ⁰ Threshold</label>
-                            <input type="number" id="phi0Threshold" value="0.35" step="0.05" min="0" max="1">
-                        </div>
-                        <div class="input-group">
-                            <label>ψ⁰ Threshold</label>
-                            <input type="number" id="psi0Threshold" value="0.4" step="0.05" min="0" max="1">
-                        </div>
-                        <div class="input-group">
-                            <label>Detection Mode</label>
-                            <select id="detectionMode">
+                            <label>Structure Type</label>
+                            <select id="structureType">
                                 <option value="windmill" selected>Windmill Structures</option>
                                 <option value="tower">Tower Structures</option>
                                 <option value="mound">Archaeological Mounds</option>
                                 <option value="generic">Generic Structures</option>
                             </select>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Action Buttons -->
-                <div class="control-group">
-                    <h3>🚀 Actions</h3>
-                    <div class="button-grid">
-                        <button class="btn btn-primary" id="startScanBtn">Start Detection</button>
-                        <button class="btn btn-stop" id="stopScanBtn" disabled>Stop</button>
-                        <button class="btn btn-secondary" id="clearResultsBtn">Clear</button>
-                    </div>
-                </div>
-                
-                <!-- Visualization Options -->
-                <div class="control-group" data-collapsible="true">
-                    <h3 onclick="toggleControlGroup(this)">👁️ Visualization <span class="toggle-icon">▼</span></h3>
-                    <div class="control-content">
-                        <div class="input-group">
-                            <label>
-                                <input type="checkbox" id="showElevation" checked> Show elevation data
-                            </label>
-                        </div>
-                        <div class="input-group">
-                            <label>
-                                <input type="checkbox" id="showConfidence" checked> Color by confidence
-                            </label>
-                        </div>
-                        <div class="input-group">
-                            <label>
-                                <input type="checkbox" id="showScanAnimation"> Show scan animation
-                            </label>
                         </div>
                     </div>
                 </div>

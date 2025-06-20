@@ -1,5 +1,76 @@
 /* Enhanced styles for the windmill discovery visualization components */
 
+/* Satellite/Airplane scanning animation */
+.scanning-icon {
+    position: absolute;
+    z-index: 1000;
+    pointer-events: none;
+    font-size: 24px;
+    animation: scanMove 8s linear infinite;
+    transition: all 0.3s ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+.scanning-icon.satellite {
+    content: '🛰️';
+}
+
+.scanning-icon.airplane {
+    content: '✈️';
+}
+
+.scanning-icon.high-res {
+    animation-duration: 12s; /* Slower for high-resolution scans */
+    font-size: 28px;
+}
+
+@keyframes scanMove {
+    0% {
+        transform: translate(-100px, -100px) rotate(0deg);
+        opacity: 0;
+    }
+    10% {
+        opacity: 1;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(100vw, 100vh) rotate(360deg);
+        opacity: 0;
+    }
+}
+
+/* LiDAR heatmap tile styles */
+.lidar-heatmap-tile {
+    pointer-events: none !important;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+}
+
+.lidar-heatmap-tile.visible {
+    opacity: 0.8;
+}
+
+.lidar-heatmap-container {
+    position: relative;
+    overflow: hidden;
+}
+
+/* LiDAR resolution indicator */
+.lidar-resolution-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    z-index: 500;
+    backdrop-filter: blur(4px);
+}
+
 .elevation-cell {
     transition: all 0.2s ease;
     cursor: pointer;

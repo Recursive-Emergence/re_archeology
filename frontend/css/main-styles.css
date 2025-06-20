@@ -119,7 +119,7 @@ html, body {
     height: 100%;
 }
 
-/* Discovery Panel - Floating left - Now minimized/hidden since we have compact controls */
+/* Discovery Panel - Floating left */
 .discovery-panel {
     position: absolute;
     top: 80px;
@@ -130,7 +130,7 @@ html, body {
     backdrop-filter: blur(10px);
     border: 1px solid rgba(64, 64, 64, 0.8);
     border-radius: 12px;
-    display: none; /* Hidden by default - use compact controls instead */
+    display: flex; /* Always visible now with our new LiDAR controls */
     flex-direction: column;
     overflow: hidden;
     z-index: 1001;

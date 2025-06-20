@@ -1478,642 +1478,234 @@ class MapVisualization {
     }
 
     /**
-     * Add a LiDAR tile to the map with visual wipe effect and sync protection
+     * Enable heatmap mode for enhanced LiDAR visualization
      */
-    addLidarTile(tileData) {
-        // Store tile data for canvas-based heatmap
-        if (!this.lidarTiles) {
-            this.lidarTiles = new Map();
-            this.tileQueue = [];
-            this.isWiping = false;
-            this.queueSorted = false;
-            this.processedTileIds = new Set(); // Track processed tiles to prevent duplicates
-        }
-        
-        // Check for duplicate tiles to prevent sync issues
-        if (this.processedTileIds.has(tileData.tile_id)) {
-            // console.warn(`⚠️ Duplicate tile detected: ${tileData.tile_id}, skipping`); // Reduced log noise
-            return null;
-        }
-        
-        // Mark tile as processed
-        this.processedTileIds.add(tileData.tile_id);
-        
-        // Store scan area bounds from first tile (should be consistent across session)
-        if (!this.scanAreaBounds && tileData.scan_bounds) {
-            this.scanAreaBounds = tileData.scan_bounds;
-            console.log('📍 Scan area bounds set:', this.scanAreaBounds);
-        }
-        
-        this.tileQueue.push(tileData);
-        
-        if (!this.isWiping) {
-            this.startWipeEffect();
-        }
-        
-        return null; // No individual rectangles anymore
+    enableHeatmapMode() {
+        this.heatmapMode = true;
+        this.heatmapTiles = new Map();
+        console.log('🔥 Enabled LiDAR heatmap mode');
     }
     
     /**
-     * Start the visual wipe effect (left to right)
+     * Disable heatmap mode
      */
-    startWipeEffect() {
-        this.isWiping = true;
-        this.processWipeQueue();
-    }
-    
-    /**
-     * Process the tile queue with sequential left-to-right wipe timing  
-     */
-    processWipeQueue() {
-        if (this.tileQueue.length === 0) {
-            this.isWiping = false;
-            return;
+    disableHeatmapMode() {
+        this.heatmapMode = false;
+        if (this.heatmapTiles) {
+            this.heatmapTiles.clear();
         }
-        
-        // Sort queue by grid position for left-to-right effect (only once)
-        if (!this.queueSorted) {
-            this.tileQueue.sort((a, b) => {
-                if (a.grid_row !== b.grid_row) {
-                    return a.grid_row - b.grid_row; // Top to bottom
-                }
-                return a.grid_col - b.grid_col; // Left to right within row
-            });
-            this.queueSorted = true;
-        }
-        
-        // Get the next tile to wipe (first in sorted queue)
-        const currentTile = this.tileQueue[0];
-        if (!currentTile) return;
-        
-        if (!currentTile.wipeStartTime) {
-            currentTile.wipeStartTime = Date.now();
-            currentTile.wipeProgress = 0;
-        }
-        
-        // Calculate wipe progress for current tile only
-        const currentTime = Date.now();
-        const timeSinceStart = currentTime - currentTile.wipeStartTime;
-        
-        // Adaptive wipe duration: faster if more tiles in queue
-        const baseDuration = 600; // Base 600ms per tile  
-        const queueSpeedBonus = Math.min(400, this.tileQueue.length * 30); // Up to 400ms faster
-        const wipeDuration = Math.max(200, baseDuration - queueSpeedBonus); // Minimum 200ms
-        
-        // Update progress for current tile
-        currentTile.wipeProgress = Math.min(1, timeSinceStart / wipeDuration);
-        
-        // Add current tile to render map
-        this.lidarTiles.set(currentTile.tile_id, currentTile);
-        
-        // Update canvas to show current tile progress
-        this.updateCanvasHeatmap();
-        
-        if (currentTile.wipeProgress >= 1) {
-            this.tileQueue.shift();
-            
-            if (this.tileQueue.length > 0) {
-                setTimeout(() => this.processWipeQueue(), 16);
-            } else {
-                this.isWiping = false;
-                this.queueSorted = false;
-            }
-        } else {
-            setTimeout(() => this.processWipeQueue(), 16); // 60fps for smooth animation
-        }
-    }
-    
-    /**
-     * Create popup content for LiDAR tiles
-     */
-    createLidarTilePopup(tileData) {
-        const hasData = tileData.has_data;
-        
-        return `
-            <div class="lidar-tile-popup">
-                <h4>📡 LiDAR Tile</h4>
-                <div class="tile-info">
-                    <div class="info-row">
-                        <span class="label">Tile ID:</span>
-                        <span class="value">${tileData.tile_id}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">Location:</span>
-                        <span class="value">${tileData.center_lat.toFixed(6)}, ${tileData.center_lon.toFixed(6)}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">Size:</span>
-                        <span class="value">${tileData.size_m}m × ${tileData.size_m}m</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="label">Data Status:</span>
-                        <span class="value status-${hasData ? 'available' : 'unavailable'}">
-                            ${hasData ? '✅ Available' : '❌ Unavailable'}
-                        </span>
-                    </div>
-                    ${hasData ? `
-                        <div class="elevation-stats">
-                            <h5>Elevation Statistics</h5>
-                            <div class="stats-grid">
-                                <div class="stat">
-                                    <span class="stat-label">Min:</span>
-                                    <span class="stat-value">${tileData.elevation_stats.min.toFixed(2)}m</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="stat-label">Max:</span>
-                                    <span class="stat-value">${tileData.elevation_stats.max.toFixed(2)}m</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="stat-label">Mean:</span>
-                                    <span class="stat-value">${tileData.elevation_stats.mean.toFixed(2)}m</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="stat-label">Std Dev:</span>
-                                    <span class="stat-value">${tileData.elevation_stats.std.toFixed(2)}m</span>
-                                </div>
-                            </div>
-                        </div>
-                    ` : `
-                        <div class="no-data-message">
-                            <p>${tileData.message || 'No LiDAR data available for this tile'}</p>
-                        </div>
-                    `}
-                    <div class="info-row">
-                        <span class="label">Timestamp:</span>
-                        <span class="value">${new Date(tileData.timestamp).toLocaleString()}</span>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    /**
-     * Update canvas-based heatmap overlay for smooth elevation visualization
-     */
-    updateCanvasHeatmap() {
-        if (!this.lidarTiles || this.lidarTiles.size === 0) {
-            return;
-        }
-        
-        // Use scan area bounds if available, otherwise calculate from tiles
-        let bounds;
-        if (this.scanAreaBounds) {
-            bounds = this.scanAreaBounds;
-        } else {
-            // Calculate bounds of all tiles as fallback
-            const tilesArray = Array.from(this.lidarTiles.values());
-            bounds = this.calculateTileBounds(tilesArray);
-        }
-        
-        if (!bounds) {
-            console.warn("⚠️ Could not determine bounds for heatmap");
-            return;
-        }
-        
-        // Get tiles array for rendering
-        const tilesArray = Array.from(this.lidarTiles.values());
-        
-        // Remove existing canvas overlay if it exists
-        if (this.canvasOverlay) {
-            this.map.removeLayer(this.canvasOverlay);
-            this.canvasOverlay = null;
-        }
-        
-        // Create canvas overlay
-        this.canvasOverlay = this.createCanvasOverlay(bounds, tilesArray);
-        
-        // Add directly to map instead of layer group for proper positioning
-        this.canvasOverlay.addTo(this.map);
-        
-        // Auto-zoom to the LiDAR area for better visibility (but not if we have a selection rectangle)
-        if (tilesArray.length >= 2 && !this.hasActiveSelection()) {  
-            const mapBounds = L.latLngBounds(
-                [bounds.south, bounds.west],
-                [bounds.north, bounds.east]
-            );
-            this.map.fitBounds(mapBounds, { padding: [20, 20] });
-        }
-    }
-    
-    /**
-     * Calculate the overall bounds of all LiDAR tiles
-     */
-    calculateTileBounds(tilesArray) {
-        if (tilesArray.length === 0) return null;
-        
-        let minLat = Infinity, maxLat = -Infinity;
-        let minLon = Infinity, maxLon = -Infinity;
-        
-        for (const tile of tilesArray) {
-            const latSize = tile.size_m / 111320;
-            const lonSize = tile.size_m / (111320 * Math.cos(tile.center_lat * Math.PI / 180));
-            
-            const tileBounds = {
-                south: tile.center_lat - latSize / 2,
-                north: tile.center_lat + latSize / 2,
-                west: tile.center_lon - lonSize / 2,
-                east: tile.center_lon + lonSize / 2
-            };
-            
-            minLat = Math.min(minLat, tileBounds.south);
-            maxLat = Math.max(maxLat, tileBounds.north);
-            minLon = Math.min(minLon, tileBounds.west);
-            maxLon = Math.max(maxLon, tileBounds.east);
-        }
-        
-        const overallBounds = {
-            south: minLat,
-            north: maxLat,
-            west: minLon,
-            east: maxLon,
-            center: [(minLat + maxLat) / 2, (minLon + maxLon) / 2]
-        };
-        
-        return overallBounds;
-    }
-    
-    /**
-     * Create a canvas overlay with high-resolution elevation data
-     */
-    createCanvasOverlay(bounds, tilesArray) {
-        // Calculate appropriate canvas size based on tile resolution
-        const boundsWidth = bounds.east - bounds.west;
-        const boundsHeight = bounds.north - bounds.south;
-        const metersPerDegreeLat = 111320;
-        const metersPerDegreeLon = 111320 * Math.cos((bounds.north + bounds.south) / 2 * Math.PI / 180);
-        
-        const areaWidthM = boundsWidth * metersPerDegreeLon;
-        const areaHeightM = boundsHeight * metersPerDegreeLat;
-        
-        // Set canvas size to provide good resolution without being too large
-        const targetResolutionM = 2.0; // 2m per pixel for good detail
-        const canvasWidth = Math.min(1024, Math.max(256, Math.round(areaWidthM / targetResolutionM)));
-        const canvasHeight = Math.min(1024, Math.max(256, Math.round(areaHeightM / targetResolutionM)));
-        
-        // Create canvas
-        const canvas = document.createElement('canvas');
-        canvas.width = canvasWidth;
-        canvas.height = canvasHeight;
-        const ctx = canvas.getContext('2d');
-        
-        // Calculate global elevation range for consistent coloring
-        let globalMin = Infinity;
-        let globalMax = -Infinity;
-        
-        tilesArray.forEach(tile => {
-            if (tile.has_data && tile.elevation_stats) {
-                globalMin = Math.min(globalMin, tile.elevation_stats.min);
-                globalMax = Math.max(globalMax, tile.elevation_stats.max);
-            }
-        });
-        
-        // Clear canvas with transparent background
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw each tile with high-resolution data
-        tilesArray.forEach(tile => {
-            if (tile.has_data && tile.viz_elevation) {
-                this.drawHighResolutionTile(ctx, canvas, bounds, tile, {min: globalMin, max: globalMax});
-            }
-        });
-        
-        // Create Leaflet image overlay
-        const imageBounds = [[bounds.south, bounds.west], [bounds.north, bounds.east]];
-        const overlay = L.imageOverlay(canvas.toDataURL(), imageBounds, {
-            opacity: 0.8,
-            className: 'lidar-canvas-heatmap'
-        });
-        
-        return overlay;
-    }
-    
-    /**
-     * Draw a single tile with high-resolution elevation data and wipe effect
-     */
-    drawHighResolutionTile(ctx, canvas, bounds, tile, elevRange) {
-        const elevation2D = tile.viz_elevation;
-        const rows = elevation2D.length;
-        const cols = elevation2D[0].length;
-        
-        // Get wipe progress (0 to 1)
-        const wipeProgress = tile.wipeProgress || 1.0;
-        
-        // Calculate tile bounds
-        const tileLatSize = tile.size_m / 111320;
-        const tileLonSize = tile.size_m / (111320 * Math.cos(tile.center_lat * Math.PI / 180));
-        
-        const tileBounds = {
-            south: tile.center_lat - tileLatSize / 2,
-            north: tile.center_lat + tileLatSize / 2,
-            west: tile.center_lon - tileLonSize / 2,
-            east: tile.center_lon + tileLonSize / 2
-        };
-        
-        // Convert tile bounds to canvas coordinates
-        const tileCanvasX = ((tileBounds.west - bounds.west) / (bounds.east - bounds.west)) * canvas.width;
-        const tileCanvasY = ((bounds.north - tileBounds.north) / (bounds.north - bounds.south)) * canvas.height;
-        const tileCanvasW = ((tileBounds.east - tileBounds.west) / (bounds.east - bounds.west)) * canvas.width;
-        const tileCanvasH = ((tileBounds.north - tileBounds.south) / (bounds.north - bounds.south)) * canvas.height;
-        
-        // Calculate how many columns to show based on wipe progress (left to right)
-        const visibleCols = Math.floor(cols * wipeProgress);
-        const partialCol = cols * wipeProgress - visibleCols;
-        
-        // Draw each elevation pixel as a colored rectangle
-        const pixelWidth = tileCanvasW / cols;
-        const pixelHeight = tileCanvasH / rows;
-        
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col <= visibleCols; col++) {
-                if (col >= cols) break;
-                
-                const elevation = elevation2D[row][col];
-                if (isNaN(elevation)) continue;
-                
-                const color = this.elevationToColor(elevation, elevRange);
-                
-                const pixelX = tileCanvasX + col * pixelWidth;
-                const pixelY = tileCanvasY + row * pixelHeight;
-                
-                let pixelWidthToDraw = pixelWidth;
-                
-                // For the last partial column, only draw the visible portion
-                if (col === visibleCols && partialCol > 0) {
-                    pixelWidthToDraw = pixelWidth * partialCol;
-                }
-                
-                ctx.fillStyle = color;
-                ctx.fillRect(
-                    Math.floor(pixelX), 
-                    Math.floor(pixelY), 
-                    Math.ceil(pixelWidthToDraw), 
-                    Math.ceil(pixelHeight)
-                );
-            }
-        }
-        
-        // Add a subtle vertical line at the wipe edge for visual feedback
-        if (wipeProgress < 1.0 && wipeProgress > 0) {
-            const wipeX = tileCanvasX + tileCanvasW * wipeProgress;
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(wipeX, tileCanvasY);
-            ctx.lineTo(wipeX, tileCanvasY + tileCanvasH);
-            ctx.stroke();
-        }
-    }
-    
-    /**
-     * Calculate global elevation range across all tiles
-     */
-    calculateGlobalElevationRange(tilesArray) {
-        let globalMin = Infinity;
-        let globalMax = -Infinity;
-        
-        for (const tile of tilesArray) {
-            if (tile.has_data && tile.elevation_stats) {
-                globalMin = Math.min(globalMin, tile.elevation_stats.min);
-                globalMax = Math.max(globalMax, tile.elevation_stats.max);
-            }
-        }
-        
-        // Add some padding for better visualization
-        const padding = (globalMax - globalMin) * 0.1;
-        return {
-            min: globalMin - padding,
-            max: globalMax + padding
-        };
-    }
-    
-    /**
-     * Draw smooth elevation data on canvas with interpolation
-     */
-    drawSmoothElevationData(ctx, canvas, bounds, tilesArray, elevRange) {
-        const imageData = ctx.createImageData(canvas.width, canvas.height);
-        const data = imageData.data;
-        
-        const elevGrid = this.createElevationGrid(bounds, tilesArray, canvas.width, canvas.height);
-        const nonNullPixels = elevGrid.filter(val => val !== null).length;
-        
-        const smoothGrid = this.applyGaussianBlur(elevGrid, canvas.width, canvas.height, 0.5);
-        
-        // Convert elevation data to colors
-        let coloredPixels = 0;
-        for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-                const idx = (y * canvas.width + x) * 4;
-                const elevation = smoothGrid[y * canvas.width + x];
-                
-                if (elevation !== null) {
-                    const color = this.elevationToColor(elevation, elevRange);
-                    data[idx] = color.r;     // Red
-                    data[idx + 1] = color.g; // Green
-                    data[idx + 2] = color.b; // Blue
-                    data[idx + 3] = 192;     // Alpha (75% opacity)
-                    coloredPixels++;
-                } else {
-                    // Transparent for no data areas
-                    data[idx + 3] = 0;
-                }
-            }
-        }
-        
-        ctx.putImageData(imageData, 0, 0);
-        console.log(`✅ Canvas elevation data drawn successfully`);
-    }
-    
-    /**
-     * Create elevation grid from tile data using discrete zones
-     * Based on working lidar patch code approach
-     */
-    createElevationGrid(bounds, tilesArray, width, height) {
-        const grid = new Array(width * height).fill(null);
-        const contourInterval = 0.5; // Match working code's contour_interval
-        
-        const latSpan = bounds.north - bounds.south;
-        const lonSpan = bounds.east - bounds.west;
-        
-        for (const tile of tilesArray) {
-            if (!tile.has_data || !tile.elevation_stats) continue;
-            
-            const latSize = tile.size_m / 111320;
-            const lonSize = tile.size_m / (111320 * Math.cos(tile.center_lat * Math.PI / 180));
-            
-            // Calculate tile bounds in grid coordinates
-            const tileBounds = {
-                south: tile.center_lat - latSize / 2,
-                north: tile.center_lat + latSize / 2,
-                west: tile.center_lon - lonSize / 2,
-                east: tile.center_lon + lonSize / 2
-            };
-            
-            // Convert to pixel coordinates
-            const x1 = Math.floor((tileBounds.west - bounds.west) / lonSpan * width);
-            const x2 = Math.ceil((tileBounds.east - bounds.west) / lonSpan * width);
-            const y1 = Math.floor((bounds.north - tileBounds.north) / latSpan * height);
-            const y2 = Math.ceil((bounds.north - tileBounds.south) / latSpan * height);
-            
-            // Use discrete elevation zones like working code
-            const rawElevation = tile.elevation_stats.mean;
-            const discreteElevation = Math.floor(rawElevation / contourInterval) * contourInterval;
-            
-            // Fill grid cells with discrete elevation
-            for (let y = Math.max(0, y1); y < Math.min(height, y2); y++) {
-                for (let x = Math.max(0, x1); x < Math.min(width, x2); x++) {
-                    grid[y * width + x] = discreteElevation;
-                }
-            }
-        }
-        
-        return grid;
-    }
-    
-    /**
-     * Apply Gaussian blur for smooth transitions between tiles
-     */
-    applyGaussianBlur(grid, width, height, radius) {
-        const result = new Array(grid.length);
-        const kernel = this.createGaussianKernel(radius);
-        const kernelSize = kernel.length;
-        const kernelRadius = Math.floor(kernelSize / 2);
-        
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                let sum = 0;
-                let weightSum = 0;
-                
-                for (let ky = 0; ky < kernelSize; ky++) {
-                    for (let kx = 0; kx < kernelSize; kx++) {
-                        const sourceX = x + kx - kernelRadius;
-                        const sourceY = y + ky - kernelRadius;
-                        
-                        if (sourceX >= 0 && sourceX < width && sourceY >= 0 && sourceY < height) {
-                            const sourceValue = grid[sourceY * width + sourceX];
-                            if (sourceValue !== null) {
-                                const weight = kernel[ky][kx];
-                                sum += sourceValue * weight;
-                                weightSum += weight;
-                            }
-                        }
-                    }
-                }
-                
-                result[y * width + x] = weightSum > 0 ? sum / weightSum : null;
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Create Gaussian kernel for blurring
-     */
-    createGaussianKernel(radius) {
-        const size = Math.ceil(radius * 2) * 2 + 1;
-        const kernel = [];
-        const sigma = radius / 3;
-        const center = Math.floor(size / 2);
-        let sum = 0;
-        
-        for (let y = 0; y < size; y++) {
-            kernel[y] = [];
-            for (let x = 0; x < size; x++) {
-                const distance = Math.sqrt((x - center) ** 2 + (y - center) ** 2);
-                const value = Math.exp(-(distance ** 2) / (2 * sigma ** 2));
-                kernel[y][x] = value;
-                sum += value;
-            }
-        }
-        
-        // Normalize kernel
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                kernel[y][x] /= sum;
-            }
-        }
-        
-        return kernel;
-    }
-    
-    /**
-     * Convert elevation to color using archaeological contour-based scheme
-     * Based on working lidar patch code that uses discrete elevation zones
-     */
-    elevationToColor(elevation, range) {
-        // Use contour intervals like the working code (0.5m intervals)
-        const contourInterval = 0.5;
-        
-        // Create discrete elevation zones (like the working code does)
-        const discreteElevation = Math.floor(elevation / contourInterval) * contourInterval;
-        
-        // Normalize based on discrete zones for better contrast
-        const normalized = Math.max(0, Math.min(1, (discreteElevation - range.min) / (range.max - range.min)));
-        
-        // Enhanced archaeological color scheme with better contrast
-        if (normalized < 0.15) {
-            // Very low areas: dark blue (water/depressions)
-            return this.rgbToHex({r: 0, g: 80, b: 160});
-        } else if (normalized < 0.35) {
-            // Low elevation: light blue to cyan (low ground) 
-            return this.rgbToHex({r: 50, g: 150, b: 200});
-        } else if (normalized < 0.55) {
-            // Medium elevation: green (normal ground level)
-            return this.rgbToHex({r: 80, g: 180, b: 80});
-        } else if (normalized < 0.75) {
-            // Higher elevation: yellow-orange (elevated features)
-            return this.rgbToHex({r: 255, g: 200, b: 50});
-        } else {
-            // High elevation: red (potential structures/mounds)
-            return this.rgbToHex({r: 220, g: 50, b: 50});
-        }
-    }
-    
-    /**
-     * Convert RGB object to hex color string
-     */
-    rgbToHex(rgb) {
-        const componentToHex = (c) => {
-            const hex = Math.max(0, Math.min(255, Math.round(c))).toString(16);
-            return hex.length == 1 ? "0" + hex : hex;
-        };
-        return `#${componentToHex(rgb.r)}${componentToHex(rgb.g)}${componentToHex(rgb.b)}`;
+        console.log('❄️ Disabled LiDAR heatmap mode');
     }
 
     /**
-     * Interpolate between two colors (kept for compatibility)
+     * Add LiDAR heatmap tile with enhanced visualization
      */
-    interpolateColor(color1, color2, t) {
-        return {
-            r: Math.round(color1.r + (color2.r - color1.r) * t),
-            g: Math.round(color1.g + (color2.g - color1.g) * t),
-            b: Math.round(color1.b + (color2.b - color1.b) * t)
-        };
+    addLidarHeatmapTile(tileData) {
+        if (!this.heatmapMode) {
+            console.warn('⚠️ Heatmap mode not enabled');
+            return;
+        }
+
+        try {
+            console.log('🔥 Processing heatmap tile data:', tileData);
+            console.log('🔥 Available keys:', Object.keys(tileData));
+            
+            // Calculate tile bounds from center position and size
+            let bounds;
+            if (tileData.scan_bounds) {
+                // Use scan area bounds for heatmap tiles
+                bounds = tileData.scan_bounds;
+            } else if (tileData.bounds) {
+                bounds = tileData.bounds;
+            } else if (tileData.tile_bounds) {
+                bounds = tileData.tile_bounds;
+            } else if (tileData.center_lat && tileData.center_lon && tileData.size_m) {
+                // Calculate bounds from center and size
+                const centerLat = tileData.center_lat;
+                const centerLon = tileData.center_lon;
+                const sizeM = tileData.size_m;
+                
+                // Convert size in meters to degrees (approximate)
+                const latDelta = sizeM / 111000; // ~111km per degree latitude
+                const lonDelta = sizeM / (111000 * Math.cos(centerLat * Math.PI / 180));
+                
+                bounds = {
+                    south: centerLat - latDelta / 2,
+                    west: centerLon - lonDelta / 2,
+                    north: centerLat + latDelta / 2,
+                    east: centerLon + lonDelta / 2
+                };
+            } else if (tileData.southwest_lat && tileData.northeast_lat) {
+                // Alternative format
+                bounds = {
+                    south: tileData.southwest_lat,
+                    west: tileData.southwest_lon,
+                    north: tileData.northeast_lat,
+                    east: tileData.northeast_lon
+                };
+            } else {
+                console.error('❌ No valid bounds found in tile data:', Object.keys(tileData));
+                return;
+            }
+            
+            console.log('🔥 Using bounds:', bounds);
+
+            // Create heatmap tile bounds
+            const leafletBounds = L.latLngBounds(
+                [bounds.south, bounds.west],
+                [bounds.north, bounds.east]
+            );
+
+            // Check if elevation data exists (check multiple possible field names)
+            let elevationData = null;
+            if (tileData.viz_elevation && Array.isArray(tileData.viz_elevation)) {
+                elevationData = tileData.viz_elevation;
+                console.log('🔥 Using viz_elevation data');
+            } else if (tileData.elevation_data && Array.isArray(tileData.elevation_data)) {
+                elevationData = tileData.elevation_data;
+                console.log('🔥 Using elevation_data');
+            } else {
+                console.error('❌ No valid elevation data in tile:', Object.keys(tileData));
+                return;
+            }
+
+            // Create canvas element for heatmap
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas dimensions based on data resolution
+            const dataRows = elevationData.length;
+            const dataCols = elevationData[0].length;
+            canvas.width = dataCols * 4; // Scale up for better visualization
+            canvas.height = dataRows * 4;
+
+            // Generate heatmap
+            this.renderHeatmapCanvas(ctx, elevationData, canvas.width, canvas.height);
+
+            // Create image overlay from canvas
+            const imageUrl = canvas.toDataURL();
+            const heatmapOverlay = L.imageOverlay(imageUrl, leafletBounds, {
+                opacity: 0.7,
+                className: 'lidar-heatmap-tile',
+                interactive: false  // Prevent overlay from blocking map interactions
+            });
+
+            // Add to map with fade-in effect
+            heatmapOverlay.addTo(this.map);
+            
+            // Trigger fade-in animation
+            setTimeout(() => {
+                const element = heatmapOverlay.getElement();
+                if (element) {
+                    element.classList.add('visible');
+                }
+            }, 100);
+
+            // Store tile reference
+            this.heatmapTiles.set(tileData.tile_id, heatmapOverlay);
+
+            console.log(`✅ Added LiDAR heatmap tile ${tileData.tile_id}`);
+
+        } catch (error) {
+            console.error(`❌ Failed to add heatmap tile ${tileData.tile_id}:`, error);
+        }
     }
-    
+
     /**
-     * Find the tile at a specific lat/lon location
+     * Render elevation data as heatmap on canvas
      */
-    findTileAtLocation(lat, lon) {
-        for (const tile of this.lidarTiles.values()) {
-            const latSize = tile.size_m / 111320;
-            const lonSize = tile.size_m / (111320 * Math.cos(tile.center_lat * Math.PI / 180));
-            
-            const bounds = {
-                south: tile.center_lat - latSize / 2,
-                north: tile.center_lat + latSize / 2,
-                west: tile.center_lon - lonSize / 2,
-                east: tile.center_lon + lonSize / 2
-            };
-            
-            if (lat >= bounds.south && lat <= bounds.north && 
-                lon >= bounds.west && lon <= bounds.east) {
-                return tile;
+    renderHeatmapCanvas(ctx, elevationData, canvasWidth, canvasHeight) {
+        const rows = elevationData.length;
+        const cols = elevationData[0].length;
+        
+        // Find min/max elevation for normalization
+        let minElev = Infinity;
+        let maxElev = -Infinity;
+        
+        for (let i = 0; i < rows; i++) {
+            for (let j = 0; j < cols; j++) {
+                const elev = elevationData[i][j];
+                if (elev !== null && !isNaN(elev)) {
+                    minElev = Math.min(minElev, elev);
+                    maxElev = Math.max(maxElev, elev);
+                }
             }
         }
-        return null;
+
+        const elevRange = maxElev - minElev;
+        const cellWidth = canvasWidth / cols;
+        const cellHeight = canvasHeight / rows;
+
+        // Render each cell
+        for (let i = 0; i < rows; i++) {
+            for (let j = 0; j < cols; j++) {
+                const elev = elevationData[i][j];
+                
+                if (elev !== null && !isNaN(elev)) {
+                    // Normalize elevation to 0-1 range
+                    const normalized = elevRange > 0 ? (elev - minElev) / elevRange : 0.5;
+                    
+                    // Create heatmap color (blue to red)
+                    const color = this.getHeatmapColor(normalized);
+                    
+                    ctx.fillStyle = color;
+                    ctx.fillRect(j * cellWidth, i * cellHeight, cellWidth, cellHeight);
+                }
+            }
+        }
     }
-    
+
+    /**
+     * Get heatmap color based on normalized value (0-1)
+     */
+    getHeatmapColor(value) {
+        // Clamp value to 0-1 range
+        value = Math.max(0, Math.min(1, value));
+        
+        // Create color gradient: blue (low) -> green -> yellow -> red (high)
+        let r, g, b;
+        
+        if (value < 0.25) {
+            // Blue to cyan
+            const t = value / 0.25;
+            r = 0;
+            g = Math.floor(255 * t);
+            b = 255;
+        } else if (value < 0.5) {
+            // Cyan to green
+            const t = (value - 0.25) / 0.25;
+            r = 0;
+            g = 255;
+            b = Math.floor(255 * (1 - t));
+        } else if (value < 0.75) {
+            // Green to yellow
+            const t = (value - 0.5) / 0.25;
+            r = Math.floor(255 * t);
+            g = 255;
+            b = 0;
+        } else {
+            // Yellow to red
+            const t = (value - 0.75) / 0.25;
+            r = 255;
+            g = Math.floor(255 * (1 - t));
+            b = 0;
+        }
+        
+        return `rgba(${r}, ${g}, ${b}, 0.7)`;
+    }
+
+    /**
+     * Clear all heatmap tiles
+     */
+    clearHeatmapTiles() {
+        if (this.heatmapTiles) {
+            this.heatmapTiles.forEach((overlay, tileId) => {
+                this.map.removeLayer(overlay);
+            });
+            this.heatmapTiles.clear();
+        }
+    }
+
     /**
      * Clear LiDAR heatmap data and sync state
      */
@@ -2143,6 +1735,9 @@ class MapVisualization {
             this.map.removeLayer(this.canvasOverlay);
             this.canvasOverlay = null;
         }
+        
+        // Clear heatmap tiles if in heatmap mode
+        this.clearHeatmapTiles();
         
         console.log('🧹 Cleared LiDAR heatmap, wipe effect state, and sync tracking');
     }
