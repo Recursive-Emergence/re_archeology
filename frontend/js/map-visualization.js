@@ -16,6 +16,8 @@ class MapVisualization {
         
         this.layers = new Map();
         this.patches = new Map();
+        this.heatmapTiles = new Map(); // Add heatmap tiles tracking
+        // Initialize visualization system
         this.controlsAdded = false;
         this.basicMapReady = true; // Map is already ready since it's passed in
         this.options = {
@@ -440,7 +442,6 @@ class MapVisualization {
      * Initialize layer groups for different data types
      */
     initLayerGroups() {
-        this.layers.set('scanArea', L.layerGroup().addTo(this.map));
         this.layers.set('patches', L.layerGroup().addTo(this.map));
         this.layers.set('detections', L.layerGroup().addTo(this.map));
         this.layers.set('animations', L.layerGroup().addTo(this.map));
@@ -452,12 +453,6 @@ class MapVisualization {
      * This method provides compatibility with the main app's selection logic
      */
     hasActiveSelection() {
-        // Check if there are any items in the scanArea layer group
-        const scanAreaLayer = this.layers.get('scanArea');
-        if (scanAreaLayer && scanAreaLayer.getLayers().length > 0) {
-            return true;
-        }
-        
         // Check if there's a global selectedArea reference
         if (window.unifiedApp && window.unifiedApp.selectedArea) {
             return true;
@@ -518,6 +513,8 @@ class MapVisualization {
         
         // Update patch visibility based on zoom level
         this.updatePatchVisibility();
+        
+        // Update any other zoom-sensitive visualizations as needed
     }
 
     /**
@@ -530,35 +527,6 @@ class MapVisualization {
             detail: { center, bounds }
         });
         this.mapElement.dispatchEvent(event);
-    }
-
-    /**
-     * Add or update scan area visualization
-     */
-    updateScanArea(lat, lon, radiusKm) {
-        const scanLayer = this.layers.get('scanArea');
-        scanLayer.clearLayers();
-
-        const circle = L.circle([lat, lon], {
-            color: '#00ff88',
-            fillColor: '#00ff88',
-            fillOpacity: 0.1,
-            weight: 2,
-            radius: radiusKm * 1000
-        });
-
-        const marker = L.circleMarker([lat, lon], {
-            color: '#00ff88',
-            fillColor: '#00ff88',
-            fillOpacity: 0.8,
-            radius: 6,
-            weight: 2
-        });
-
-        scanLayer.addLayer(circle);
-        scanLayer.addLayer(marker);
-
-        return { circle, marker };
     }
 
     /**
@@ -1089,6 +1057,7 @@ class MapVisualization {
     clearAll() {
         this.layers.forEach(layer => layer.clearLayers());
         this.patches.clear();
+        // Clear any remaining references
         
         // Also clear LiDAR heatmap
         this.clearLidarHeatmap();
@@ -1438,12 +1407,13 @@ class MapVisualization {
                     [lat + patchLatDelta, lon + patchLonDelta]
                 ];
                 
-                // Create semi-transparent overlay to show sliding window pattern
+                // Create completely transparent overlay to show sliding window pattern (border only)
                 const overlay = L.rectangle(bounds, {
                     color: '#00ff88',
                     weight: 1,
-                    fillColor: '#00ff88',
-                    fillOpacity: 0.1,
+                    fillColor: 'none',      // No fill color
+                    fillOpacity: 0,         // No fill opacity
+                    fill: false,            // Explicitly disable fill
                     className: 'sliding-window-overlay'
                 });
                 
@@ -1510,24 +1480,46 @@ class MapVisualization {
             console.log('🔥 Processing heatmap tile data:', tileData);
             console.log('🔥 Available keys:', Object.keys(tileData));
             
-            // Calculate tile bounds from center position and size
+            // Calculate tile bounds from center position and size - use ACTUAL tile size, not scan area
             let bounds;
-            if (tileData.scan_bounds) {
-                // Use scan area bounds for heatmap tiles
-                bounds = tileData.scan_bounds;
+            if (tileData.tile_bounds) {
+                bounds = tileData.tile_bounds;
             } else if (tileData.bounds) {
                 bounds = tileData.bounds;
-            } else if (tileData.tile_bounds) {
-                bounds = tileData.tile_bounds;
+            } else if (tileData.center_lat && tileData.center_lon && tileData.tile_size_m) {
+                // Use actual tile size (e.g., 40m, 64m, 128m) NOT scan area size
+                const centerLat = tileData.center_lat;
+                const centerLon = tileData.center_lon;
+                const tileSizeM = tileData.tile_size_m; // This is the individual tile size (e.g., 40m)
+                
+                // Convert tile size in meters to degrees (approximate)
+                const latDelta = tileSizeM / 111000; // ~111km per degree latitude
+                const lonDelta = tileSizeM / (111000 * Math.cos(centerLat * Math.PI / 180));
+                
+                bounds = {
+                    south: centerLat - latDelta / 2,
+                    west: centerLon - lonDelta / 2,
+                    north: centerLat + latDelta / 2,
+                    east: centerLon + lonDelta / 2
+                };
+                
+                console.log(`🔥 Calculated bounds for ${tileSizeM}m tile:`, bounds);
             } else if (tileData.center_lat && tileData.center_lon && tileData.size_m) {
-                // Calculate bounds from center and size
+                // Fallback: use size_m but warn if it seems too large
                 const centerLat = tileData.center_lat;
                 const centerLon = tileData.center_lon;
                 const sizeM = tileData.size_m;
                 
+                // If size_m is larger than 200m, it's probably the scan area, not tile size
+                const actualTileSize = sizeM > 200 ? 40 : sizeM; // Default to 40m if suspiciously large
+                
+                if (sizeM > 200) {
+                    console.warn(`⚠️ Large size_m (${sizeM}m) detected, using 40m tile size instead`);
+                }
+                
                 // Convert size in meters to degrees (approximate)
-                const latDelta = sizeM / 111000; // ~111km per degree latitude
-                const lonDelta = sizeM / (111000 * Math.cos(centerLat * Math.PI / 180));
+                const latDelta = actualTileSize / 111000;
+                const lonDelta = actualTileSize / (111000 * Math.cos(centerLat * Math.PI / 180));
                 
                 bounds = {
                     south: centerLat - latDelta / 2,
@@ -1569,15 +1561,20 @@ class MapVisualization {
                 return;
             }
 
-            // Create canvas element for heatmap
+            // Create canvas element for heatmap - scale based on tile resolution
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // Set canvas dimensions based on data resolution
+            // Set canvas dimensions based on data resolution and tile size
             const dataRows = elevationData.length;
             const dataCols = elevationData[0].length;
-            canvas.width = dataCols * 4; // Scale up for better visualization
-            canvas.height = dataRows * 4;
+            
+            // Scale canvas appropriately - smaller tiles get less pixels
+            const tileSizeM = tileData.tile_size_m || tileData.size_m || 40;
+            const pixelsPerMeter = tileSizeM <= 40 ? 2 : tileSizeM <= 100 ? 1.5 : 1;
+            
+            canvas.width = Math.max(dataCols, tileSizeM * pixelsPerMeter);
+            canvas.height = Math.max(dataRows, tileSizeM * pixelsPerMeter);
 
             // Generate heatmap
             this.renderHeatmapCanvas(ctx, elevationData, canvas.width, canvas.height);
@@ -1604,7 +1601,7 @@ class MapVisualization {
             // Store tile reference
             this.heatmapTiles.set(tileData.tile_id, heatmapOverlay);
 
-            console.log(`✅ Added LiDAR heatmap tile ${tileData.tile_id}`);
+            console.log(`✅ Added LiDAR heatmap tile ${tileData.tile_id} (${tileSizeM}m)`);
 
         } catch (error) {
             console.error(`❌ Failed to add heatmap tile ${tileData.tile_id}:`, error);
@@ -1707,6 +1704,22 @@ class MapVisualization {
     }
 
     /**
+     * Clear elevation data and related overlays
+     */
+    clearElevationData() {
+        // Clear LiDAR heatmap
+        this.clearLidarHeatmap();
+        
+        // Clear any elevation-related layers
+        const elevationLayer = this.layers.get('elevation');
+        if (elevationLayer) {
+            elevationLayer.clearLayers();
+        }
+        
+        console.log('🧹 Cleared elevation data');
+    }
+
+    /**
      * Clear LiDAR heatmap data and sync state
      */
     clearLidarHeatmap() {
@@ -1726,9 +1739,6 @@ class MapVisualization {
         }
         this.isWiping = false;
         this.queueSorted = false;
-        
-        // Clear scan area bounds
-        this.scanAreaBounds = null;
         
         // Remove canvas overlay
         if (this.canvasOverlay) {

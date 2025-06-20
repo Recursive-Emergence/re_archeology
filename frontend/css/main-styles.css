@@ -1097,13 +1097,6 @@ html, body {
     vector-effect: non-scaling-stroke !important; /* Prevent scaling with zoom */
 }
 
-.scan-area-circle {
-    stroke-width: 2 !important;
-    stroke: #00ff88 !important;
-    stroke-opacity: 1.0 !important;
-    vector-effect: non-scaling-stroke !important; /* Prevent scaling with zoom */
-}
-
 /* Enhanced Leaflet Layer Control Styling */
 .leaflet-control-layers {
     background: rgba(26, 26, 26, 0.95) !important;

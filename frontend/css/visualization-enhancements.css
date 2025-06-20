@@ -1,14 +1,20 @@
 /* Enhanced styles for the windmill discovery visualization components */
 
-/* Satellite/Airplane scanning animation */
+/* Satellite/Airplane scanning animation - constrained to scan area only */
 .scanning-icon {
     position: absolute;
     z-index: 1000;
     pointer-events: none;
     font-size: 24px;
-    animation: scanMove 8s linear infinite;
-    transition: all 0.3s ease;
+    /* Remove CSS animation - using JS animation for precise bounds control */
+    transition: opacity 0.3s ease, transform 0.15s ease;
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+    /* Ensure icon never goes outside container */
+    max-width: 30px;
+    max-height: 30px;
+    overflow: visible;
+    /* Prevent multiple icons from accumulating */
+    will-change: transform, opacity;
 }
 
 .scanning-icon.satellite {
@@ -20,32 +26,43 @@
 }
 
 .scanning-icon.high-res {
-    animation-duration: 12s; /* Slower for high-resolution scans */
     font-size: 28px;
 }
 
-@keyframes scanMove {
-    0% {
-        transform: translate(-100px, -100px) rotate(0deg);
-        opacity: 0;
-    }
-    10% {
-        opacity: 1;
-    }
-    90% {
-        opacity: 1;
-    }
-    100% {
-        transform: translate(100vw, 100vh) rotate(360deg);
-        opacity: 0;
-    }
+/* Animation state transitions */
+.scanning-icon[data-state="active"] {
+    opacity: 0.9;
 }
 
-/* LiDAR heatmap tile styles */
+.scanning-icon[data-state="inactive"] {
+    opacity: 0.3;
+}
+
+.scanning-icon[data-state="pulse"] {
+    transform: scale(1.2);
+}
+
+/* Ensure only one scanning icon at a time */
+.leaflet-container .scanning-icon:not(:last-of-type) {
+    display: none !important;
+}
+
+/* Subtle pulse animation for tile processing feedback */
+@keyframes tilePulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+/* LiDAR heatmap tile styles - respect actual tile size */
 .lidar-heatmap-tile {
     pointer-events: none !important;
     opacity: 0;
     transition: opacity 0.5s ease-in-out;
+    /* Ensure tiles maintain their actual size */
+    image-rendering: pixelated; /* For sharp tile boundaries */
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
 }
 
 .lidar-heatmap-tile.visible {
@@ -55,6 +72,15 @@
 .lidar-heatmap-container {
     position: relative;
     overflow: hidden;
+}
+
+/* Tile size indicator for debugging */
+.lidar-heatmap-tile[title*="40m"] {
+    border: 1px solid rgba(255, 255, 0, 0.3); /* Small tiles get yellow border */
+}
+
+.lidar-heatmap-tile[title*="128m"] {
+    border: 1px solid rgba(255, 0, 0, 0.3); /* Large tiles get red border */
 }
 
 /* LiDAR resolution indicator */

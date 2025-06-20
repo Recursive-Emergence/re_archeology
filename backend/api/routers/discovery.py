@@ -488,14 +488,25 @@ async def start_discovery_session(config: Dict[str, Any]):
 
 @router.post("/discovery/stop/{session_id}")
 async def stop_discovery_session(session_id: str):
-    """Stop an active discovery session"""
+    """Stop an active discovery session (works for both DiscoverySession and LiDAR scan sessions)"""
     try:
         if session_id not in active_sessions:
             raise HTTPException(status_code=404, detail="Session not found")
         
         session = active_sessions[session_id]
-        session.status = 'stopped'
-        session.end_time = datetime.now().isoformat()
+        
+        # Handle both DiscoverySession objects and LiDAR scan dictionaries
+        if isinstance(session, dict):
+            # LiDAR scan session (stored as dict)
+            session["status"] = "stopped"
+            session["end_time"] = datetime.now(timezone.utc).isoformat()
+            session_type = session.get("type", "unknown")
+            logger.info(f"🛑 Stopped {session_type} session {session_id}")
+        else:
+            # Regular DiscoverySession object
+            session.status = 'stopped'
+            session.end_time = datetime.now().isoformat()
+            logger.info(f"🛑 Stopped discovery session {session_id}")
         
         await discovery_manager.send_message({
             'type': 'session_stopped',
@@ -505,11 +516,11 @@ async def stop_discovery_session(session_id: str):
         
         return {
             'status': 'success',
-            'message': f'Discovery session {session_id} stopped'
+            'message': f'Session {session_id} stopped successfully'
         }
         
     except Exception as e:
-        logger.error(f"Failed to stop discovery session: {e}")
+        logger.error(f"Failed to stop session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/discovery/sessions")
@@ -1209,14 +1220,16 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         # Process tiles systematically row by row, left to right
         for row in range(tiles_y):
             for col in range(tiles_x):
-                if session_id not in active_sessions:
+                # Check if session still exists and is not stopped
+                current_session = active_sessions.get(session_id)
+                if not current_session or current_session.get("status") == "stopped":
                     logger.info(f"🛑 LiDAR scan {session_id} stopped by user")
                     return
                 
                 # Check for pause state and wait if paused (always get fresh session info)
                 while True:
                     current_session = active_sessions.get(session_id)
-                    if not current_session:
+                    if not current_session or current_session.get("status") == "stopped":
                         logger.info(f"🛑 LiDAR scan {session_id} stopped while checking pause")
                         return
                     
@@ -1242,8 +1255,9 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                 lat_step = (north_lat - south_lat) / tiles_y
                 lon_step = (east_lon - west_lon) / tiles_x
                 
-                tile_lat = south_lat + (row + 0.5) * lat_step
-                tile_lon = west_lon + (col + 0.5) * lon_step
+                # Top-left to bottom-right: row 0 should be at north (top), row N at south (bottom)
+                tile_lat = north_lat - (row + 0.5) * lat_step  # Start from north, go south
+                tile_lon = west_lon + (col + 0.5) * lon_step   # Start from west, go east
                 
                 try:
                     # Force AHN4 high-resolution LiDAR data
