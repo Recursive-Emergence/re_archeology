@@ -952,13 +952,21 @@ class REArchaeologyApp {
         // Store reference
         this.scanningIcon = scanIcon;
         
-        // Initialize animation state
+        // Initialize animation state with adaptive parameters
+        const areaKm = this.selectedArea?.radius || 1;
+        const isHighRes = resolution.includes('0.25');
+        
         this.animationState = {
             tileCount: 0,
             startTime: Date.now(),
             isActive: true,
             iconType: iconType,
-            resolution: resolution
+            resolution: resolution,
+            // Adaptive scanning parameters based on resolution and area
+            cols: isHighRes ? 16 : (areaKm > 2 ? 8 : 12),
+            rows: isHighRes ? 12 : 8,
+            cycleDuration: isHighRes ? 25000 : (areaKm > 2 ? 15000 : 20000),
+            smoothing: isHighRes ? 0.2 : 0.3
         };
         
         // Start animation
@@ -1049,29 +1057,53 @@ class REArchaeologyApp {
                     return;
                 }
                 
-                // Calculate position with grid pattern
+                // Calculate position with serpentine scanning pattern
                 const baseTime = Date.now() - this.animationState.startTime;
-                const progress = (baseTime / 15000) % 1; // 15 second cycle
+                const cycleDuration = this.animationState.cycleDuration || 20000;
+                const progress = (baseTime / cycleDuration) % 1;
                 
-                const cols = 8;
-                const rows = 8;
+                // Use adaptive grid size and serpentine pattern for realistic scanning
+                const cols = this.animationState.cols || 12;
+                const rows = this.animationState.rows || 8;
+                const smoothing = this.animationState.smoothing || 0.3;
+                
                 const totalCells = cols * rows;
                 const currentCell = Math.floor(progress * totalCells) % totalCells;
-                const col = currentCell % cols;
-                const row = Math.floor(currentCell / cols);
                 
-                // Add jitter for natural movement
-                const jitter = 5;
+                // Calculate row and column with serpentine pattern
+                const row = Math.floor(currentCell / cols);
+                let col;
+                
+                // Alternate direction for each row (serpentine pattern)
+                if (row % 2 === 0) {
+                    // Even rows: left to right
+                    col = currentCell % cols;
+                } else {
+                    // Odd rows: right to left
+                    col = cols - 1 - (currentCell % cols);
+                }
+                
+                // Add subtle jitter for natural movement
+                const jitter = 3; // Reduced jitter for smoother movement
                 const jitterX = (Math.random() - 0.5) * jitter;
                 const jitterY = (Math.random() - 0.5) * jitter;
                 
                 // Calculate position with padding
-                const padding = 25;
+                const padding = 30;
                 const usableWidth = scanWidth - (2 * padding);
                 const usableHeight = scanHeight - (2 * padding);
                 
-                const x = minX + padding + (col / Math.max(1, cols - 1)) * usableWidth + jitterX;
-                const y = minY + padding + (row / Math.max(1, rows - 1)) * usableHeight + jitterY;
+                // Smooth interpolation between grid points
+                const baseX = minX + padding + (col / Math.max(1, cols - 1)) * usableWidth;
+                const baseY = minY + padding + (row / Math.max(1, rows - 1)) * usableHeight;
+                
+                // Add smooth transitions between cells
+                const cellProgress = (progress * totalCells) % 1;
+                const transitionX = Math.sin(cellProgress * Math.PI * 2) * smoothing;
+                const transitionY = Math.cos(cellProgress * Math.PI * 2) * smoothing;
+                
+                const x = baseX + transitionX + jitterX;
+                const y = baseY + transitionY + jitterY;
                 
                 // Constrain to bounds
                 const finalX = Math.max(minX + padding, Math.min(maxX - padding, x));
@@ -1086,8 +1118,9 @@ class REArchaeologyApp {
                 const tileLatLng = this.map.containerPointToLatLng([finalX, finalY]);
                 this.drawSatelliteBeam(tileLatLng);
                 
-                // Schedule next update
-                setTimeout(updatePosition, 1000 + Math.random() * 500);
+                // Schedule next update with adaptive timing
+                const updateInterval = 800 + Math.random() * 400; // 800-1200ms for natural variation
+                setTimeout(updatePosition, updateInterval);
                 
             } catch (error) {
                 console.error('❌ Animation error:', error);
