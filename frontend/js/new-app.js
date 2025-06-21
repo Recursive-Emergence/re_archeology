@@ -15,29 +15,35 @@
 
 class REArchaeologyApp {
     constructor() {
+        // Core components
         this.map = null;
+        this.mapVisualization = null;
+        this.websocket = null;
+        
+        // Scan state
         this.scanAreaRectangle = null;
-        this.isScanning = false;
         this.selectedArea = null;
-        this.patches = new Map();
+        this.isScanning = false;
+        
+        // Sessions
+        this.currentLidarHeatmapSession = null;
         this.currentSession = null;
-        this.compactControls = {};
+        
+        // UI elements
+        this.scanningIcon = null;
+        this.resolutionBadge = null;
+        this.satelliteBeam = null;
+        
+        // Data
+        this.patches = new Map();
         this.layers = {
-            scanArea: null,
             patches: null,
             detections: null,
             animations: null
         };
-        this.statusManager = null;
-        this.websocket = null;
-        this.currentUser = null;
-        this.currentLidarSession = null;
-        this.currentLidarHeatmapSession = null;
-        this.mapVisualization = null;
-        this.scanningIcon = null;
-        this.resolutionBadge = null;
-        this.satelliteBeam = null; // For the dynamic beam
-        this.satelliteBeamLatLng = null; // Target tile position
+        
+        // Animation state
+        this.animationState = null;
         
         console.log('🚀 RE-Archaeology App initialized');
     }
@@ -57,13 +63,15 @@ class REArchaeologyApp {
                 });
             }
             
-            // Initialize map first
+            // Initialize components in order
             this.initializeMap();
-            this.initializeLayers(); // <-- Ensure layers are initialized first
-            this.setupDefaultScanArea(); // <-- Now safe to call
+            this.initializeLayers();
+            this.setupDefaultScanArea();
             this.setupEventListeners();
-            this.initializeStatusManager();
-            this.initializeAuth();
+            
+            // Set initial button text
+            const enableDetection = document.getElementById('enableDetection')?.checked || false;
+            this.updateScanButtonText(enableDetection);
             
             console.log('✅ Application initialized successfully');
             
@@ -81,9 +89,9 @@ class REArchaeologyApp {
             throw new Error('Map container not found');
         }
         
-        // Remove old map and controls if they exist
+        // Clean up existing map
         if (container._leaflet_id) {
-            if (container._leaflet_map && typeof container._leaflet_map.remove === 'function') {
+            if (container._leaflet_map?.remove) {
                 container._leaflet_map.remove();
             }
             while (container.firstChild) {
@@ -93,54 +101,23 @@ class REArchaeologyApp {
             delete container._leaflet_map;
         }
         
-        // Prevent double initialization
-        if (container._leaflet_id) {
-            console.warn('Map container is already initialized. Skipping map creation.');
-            // Optionally, you can reuse the existing map instance if needed
-            this.map = container._leaflet_map || null;
-            return;
-        }
-        
         // Ensure container has dimensions
-        container.style.width = '100%';
-        container.style.height = '100vh';
-        container.style.minHeight = '100vh';
-        
-        // Force layout recalculation
-        container.offsetHeight;
+        container.style.cssText = 'width: 100%; height: 100vh; min-height: 100vh;';
+        container.offsetHeight; // Force layout
         
         if (!container.offsetWidth || !container.offsetHeight) {
             throw new Error('Map container has no dimensions');
         }
-        
-        console.log('✅ Container ready:', {
-            width: container.offsetWidth,
-            height: container.offsetHeight
-        });
         
         // Create Leaflet map
         this.map = L.map(container, {
             center: [52.4751, 4.8156],
             zoom: 13,
             zoomControl: true,
-            attributionControl: true,
-            dragging: true,
-            touchZoom: true,
-            doubleClickZoom: true,
-            scrollWheelZoom: true,
-            boxZoom: true,
-            keyboard: true
+            attributionControl: true
         });
         
-        console.log('✅ Leaflet map created');
-        
-        // Add base layers
         this.addBaseLayers();
-        
-        // Initialize layer groups
-        this.initializeLayers();
-        
-        // Setup map events
         this.setupMapEvents();
         
         console.log('✅ Map initialization complete');
@@ -194,7 +171,6 @@ class REArchaeologyApp {
     initializeLayers() {
         console.log('🔧 Initializing layer groups...');
         
-        this.layers.scanArea = L.layerGroup().addTo(this.map);
         this.layers.patches = L.layerGroup().addTo(this.map);
         this.layers.detections = L.layerGroup().addTo(this.map);
         this.layers.animations = L.layerGroup().addTo(this.map);
@@ -233,99 +209,125 @@ class REArchaeologyApp {
         console.log('✅ Default scan area set');
     }
     
-    selectScanArea(lat, lon, radiusKm = null) {
+    selectScanArea(lat, lon, radiusKm = 1) {
         console.log('🎯 Setting scan area:', { lat, lon, radiusKm });
-        
-        const radius = radiusKm || 1; // Default to 1km
         
         // Clear existing scan area rectangle
         if (this.scanAreaRectangle) {
             this.map.removeLayer(this.scanAreaRectangle);
-            this.scanAreaRectangle = null;
         }
         
-        // Calculate rectangle bounds for the scan area (square, not rectangle)
-        const radiusInDegreesLat = radius / 111.32; // Latitude degrees
-        const radiusInDegreesLon = radius / (111.32 * Math.cos(lat * Math.PI / 180)); // Longitude degrees adjusted for latitude
+        // Calculate rectangle bounds
+        const radiusInDegreesLat = radiusKm / 111.32;
+        const radiusInDegreesLon = radiusKm / (111.32 * Math.cos(lat * Math.PI / 180));
         const bounds = [
-            [lat - radiusInDegreesLat, lon - radiusInDegreesLon], // southwest
-            [lat + radiusInDegreesLat, lon + radiusInDegreesLon]  // northeast
+            [lat - radiusInDegreesLat, lon - radiusInDegreesLon],
+            [lat + radiusInDegreesLat, lon + radiusInDegreesLon]
         ];
         
-        // Create scan area rectangle with transparent fill and zoom-responsive border
-        const zoom = this.map.getZoom();
-        const baseWeight = 3;
-        const zoomFactor = Math.pow(2, (zoom - 13) / 3);
-        const borderWeight = Math.max(1, Math.min(6, baseWeight * zoomFactor));
-        
+        // Create scan area rectangle
         this.scanAreaRectangle = L.rectangle(bounds, {
-            color: '#00ff88',           // Green border
-            weight: borderWeight,       // Zoom-responsive border thickness  
-            fillColor: 'none',          // No fill color
-            fillOpacity: 0,             // No fill opacity
-            fill: false,                // Explicitly disable fill
-            opacity: 0.9,              // High border visibility
-            interactive: false          // Don't interfere with map interactions
+            color: '#00ff88',
+            weight: this.calculateOptimalBorderWeight(),
+            fillOpacity: 0,
+            fill: false,
+            opacity: 0.9,
+            interactive: false
         }).addTo(this.map);
         
-        // Add zoom handler to update border thickness
-        this.map.off('zoomend', this.updateScanAreaBorder); // Remove existing handler
-        this.updateScanAreaBorder = () => {
+        // Maintain constant border weight at all zoom levels
+        const updateBorder = () => {
             if (this.scanAreaRectangle) {
-                const currentZoom = this.map.getZoom();
-                const currentZoomFactor = Math.pow(2, (currentZoom - 13) / 3);
-                const currentBorderWeight = Math.max(1, Math.min(6, baseWeight * currentZoomFactor));
-                this.scanAreaRectangle.setStyle({ weight: currentBorderWeight });
+                this.scanAreaRectangle.setStyle({ 
+                    weight: this.calculateOptimalBorderWeight(),
+                    color: '#00ff88',
+                    opacity: 0.9 
+                });
             }
         };
-        this.map.on('zoomend', this.updateScanAreaBorder);
+        this.map.off('zoomend', this.updateScanAreaBorder);
+        this.map.on('zoomend', updateBorder);
+        this.map.on('zoom', updateBorder);
+        this.updateScanAreaBorder = updateBorder;
         
         // Store area data
-        this.selectedArea = {
-            lat, 
-            lon, 
-            radius: radius,
-            bounds: bounds,  // Store the calculated bounds
-            isLocked: this.isScanning
+        this.selectedArea = { lat, lon, radius: radiusKm, bounds, isLocked: this.isScanning };
+        
+        console.log('✅ Scan area rectangle created');
+        this.updateButtonStates();
+    }
+    
+    /**
+     * Zoom map to fit the selected scan area with appropriate padding
+     */
+    zoomToScanArea() {
+        if (!this.selectedArea || !this.selectedArea.bounds) {
+            console.warn('⚠️ No scan area selected for zooming');
+            return;
+        }
+        
+        console.log('🔍 Zooming to scan area:', this.selectedArea);
+        
+        // Convert bounds array to Leaflet LatLngBounds object
+        const bounds = L.latLngBounds(this.selectedArea.bounds);
+        
+        // Fit map to bounds with padding
+        this.map.fitBounds(bounds, {
+            padding: [50, 50], // 50px padding on all sides
+            maxZoom: 16,       // Don't zoom in too much
+            animate: true,     // Smooth zoom animation
+            duration: 1.0      // 1 second animation duration
+        });
+        
+        // Update border weight after zoom animation completes
+        const updateBorderAfterZoom = () => {
+            if (this.scanAreaRectangle) {
+                this.scanAreaRectangle.setStyle({
+                    weight: this.calculateOptimalBorderWeight(),
+                    color: '#00ff88',
+                    opacity: 0.9
+                });
+            }
         };
         
-        console.log('✅ Scan area rectangle created with transparent fill');
-        this.updateButtonStates();
+        // Wait for zoom animation to complete before updating border
+        this.map.once('zoomend', updateBorderAfterZoom);
+        this.map.once('moveend', updateBorderAfterZoom);
+        
+        console.log('✅ Map zoomed to scan area');
     }
     
     setupEventListeners() {
         console.log('🔧 Setting up event listeners...');
         
-        // LiDAR Scan buttons (main functionality)
-        document.getElementById('startLidarScanBtn')?.addEventListener('click', () => {
-            this.startLidarScan();
-        });
+        // LiDAR Scan buttons
+        document.getElementById('startLidarScanBtn')?.addEventListener('click', () => this.startLidarScan());
+        document.getElementById('stopLidarScanBtn')?.addEventListener('click', () => this.stopLidarScan());
+        document.getElementById('clearLidarScanBtn')?.addEventListener('click', () => this.clearLidarScan());
         
-        document.getElementById('stopLidarScanBtn')?.addEventListener('click', () => {
-            this.stopLidarScan();
-        });
-        
-        document.getElementById('clearLidarScanBtn')?.addEventListener('click', () => {
-            this.clearLidarScan();
-        });
-        
-        console.log('🔧 LiDAR button check:', {
-            startBtn: !!document.getElementById('startLidarScanBtn'),
-            stopBtn: !!document.getElementById('stopLidarScanBtn'),
-            clearBtn: !!document.getElementById('clearLidarScanBtn'),
-            enableDetection: !!document.getElementById('enableDetection'),
-            structureType: !!document.getElementById('structureType')
+        // Detection checkbox event listener
+        document.getElementById('enableDetection')?.addEventListener('change', (e) => {
+            this.updateScanButtonText(e.target.checked);
         });
         
         console.log('✅ Event listeners configured');
     }
     
     /**
-     * Start LiDAR scan with optional detection - clean and simplified
+     * Update scan button text based on detection checkbox state
+     */
+    updateScanButtonText(detectionEnabled) {
+        const scanButton = document.getElementById('startLidarScanBtn');
+        if (scanButton) {
+            scanButton.textContent = detectionEnabled ? 'Scan & Detect' : 'Scan';
+        }
+    }
+    
+    /**
+     * Start LiDAR scan with optional detection
      */
     async startLidarScan() {
         if (!this.selectedArea) {
-            console.warn('⚠️ No scan area selected. Please select an area first.');
             alert('Please select a scan area first by clicking on the map.');
             return;
         }
@@ -335,14 +337,33 @@ class REArchaeologyApp {
         
         console.log('🛰️ Starting LiDAR scan:', { enableDetection, structureType });
         
+        // Zoom to scan area first
+        this.zoomToScanArea();
+        
         try {
-            // Determine scan parameters based on zoom and area
-            const scanParams = this.calculateScanParameters();
+            // Wait a bit for zoom to start, then start UI with updated parameters
+            setTimeout(() => {
+                // Recalculate scan parameters after zoom (in case zoom level changed)
+                const scanParams = this.calculateScanParameters();
+                this.startScanUI(scanParams);
+                
+                // Configure and start the backend scan
+                this.startBackendScanAfterDelay(enableDetection, structureType, scanParams);
+            }, 500); // Small delay to let zoom start affecting the parameters
             
-            // Start UI animations and show progress
-            this.startScanUI(scanParams);
-            
-            // Configure and start the scan
+        } catch (error) {
+            console.error('❌ Failed to start LiDAR scan:', error);
+            alert('Failed to start LiDAR scan: ' + error.message);
+            this.cleanupAfterStop();
+        }
+    }
+    
+    /**
+     * Start backend scan after a small delay
+     */
+    async startBackendScanAfterDelay(enableDetection, structureType, scanParams) {
+        try {
+            // Configure scan
             const config = {
                 center_lat: this.selectedArea.lat,
                 center_lon: this.selectedArea.lon,
@@ -355,17 +376,15 @@ class REArchaeologyApp {
                 structure_type: structureType
             };
             
-            // Start the backend scan
+            // Start backend scan
             const result = await this.startBackendScan(config);
-            
-            // Store session and start monitoring
             this.currentLidarHeatmapSession = result.session_id;
             this.monitorLidarHeatmapProgress();
             
             console.log('✅ LiDAR scan started successfully');
             
         } catch (error) {
-            console.error('❌ Failed to start LiDAR scan:', error);
+            console.error('❌ Failed to start backend scan:', error);
             alert('Failed to start LiDAR scan: ' + error.message);
             this.cleanupAfterStop();
         }
@@ -394,6 +413,18 @@ class REArchaeologyApp {
         this.showResolutionBadge(scanParams.resolution);
         this.startScanningAnimation(scanParams.iconType, scanParams.resolution);
         this.updateLidarScanButtonStates(true);
+        
+        // Set scan area to scanning state with consistent border
+        if (this.scanAreaRectangle) {
+            this.scanAreaRectangle.setStyle({
+                color: '#00ff88',
+                weight: this.calculateOptimalBorderWeight(),  // Use helper method
+                fillOpacity: 0,
+                fill: false,
+                opacity: 0.9,
+                interactive: false  // Lock during scan
+            });
+        }
         
         // Initialize map visualization
         if (!this.mapVisualization) {
@@ -425,7 +456,7 @@ class REArchaeologyApp {
     }
     
     /**
-     * Stop LiDAR scan - simplified and clean
+     * Stop LiDAR scan
      */
     async stopLidarScan() {
         console.log('🛑 Stopping LiDAR scan...');
@@ -526,7 +557,13 @@ class REArchaeologyApp {
             startBtn.disabled = isRunning || !this.selectedArea;
             stopBtn.disabled = !isRunning;
             
-            startBtn.textContent = isRunning ? 'Scanning...' : 'Scan';
+            if (isRunning) {
+                startBtn.textContent = 'Scanning...';
+            } else {
+                // Restore the correct button text based on detection state
+                const enableDetection = document.getElementById('enableDetection')?.checked || false;
+                this.updateScanButtonText(enableDetection);
+            }
         }
     }
     
@@ -560,8 +597,6 @@ class REArchaeologyApp {
         if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
             this.connectWebSocket();
         }
-        
-        // WebSocket message handling for LiDAR tiles will be handled in existing WebSocket setup
         console.log('📡 Monitoring LiDAR progress via WebSocket');
     }
     
@@ -578,7 +613,10 @@ class REArchaeologyApp {
         
         // Lock scan area during scanning
         if (this.scanAreaRectangle) {
-            this.scanAreaRectangle.setStyle({ interactive: false });
+            this.scanAreaRectangle.setStyle({ 
+                interactive: false,
+                weight: 2  // Maintain constant border weight
+            });
         }
         
         try {
@@ -624,7 +662,10 @@ class REArchaeologyApp {
             
             // Unlock scan area after error
             if (this.scanAreaRectangle) {
-                this.scanAreaRectangle.setStyle({ interactive: true });
+                this.scanAreaRectangle.setStyle({ 
+                    interactive: true,
+                    weight: 2  // Maintain constant border weight
+                });
             }
         }
     }
@@ -651,7 +692,10 @@ class REArchaeologyApp {
             
             // Unlock scan area after stopping
             if (this.scanAreaRectangle) {
-                this.scanAreaRectangle.setStyle({ interactive: true });
+                this.scanAreaRectangle.setStyle({ 
+                    interactive: true,
+                    weight: 2  // Maintain constant border weight
+                });
             }
             
             console.log('✅ Detection stopped');
@@ -770,7 +814,10 @@ class REArchaeologyApp {
             
             // Unlock scan area after completion
             if (this.scanAreaRectangle) {
-                this.scanAreaRectangle.setStyle({ interactive: true });
+                this.scanAreaRectangle.setStyle({ 
+                    interactive: true,
+                    weight: 2  // Maintain constant border weight
+                });
             }
             
             console.log('✅ Detection completed');
@@ -842,82 +889,34 @@ class REArchaeologyApp {
         // Update LiDAR scan button states
         this.updateLidarScanButtonStates(this.currentLidarHeatmapSession !== null);
     }
-    
-    initializeStatusManager() {
-        console.log('🔧 Initializing status manager...');
-        // Placeholder for status management
-        document.getElementById('sessionStatus').textContent = 'Ready';
-        console.log('✅ Status manager ready');
-    }
-    
-    initializeAuth() {
-        console.log('🔧 Initializing authentication...');
+
+    /**
+     * Cleanup after stopping scan
+     */
+    cleanupAfterStop() {
+        this.isScanning = false;
+        this.currentLidarHeatmapSession = null;
+        this.stopScanningAnimation();
+        this.hideResolutionBadge();
+        this.updateButtonStates();
         
-        // Google OAuth callback with error handling
-        window.handleGoogleLogin = (response) => {
-            try {
-                console.log('✅ Google login successful');
-                this.handleGoogleAuthSuccess(response);
-            } catch (error) {
-                console.error('❌ Google login callback error:', error);
-            }
-        };
-        
-        window.handleGoogleError = (error) => {
-            console.error('❌ Google login failed:', error);
-        };
-        
-        // Handle Google OAuth loading errors
-        window.addEventListener('error', (event) => {
-            if (event.target && event.target.src && event.target.src.includes('accounts.google.com')) {
-                console.warn('⚠️ Google OAuth script loading issue, continuing without authentication');
-            }
-        });
-        
-        console.log('✅ Authentication ready');
-    }
-    
-    handleGoogleAuthSuccess(response) {
-        // Decode JWT token to get user info
-        try {
-            const payload = JSON.parse(atob(response.credential.split('.')[1]));
-            this.currentUser = {
-                id: payload.sub,
-                email: payload.email,
-                name: payload.name,
-                picture: payload.picture
-            };
-            
-            console.log('✅ User authenticated:', this.currentUser.name);
-            this.updateAuthUI();
-            
-        } catch (error) {
-            console.error('❌ Failed to parse auth token:', error);
+        // Reset scan area border to normal state with calibrated weight
+        if (this.scanAreaRectangle) {
+            this.scanAreaRectangle.setStyle({
+                color: '#00ff88',
+                weight: this.calculateOptimalBorderWeight(),  // Use helper method
+                fillOpacity: 0,
+                fill: false,
+                opacity: 0.9,
+                interactive: false  // Keep non-interactive but reset styling
+            });
         }
-    }
-    
-    updateAuthUI() {
-        if (this.currentUser) {
-            // Hide login section
-            document.getElementById('login-section').style.display = 'none';
-            
-            // Show chat input
-            document.getElementById('chat-input-form').style.display = 'flex';
-            document.getElementById('chat-input').disabled = false;
-            document.getElementById('send-btn').disabled = false;
-            
-            // Show user profile
-            document.getElementById('user-profile').style.display = 'block';
-            document.getElementById('user-avatar').src = this.currentUser.picture;
-            document.getElementById('user-name').textContent = this.currentUser.name;
-            document.getElementById('user-email').textContent = this.currentUser.email;
-            document.getElementById('logout-btn').style.display = 'block';
-            
-            // Update welcome message
-            document.getElementById('chat-welcome').innerHTML = `
-                <p>👋 Welcome ${this.currentUser.name}!</p>
-                <p>I'm ready to help with your archaeological discoveries.</p>
-            `;
+        
+        // Reset stop button text
+        const stopBtn = document.getElementById('stopLidarScanBtn');
+        if (stopBtn) {
+            stopBtn.textContent = 'Stop';
+            stopBtn.disabled = true;
         }
     }
     
@@ -925,67 +924,61 @@ class REArchaeologyApp {
      * Start scanning animation with satellite or airplane icon
      */
     startScanningAnimation(iconType = 'satellite', resolution = '0.5m') {
-        // Always remove any existing scanning icon first to prevent duplicates
+        // Remove any existing scanning icon first
         this.stopScanningAnimation();
         
-        // Wait a frame to ensure cleanup is complete
-        requestAnimationFrame(() => {
-            console.log(`🛰️ Creating new ${iconType} scanning animation (${resolution} resolution)`);
-            
-            // Create scanning icon element
-            const scanIcon = document.createElement('div');
-            scanIcon.className = `scanning-icon ${iconType}`;
-            scanIcon.innerHTML = iconType === 'airplane' ? '✈️' : '🛰️';
-            scanIcon.setAttribute('data-animation-id', Date.now()); // Unique ID for debugging
-            
-            // Set CSS styles directly
-            scanIcon.style.cssText = `
-                position: absolute;
-                z-index: 1000;
-                pointer-events: none;
-                font-size: ${resolution.includes('0.25') || resolution.includes('0.1') ? '28px' : '24px'};
-                filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
-                transition: all 0.2s ease;
-                opacity: 0;
-            `;
-            
-            // Position relative to map container
-            const mapContainer = this.map.getContainer();
-            mapContainer.appendChild(scanIcon);
-            
-            // Store reference for cleanup
-            this.scanningIcon = scanIcon;
-            
-            // Initialize animation tracking
-            this.animationState = {
-                tileCount: 0,
-                lastTileTime: Date.now(),
-                startTime: Date.now(),
-                currentTileCenter: null, // Will store [lat, lon] of current tile being processed
-                isActive: true,
-                iconType: iconType,
-                resolution: resolution
-            };
-            
-            // Start with tile-based animation instead of time-based
-            this.animateScanningIconWithTiles(scanIcon, resolution);
-            
-            console.log(`✅ Started ${iconType} scanning animation with ID:`, scanIcon.getAttribute('data-animation-id'));
-        });
+        console.log(`🛰️ Creating ${iconType} scanning animation (${resolution} resolution)`);
+        
+        // Create scanning icon element
+        const scanIcon = document.createElement('div');
+        scanIcon.className = `scanning-icon ${iconType}`;
+        scanIcon.innerHTML = iconType === 'airplane' ? '✈️' : '🛰️';
+        
+        // Set CSS styles
+        scanIcon.style.cssText = `
+            position: absolute;
+            z-index: 1000;
+            pointer-events: none;
+            font-size: ${resolution.includes('0.25') ? '28px' : '24px'};
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+            transition: all 0.2s ease;
+            opacity: 0;
+        `;
+        
+        // Add to map container
+        const mapContainer = this.map.getContainer();
+        mapContainer.appendChild(scanIcon);
+        
+        // Store reference
+        this.scanningIcon = scanIcon;
+        
+        // Initialize animation state
+        this.animationState = {
+            tileCount: 0,
+            startTime: Date.now(),
+            isActive: true,
+            iconType: iconType,
+            resolution: resolution
+        };
+        
+        // Start animation
+        this.animateScanningIcon(scanIcon);
+        
+        console.log(`✅ Started ${iconType} scanning animation`);
     }
     
     /**
-     * Draw or update the satellite beam (white thin line) from the scanning icon to the current tile
-     * @param {L.LatLng} targetLatLng - The lat/lng of the current tile being rendered
+     * Draw satellite beam from icon to target location
      */
     drawSatelliteBeam(targetLatLng) {
         if (!this.map || !this.scanningIcon || !targetLatLng) return;
-        // Remove previous beam if any
+        
+        // Remove previous beam
         if (this.satelliteBeam) {
             this.map.removeLayer(this.satelliteBeam);
-            this.satelliteBeam = null;
         }
-        // Get satellite icon position (center of icon in pixels)
+        
+        // Get satellite icon position
         const mapContainer = this.map.getContainer();
         const iconRect = this.scanningIcon.getBoundingClientRect();
         const mapRect = mapContainer.getBoundingClientRect();
@@ -993,58 +986,51 @@ class REArchaeologyApp {
             iconRect.left + iconRect.width / 2 - mapRect.left,
             iconRect.top + iconRect.height / 2 - mapRect.top
         ];
-        // Convert icon pixel position to lat/lng
+        
+        // Convert to lat/lng
         const iconLatLng = this.map.containerPointToLatLng(iconCenter);
-        // Draw a white polyline from iconLatLng to targetLatLng
-        this.satelliteBeam = L.polyline([
-            iconLatLng,
-            targetLatLng
-        ], {
+        
+        // Draw beam
+        this.satelliteBeam = L.polyline([iconLatLng, targetLatLng], {
             color: '#fff',
             weight: 2,
             opacity: 0.85,
             dashArray: '4, 6',
             interactive: false
         }).addTo(this.map);
-        this.satelliteBeamLatLng = targetLatLng;
     }
 
     /**
-     * Clear the satellite beam from the map
+     * Clear the satellite beam
      */
     clearSatelliteBeam() {
         if (this.satelliteBeam) {
             this.map.removeLayer(this.satelliteBeam);
             this.satelliteBeam = null;
-            this.satelliteBeamLatLng = null;
         }
     }
     
     /**
-     * Animate scanning icon based on tile progress instead of time
+     * Animate scanning icon within scan area
      */
-    animateScanningIconWithTiles(iconElement, resolution) {
+    animateScanningIcon(iconElement) {
         if (!this.selectedArea || !iconElement) return;
-        
-        console.log('🛰️ Starting tile-based animation for selected area:', this.selectedArea);
         
         const map = this.map;
         const bounds = this.selectedArea.bounds;
         
-        // Get scan area bounds in pixels
         const updatePosition = () => {
-            if (!this.scanningIcon || this.scanningIcon !== iconElement || !this.animationState?.isActive) {
+            if (!this.scanningIcon || !this.animationState?.isActive) {
                 this.clearSatelliteBeam();
-                return; // Animation stopped
+                return;
             }
             
             try {
-                // Convert geographic bounds to pixel coordinates
+                // Convert bounds to pixel coordinates
                 const southWest = map.latLngToContainerPoint([bounds[0][0], bounds[0][1]]);
                 const northEast = map.latLngToContainerPoint([bounds[1][0], bounds[1][1]]);
                 
-                if (!southWest || !northEast || isNaN(southWest.x) || isNaN(northEast.y)) {
-                    console.warn('⚠️ Invalid coordinate conversion, retrying...');
+                if (!southWest || !northEast) {
                     setTimeout(updatePosition, 100);
                     return;
                 }
@@ -1063,24 +1049,19 @@ class REArchaeologyApp {
                     return;
                 }
                 
-                // Use a combination of tile count and time to determine position
+                // Calculate position with grid pattern
                 const baseTime = Date.now() - this.animationState.startTime;
-                const timeBasedProgress = (baseTime / 15000) % 1; // 15 second cycle
-                const tileCount = this.animationState.tileCount;
+                const progress = (baseTime / 15000) % 1; // 15 second cycle
                 
-                // Combine time and tile-based movement for smooth animation
                 const cols = 8;
                 const rows = 8;
                 const totalCells = cols * rows;
-                
-                // Use time-based progress but jump ahead with tile updates
-                const effectiveProgress = (timeBasedProgress + (tileCount * 0.1)) % 1;
-                const currentCell = Math.floor(effectiveProgress * totalCells) % totalCells;
+                const currentCell = Math.floor(progress * totalCells) % totalCells;
                 const col = currentCell % cols;
                 const row = Math.floor(currentCell / cols);
                 
-                // Add some randomness to make it look more natural
-                const jitter = 5; // pixels
+                // Add jitter for natural movement
+                const jitter = 5;
                 const jitterX = (Math.random() - 0.5) * jitter;
                 const jitterY = (Math.random() - 0.5) * jitter;
                 
@@ -1088,11 +1069,6 @@ class REArchaeologyApp {
                 const padding = 25;
                 const usableWidth = scanWidth - (2 * padding);
                 const usableHeight = scanHeight - (2 * padding);
-                
-                if (usableWidth <= 0 || usableHeight <= 0) {
-                    setTimeout(updatePosition, 100);
-                    return;
-                }
                 
                 const x = minX + padding + (col / Math.max(1, cols - 1)) * usableWidth + jitterX;
                 const y = minY + padding + (row / Math.max(1, rows - 1)) * usableHeight + jitterY;
@@ -1106,16 +1082,12 @@ class REArchaeologyApp {
                 iconElement.style.top = `${finalY}px`;
                 iconElement.style.opacity = '0.9';
                 
-                // Only draw beam if we don't have real tile data
-                // (Real tile data will update the beam via updateAnimationProgress)
-                if (!this.animationState.currentTileCenter) {
-                    // Fallback: convert satellite pixel position back to lat/lng
-                    const tileLatLng = this.map.containerPointToLatLng([finalX, finalY]);
-                    this.drawSatelliteBeam(tileLatLng);
-                }
+                // Draw beam to current position
+                const tileLatLng = this.map.containerPointToLatLng([finalX, finalY]);
+                this.drawSatelliteBeam(tileLatLng);
                 
                 // Schedule next update
-                setTimeout(updatePosition, 1000 + Math.random() * 500); // Variable timing
+                setTimeout(updatePosition, 1000 + Math.random() * 500);
                 
             } catch (error) {
                 console.error('❌ Animation error:', error);
@@ -1124,74 +1096,35 @@ class REArchaeologyApp {
         };
         
         // Start animation
-        setTimeout(updatePosition, 500); // Initial delay
-        console.log('🛰️ Tile-based animation loop started');
+        setTimeout(updatePosition, 500);
     }
 
     /**
-     * Update animation based on tile progress (called when tiles are received)
+     * Update animation based on tile progress
      */
     updateAnimationProgress(tileData) {
         if (this.animationState && this.animationState.isActive) {
             this.animationState.tileCount++;
-            this.animationState.lastTileTime = Date.now();
             
-            console.log('🛰️ Raw tile data received:', tileData);
-            console.log('🛰️ Available keys:', Object.keys(tileData || {}));
-            
-            // Store the real tile bounds for beam targeting - check multiple possible field names
+            // Extract tile center coordinates
             let tileCenterLat, tileCenterLon;
             
-            if (tileData) {
-                // Method 1: Direct tile bounds
-                if (tileData.tile_bounds) {
-                    const bounds = tileData.tile_bounds;
-                    tileCenterLat = (bounds.north + bounds.south) / 2;
-                    tileCenterLon = (bounds.east + bounds.west) / 2;
-                    console.log('🛰️ Using tile_bounds:', bounds);
-                }
-                // Method 2: Alternative bounds field
-                else if (tileData.bounds) {
-                    const bounds = tileData.bounds;
-                    tileCenterLat = (bounds.north + bounds.south) / 2;
-                    tileCenterLon = (bounds.east + bounds.west) / 2;
-                    console.log('🛰️ Using bounds:', bounds);
-                }
-                // Method 3: Center coordinates
-                else if (tileData.center_lat && tileData.center_lon) {
-                    tileCenterLat = tileData.center_lat;
-                    tileCenterLon = tileData.center_lon;
-                    console.log('🛰️ Using center coordinates:', {lat: tileCenterLat, lon: tileCenterLon});
-                }
-                // Method 4: Southwest/Northeast format
-                else if (tileData.southwest_lat && tileData.northeast_lat) {
-                    tileCenterLat = (tileData.southwest_lat + tileData.northeast_lat) / 2;
-                    tileCenterLon = (tileData.southwest_lon + tileData.northeast_lon) / 2;
-                    console.log('🛰️ Using southwest/northeast format');
-                }
-                // Method 5: Check for nested data
-                else if (tileData.tile_data && tileData.tile_data.bounds) {
-                    const bounds = tileData.tile_data.bounds;
-                    tileCenterLat = (bounds.north + bounds.south) / 2;
-                    tileCenterLon = (bounds.east + bounds.west) / 2;
-                    console.log('🛰️ Using nested tile_data.bounds:', bounds);
-                }
-                
-                if (tileCenterLat && tileCenterLon) {
-                    this.animationState.currentTileCenter = [tileCenterLat, tileCenterLon];
-                    
-                    // Update beam to point to the actual tile being processed
-                    this.drawSatelliteBeam(L.latLng(tileCenterLat, tileCenterLon));
-                    
-                    console.log(`🛰️ Beam updated to tile center: ${tileCenterLat.toFixed(6)}, ${tileCenterLon.toFixed(6)}`);
-                } else {
-                    console.warn('⚠️ Could not extract tile center from data:', tileData);
-                }
+            if (tileData?.tile_bounds) {
+                const bounds = tileData.tile_bounds;
+                tileCenterLat = (bounds.north + bounds.south) / 2;
+                tileCenterLon = (bounds.east + bounds.west) / 2;
+            } else if (tileData?.center_lat && tileData?.center_lon) {
+                tileCenterLat = tileData.center_lat;
+                tileCenterLon = tileData.center_lon;
             }
             
-            // Optional: Add visual feedback for each tile
+            if (tileCenterLat && tileCenterLon) {
+                // Update beam to point to actual tile
+                this.drawSatelliteBeam(L.latLng(tileCenterLat, tileCenterLon));
+            }
+            
+            // Add visual feedback
             if (this.scanningIcon) {
-                // Brief pulse effect when a tile is processed
                 this.scanningIcon.style.transform = 'scale(1.2)';
                 setTimeout(() => {
                     if (this.scanningIcon) {
@@ -1199,8 +1132,6 @@ class REArchaeologyApp {
                     }
                 }, 150);
             }
-            
-            console.log(`🛰️ Animation updated: ${this.animationState.tileCount} tiles processed`);
         }
     }
 
@@ -1215,13 +1146,9 @@ class REArchaeologyApp {
             this.animationState.isActive = false;
         }
         
-        // Remove the scanning icon element
+        // Remove scanning icon
         if (this.scanningIcon) {
-            const animationId = this.scanningIcon.getAttribute('data-animation-id');
-            console.log('🗑️ Removing scanning icon with ID:', animationId);
-            
             try {
-                // Fade out animation
                 this.scanningIcon.style.opacity = '0';
                 setTimeout(() => {
                     if (this.scanningIcon && this.scanningIcon.parentNode) {
@@ -1230,21 +1157,18 @@ class REArchaeologyApp {
                 }, 200);
             } catch (error) {
                 console.warn('⚠️ Error removing scanning icon:', error);
-                // Force removal
                 if (this.scanningIcon && this.scanningIcon.parentNode) {
                     this.scanningIcon.parentNode.removeChild(this.scanningIcon);
                 }
             }
-            
             this.scanningIcon = null;
         }
         
-        // Clean up any orphaned scanning icons in the DOM
+        // Clean up orphaned icons
         const mapContainer = this.map?.getContainer();
         if (mapContainer) {
             const orphanedIcons = mapContainer.querySelectorAll('.scanning-icon');
-            orphanedIcons.forEach((icon, index) => {
-                console.log(`🧹 Removing orphaned scanning icon ${index + 1}`);
+            orphanedIcons.forEach(icon => {
                 try {
                     icon.parentNode.removeChild(icon);
                 } catch (error) {
@@ -1253,13 +1177,11 @@ class REArchaeologyApp {
             });
         }
         
-        // Clear the beam if it's still there
+        // Clear beam and reset state
         this.clearSatelliteBeam();
-        
-        // Reset animation state
         this.animationState = null;
         
-        console.log('✅ Scanning animation stopped and cleaned up');
+        console.log('✅ Scanning animation stopped');
     }
     
     /**
@@ -1340,40 +1262,6 @@ class REArchaeologyApp {
     }
     
     /**
-     * Manual test function for debugging (call from browser console)
-     */
-    testLidarScan() {
-        console.log('🧪 Manual test: Testing LiDAR scan functionality');
-        const enableDetectionCheckbox = document.getElementById('enableDetection');
-        const structureTypeSelect = document.getElementById('structureType');
-        
-        console.log('🧪 LiDAR controls found:', {
-            enableDetection: !!enableDetectionCheckbox,
-            structureType: !!structureTypeSelect
-        });
-        console.log('🧪 Selected area:', this.selectedArea);
-        console.log('🧪 Current sessions:', {
-            heatmap: this.currentLidarHeatmapSession,
-            regular: this.currentLidarSession,
-            detection: this.currentSession
-        });
-        
-        if (enableDetectionCheckbox) {
-            console.log('🧪 Detection enabled:', enableDetectionCheckbox.checked);
-        }
-        if (structureTypeSelect) {
-            console.log('🧪 Structure type:', structureTypeSelect.value);
-        }
-        
-        console.log('🧪 Available test commands:');
-        console.log('  - window.reApp.testBackendConnection()');
-        console.log('  - window.reApp.forceStopAllSessions()');
-        console.log('  - window.reApp.startLidarScan()');
-        console.log('  - window.reApp.stopLidarScan()');
-        console.log('  - window.reApp.clearLidarScan()');
-    }
-    
-    /**
      * Handle WebSocket messages for real-time updates
      */
     handleWebSocketMessage(data) {
@@ -1405,6 +1293,11 @@ class REArchaeologyApp {
                 this.handleSessionComplete(data);
                 break;
                 
+            case 'session_stopped':
+                console.log('🛑 Session stopped via WebSocket:', data);
+                this.handleSessionStopped(data);
+                break;
+                
             case 'error':
                 console.error('❌ WebSocket error message:', data.message);
                 break;
@@ -1419,45 +1312,21 @@ class REArchaeologyApp {
      */
     handleLidarTileUpdate(data) {
         console.log('🗺️ LiDAR tile update:', data);
-        console.log('🗺️ MapVisualization exists:', !!this.mapVisualization);
-        console.log('🗺️ Heatmap mode:', this.mapVisualization?.heatmapMode);
-        console.log('🗺️ Session ID comparison:', {
-            received: data.session_id,
-            heatmapSession: this.currentLidarHeatmapSession,
-            regularSession: this.currentLidarSession
-        });
         
-        // Update animation progress for each tile received
+        // Update animation progress
         this.updateAnimationProgress(data);
         
-        if (this.mapVisualization) {
-            // Check if this is from our heatmap session OR if we're in heatmap mode
-            if (this.mapVisualization.heatmapMode && 
-                (data.session_id === this.currentLidarHeatmapSession || 
-                 !this.currentLidarHeatmapSession)) {
-                console.log('🔥 Routing to heatmap handler');
-                // Handle as heatmap tile
+        if (this.mapVisualization && this.mapVisualization.heatmapMode) {
+            if (data.session_id === this.currentLidarHeatmapSession || !this.currentLidarHeatmapSession) {
                 this.mapVisualization.addLidarHeatmapTile(data);
                 
-                // Update session ID tracking if we don't have it
+                // Update session ID if needed
                 if (!this.currentLidarHeatmapSession) {
                     this.currentLidarHeatmapSession = data.session_id;
-                    console.log('🔥 Updated heatmap session ID to:', data.session_id);
                 }
-            } else if (data.session_id === this.currentLidarSession) {
-                console.log('📊 Routing to regular elevation handler');
-                // Handle as regular elevation tile
-                this.mapVisualization.addLidarTile(data);
-            } else {
-                console.warn('⚠️ Received lidar_tile for unknown session:', data.session_id);
-                console.warn('⚠️ Known sessions:', {
-                    heatmap: this.currentLidarHeatmapSession,
-                    regular: this.currentLidarSession
-                });
             }
         } else {
             console.error('❌ MapVisualization not available for lidar tile');
-            console.error('❌ Available window objects:', Object.keys(window).filter(k => k.includes('Map') || k.includes('Visual')));
         }
     }
     
@@ -1506,7 +1375,10 @@ class REArchaeologyApp {
             
             // Unlock scan area when session stops
             if (this.scanAreaRectangle) {
-                this.scanAreaRectangle.setStyle({ interactive: true });
+                this.scanAreaRectangle.setStyle({ 
+                    interactive: true,
+                    weight: 2  // Maintain constant border weight
+                });
             }
         }
         
@@ -1523,235 +1395,84 @@ class REArchaeologyApp {
     }
     
     /**
-     * Test backend connectivity and available endpoints
+     * Handle session stopped message from WebSocket
      */
-    async testBackendConnection() {
-        console.log('🔬 Testing backend connection...');
+    handleSessionStopped(data) {
+        console.log('🛑 Session stopped via WebSocket:', data);
         
-        const testEndpoints = [
-            `${window.AppConfig.apiBase}/health`,
-            `${window.AppConfig.apiBase}/status`,
-            `${window.AppConfig.apiBase}/discovery/status`,
-            `${window.AppConfig.apiBase}/discovery/sessions`
-        ];
-        
-        for (const endpoint of testEndpoints) {
-            try {
-                const response = await fetch(endpoint, {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log(`✅ ${endpoint}:`, data);
-                } else {
-                    console.warn(`⚠️ ${endpoint}: ${response.status} ${response.statusText}`);
-                }
-            } catch (error) {
-                console.error(`❌ ${endpoint}:`, error.message);
-            }
-        }
-        
-        // Test WebSocket connection
-        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-            console.log('✅ WebSocket: Connected');
-        } else {
-            console.warn('⚠️ WebSocket: Not connected');
-        }
-    }
-
-    /**
-     * Global function for toggling collapsible control groups
-     * Called from HTML onclick handlers
-     */
-    toggleControlGroup(headerElement) {
-        const controlGroup = headerElement.parentElement;
-        const content = controlGroup.querySelector('.control-content');
-        const toggleIcon = headerElement.querySelector('.toggle-icon');
-        
-        if (!content || !toggleIcon) return;
-        
-        const isCollapsed = controlGroup.classList.contains('collapsed');
-        
-        if (isCollapsed) {
-            // Expand
-            controlGroup.classList.remove('collapsed');
-            toggleIcon.textContent = '▼';
-        } else {
-            // Collapse
-            controlGroup.classList.add('collapsed');
-            toggleIcon.textContent = '▶';
-        }
-    }
-    
-    /**
-     * Force stop all active sessions - simplified and clean
-     */
-    async forceStopAllSessions() {
-        console.log('🚨 Force stopping all sessions...');
-        
-        // Collect all active session IDs
-        const sessions = [
-            this.currentLidarHeatmapSession,
-            this.currentLidarSession,
-            this.currentSession
-        ].filter(Boolean);
-        
-        if (sessions.length === 0) {
-            console.log('ℹ️ No active sessions to stop');
-            this.cleanupAfterStop();
-            return;
-        }
-        
-        // Stop each session using the correct endpoint
-        for (const sessionId of sessions) {
-            console.log(`🛑 Stopping session: ${sessionId}`);
+        if (data.session_id === this.currentSession) {
+            this.isScanning = false;
+            this.currentSession = null;
+            this.updateButtonStates();
             
-            try {
-                const response = await fetch(`${window.AppConfig.apiBase}/discovery/stop/${sessionId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+            // Unlock scan area when session stops
+            if (this.scanAreaRectangle) {
+                this.scanAreaRectangle.setStyle({ 
+                    interactive: true,
+                    weight: this.calculateOptimalBorderWeight()
                 });
-                
-                if (response.ok) {
-                    console.log(`✅ Session ${sessionId} stopped successfully`);
-                } else if (response.status === 404) {
-                    console.log(`ℹ️ Session ${sessionId} already stopped`);
-                } else {
-                    console.warn(`⚠️ Failed to stop session ${sessionId}: ${response.status}`);
-                }
-            } catch (error) {
-                console.warn(`⚠️ Error stopping session ${sessionId}:`, error.message);
             }
         }
         
-        // Clean up all state
-        this.cleanupAfterStop();
-        console.log('✅ Force stop completed');
+        if (data.session_id === this.currentLidarSession) {
+            this.currentLidarSession = null;
+            // Keep elevation layer active but stop monitoring
+        }
+        
+        if (data.session_id === this.currentLidarHeatmapSession) {
+            this.currentLidarHeatmapSession = null;
+            this.stopScanningAnimation();
+            this.hideResolutionBadge();
+            this.updateButtonStates();
+            
+            // Reset scan area border
+            if (this.scanAreaRectangle) {
+                this.scanAreaRectangle.setStyle({
+                    color: '#00ff88',
+                    weight: this.calculateOptimalBorderWeight(),
+                    fillOpacity: 0,
+                    fill: false,
+                    opacity: 0.9,
+                    interactive: false
+                });
+            }
+            
+            // Reset stop button
+            const stopBtn = document.getElementById('stopLidarScanBtn');
+            if (stopBtn) {
+                stopBtn.textContent = 'Stop';
+                stopBtn.disabled = true;
+            }
+        }
     }
     
     /**
-     * Clean up UI and state after stopping sessions
+     * Calculate optimal border weight based on current zoom level
+     * @returns {number} The optimal border weight
      */
-    cleanupAfterStop() {
-        // Clear all session IDs
-        this.currentLidarHeatmapSession = null;
-        this.currentLidarSession = null;
-        this.currentSession = null;
+    calculateOptimalBorderWeight() {
+        if (!this.map) return 2;
         
-        // Update UI
-        this.updateLidarScanButtonStates(false);
-        this.stopScanningAnimation();
-        this.hideResolutionBadge();
-        this.clearSatelliteBeam();
+        const zoom = this.map.getZoom();
+        
+        if (zoom >= 18) {
+            return 1.5;  // Thinner at very high zoom
+        } else if (zoom <= 10) {
+            return 2.5;  // Slightly thicker at low zoom for visibility
+        } else {
+            return 2;    // Standard weight for medium zoom levels
+        }
     }
+    
 }
 
-// Make function globally available
-window.toggleControlGroup = REArchaeologyApp.prototype.toggleControlGroup;
-
-// Initialize application when DOM is ready
+// Initialize the application when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         console.log('🌟 Starting RE-Archaeology Framework...');
         
         window.reApp = new REArchaeologyApp();
-        window.testApp = window.reApp; // For easier console access
         await window.reApp.init();
-        
-        // Add debugging methods to global scope for easy console access
-        window.debugScan = {
-            start: () => window.reApp.startLidarScan(),
-            stop: () => window.reApp.stopLidarScan(),
-            clear: () => window.reApp.clearLidarScan(),
-            testBackend: () => window.reApp.testBackendConnection(),
-            forceStop: () => window.reApp.forceStopAllSessions(),
-            checkMapViz: () => {
-                console.log('🔧 MapVisualization check:');
-                console.log('  - Available:', !!window.reApp.mapVisualization);
-                console.log('  - Heatmap mode:', window.reApp.mapVisualization?.heatmapMode);
-                console.log('  - Animation state:', window.reApp.animationState);
-                console.log('  - Sessions:', {
-                    heatmap: window.reApp.currentLidarHeatmapSession,
-                    regular: window.reApp.currentLidarSession
-                });
-                console.log('  - WebSocket state:', window.reApp.websocket?.readyState);
-            },
-            simulateTile: () => {
-                if (window.reApp.currentLidarHeatmapSession) {
-                    const mockTile = {
-                        type: 'lidar_tile',
-                        session_id: window.reApp.currentLidarHeatmapSession,
-                        tile_bounds: {
-                            south: 52.470,
-                            north: 52.480,
-                            west: 4.810,
-                            east: 4.820
-                        },
-                        elevation_data: []
-                    };
-                    window.reApp.handleLidarTileUpdate(mockTile);
-                } else {
-                    console.warn('No active session');
-                }
-            },
-            animationInfo: () => {
-                console.log('🛰️ Animation State:', window.reApp.animationState);
-                console.log('🛰️ Scanning Icon:', !!window.reApp.scanningIcon);
-                console.log('🛰️ Satellite Beam:', !!window.reApp.satelliteBeam);
-                console.log('🛰️ Sessions:', {
-                    heatmap: window.reApp.currentLidarHeatmapSession,
-                    regular: window.reApp.currentLidarSession,
-                    detection: window.reApp.currentSession
-                });
-                if (window.reApp.scanningIcon) {
-                    const rect = window.reApp.scanningIcon.getBoundingClientRect();
-                    const mapContainer = window.reApp.map.getContainer();
-                    const mapRect = mapContainer.getBoundingClientRect();
-                    const iconCenter = [
-                        rect.left + rect.width / 2 - mapRect.left,
-                        rect.top + rect.height / 2 - mapRect.top
-                    ];
-                    const iconLatLng = window.reApp.map.containerPointToLatLng(iconCenter);
-                    console.log('🛰️ Icon position (pixels):', { x: rect.left, y: rect.top });
-                    console.log('🛰️ Icon position (lat/lng):', iconLatLng);
-                }
-                if (window.reApp.satelliteBeam) {
-                    const beamLatLngs = window.reApp.satelliteBeam.getLatLngs();
-                    console.log('🛰️ Beam from:', beamLatLngs[0], 'to:', beamLatLngs[1]);
-                }
-                if (window.reApp.animationState?.currentTileCenter) {
-                    const [lat, lon] = window.reApp.animationState.currentTileCenter;
-                    console.log('🛰️ Current tile center:', {lat, lon});
-                    console.log('🛰️ Current tile center (formatted):', `${lat.toFixed(6)}, ${lon.toFixed(6)}`);
-                } else {
-                    console.log('🛰️ No current tile center available');
-                }
-            },
-            cleanupOrphanedIcons: () => {
-                const mapContainer = window.reApp.map?.getContainer();
-                if (mapContainer) {
-                    const icons = mapContainer.querySelectorAll('.scanning-icon');
-                    console.log(`🧹 Found ${icons.length} scanning icons`);
-                    icons.forEach((icon, i) => {
-                        console.log(`🧹 Removing icon ${i + 1}`);
-                        icon.remove();
-                    });
-                }
-            }
-        };
-        
-        console.log('🧪 Debug commands available: window.debugScan');
-        console.log('  - debugScan.start() - Start scan');
-        console.log('  - debugScan.stop() - Stop scan');
-        console.log('  - debugScan.clear() - Clear results');
-        console.log('  - debugScan.checkMapViz() - Check MapVisualization');
-        console.log('  - debugScan.simulateTile() - Simulate tile update');
-        console.log('  - debugScan.animationInfo() - Show animation state');
-        console.log('  - debugScan.cleanupOrphanedIcons() - Remove orphaned icons');
         
         console.log('🎉 Application started successfully!');
         
@@ -1770,16 +1491,5 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </button>
             </div>
         `;
-    }
-});
-
-// Initialize the application when DOM is ready
-window.addEventListener('DOMContentLoaded', async () => {
-    try {
-        window.reArchaeologyApp = new REArchaeologyApp();
-        await window.reArchaeologyApp.init();
-        console.log('🎉 RE-Archaeology App ready!');
-    } catch (error) {
-        console.error('❌ Failed to initialize RE-Archaeology App:', error);
     }
 });
