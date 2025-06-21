@@ -19,6 +19,10 @@ class REArchaeologyApp {
         // Session management
         this.currentLidarSession = null;
         
+        // Authentication state
+        this.currentUser = null;
+        this.accessToken = null;
+        
         // UI elements
         this.scanningIcon = null;
         this.resolutionBadge = null;
@@ -52,6 +56,9 @@ class REArchaeologyApp {
             this.setupDefaultScanArea();
             this.setupEventListeners();
             this.updateScanButtonText(false);
+            
+            // Initialize authentication
+            await this.initializeAuth();
             
             window.Logger?.app('info', 'Application initialized successfully');
             
@@ -103,7 +110,7 @@ class REArchaeologyApp {
         this.addBaseLayers();
         this.setupMapEvents();
         
-        console.log('✅ Map initialization complete');
+        window.Logger?.map('info', 'Map initialization complete');
     }
 
     cleanupExistingMap(container) {
@@ -156,7 +163,7 @@ class REArchaeologyApp {
     }
 
     initializeLayers() {
-        console.log('🔧 Initializing layer groups...');
+        window.Logger?.map('info', 'Initializing layer groups...');
         
         this.layers.patches = L.layerGroup().addTo(this.map);
         this.layers.detections = L.layerGroup().addTo(this.map);
@@ -167,7 +174,7 @@ class REArchaeologyApp {
         // Ctrl+Click for scan area selection
         this.map.on('click', (e) => {
             if (e.originalEvent.ctrlKey && !this.isScanning) {
-                console.log('🎯 Ctrl+Click detected, setting scan area');
+                window.Logger?.map('info', 'Ctrl+Click detected, setting scan area');
                 this.selectScanArea(e.latlng.lat, e.latlng.lng);
             }
         });
@@ -185,6 +192,29 @@ class REArchaeologyApp {
         document.getElementById('enableDetection')?.addEventListener('change', (e) => {
             this.updateScanButtonText(e.target.checked);
         });
+
+        // Chat form event listener
+        document.getElementById('chat-input-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleChatSubmit();
+        });
+    }
+
+    // ========================================
+    // MAP VISUALIZATION INITIALIZATION
+    // ========================================
+
+    initializeMapVisualization() {
+        if (!this.mapVisualization && window.MapVisualization) {
+            window.Logger?.app('info', 'Initializing MapVisualization...');
+            this.mapVisualization = new window.MapVisualization(this.map);
+            window.Logger?.app('info', 'MapVisualization initialized successfully');
+        } else if (!window.MapVisualization) {
+            window.Logger?.app('error', 'MapVisualization class not available');
+            console.error('❌ MapVisualization class not found - scanning will not work properly');
+        } else {
+            window.Logger?.app('debug', 'MapVisualization already initialized');
+        }
     }
 
     // ========================================
@@ -192,7 +222,7 @@ class REArchaeologyApp {
     // ========================================
 
     selectScanArea(lat, lon, radiusKm = 1) {
-        console.log('🎯 Setting scan area:', { lat, lon, radiusKm });
+        window.Logger?.map('info', 'Setting scan area', { lat, lon, radiusKm });
         
         // Clear existing area
         if (this.scanAreaRectangle) {
@@ -204,6 +234,7 @@ class REArchaeologyApp {
 
         // Calculate bounds
         const bounds = this.calculateAreaBounds(lat, lon, radiusKm);
+        const radiusInDegreesLat = radiusKm / 111.32;
         
         // Create rectangle
         this.scanAreaRectangle = L.rectangle(bounds, {
@@ -215,24 +246,31 @@ class REArchaeologyApp {
             interactive: false
         }).addTo(this.map);
 
-        // Add scan area label
-        const scanLabel = L.marker([lat, lon], {
+        // Add scan area label at the bottom rim of the selected area
+        const bottomRimLat = lat - radiusInDegreesLat; // Bottom edge of the scan area
+        const scanLabel = L.marker([bottomRimLat, lon], {
             icon: L.divIcon({
                 className: 'scan-area-label',
-                html: `<div style="
-                    background: rgba(0, 0, 0, 0.8); 
+                html: `<div id="scan-area-label-text" style="
+                    background: rgba(0, 0, 0, 0.85); 
                     color: #00ff88; 
-                    padding: 4px 8px; 
-                    border-radius: 12px; 
+                    padding: 6px 12px; 
+                    border-radius: 16px; 
                     font-size: 11px; 
                     font-weight: 600;
                     border: 1px solid #00ff88;
-                    backdrop-filter: blur(4px);
+                    backdrop-filter: blur(6px);
                     white-space: nowrap;
-                    transform: translateY(-10px);
+                    transform: translateY(100%);
+                    text-align: center;
+                    box-shadow: 0 2px 8px rgba(0, 255, 136, 0.3);
+                    min-width: 120px;
+                    max-width: 200px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 ">📡 Scan Area (${radiusKm}km)</div>`,
-                iconSize: [80, 20],
-                iconAnchor: [40, 10]
+                iconSize: [200, 30],
+                iconAnchor: [100, 0]
             }),
             interactive: false
         }).addTo(this.map);
@@ -293,12 +331,32 @@ class REArchaeologyApp {
         });
     }
 
+    updateScanAreaLabel(resolution = null) {
+        if (!this.scanAreaLabel) return;
+        
+        const radiusKm = this.selectedArea?.radius || 1;
+        let labelText = `📡 Scan Area (${radiusKm}km)`;
+        
+        if (resolution && resolution !== 'Determining...') {
+            labelText += ` • ${resolution}`;
+        }
+        
+        // Update the label content
+        const labelElement = document.getElementById('scan-area-label-text');
+        if (labelElement) {
+            labelElement.innerHTML = labelText;
+        }
+    }
+
     // ========================================
     // LIDAR SCANNING
     // ========================================
 
     async startLidarScan() {
+        window.Logger?.lidar('info', 'Starting LiDAR scan...');
+        
         if (!this.selectedArea) {
+            window.Logger?.lidar('warn', 'No scan area selected');
             alert('Please select a scan area first by Ctrl+clicking on the map.');
             return;
         }
@@ -306,20 +364,27 @@ class REArchaeologyApp {
         const enableDetection = document.getElementById('enableDetection')?.checked || false;
         const structureType = document.getElementById('structureType')?.value || 'windmill';
         
-        console.log('🛰️ Starting LiDAR scan:', { enableDetection, structureType });
+        window.Logger?.lidar('info', 'Scan configuration', { enableDetection, structureType, selectedArea: this.selectedArea });
+        
+        console.log('🛰️ Starting LiDAR scan:', { enableDetection, structureType, selectedArea: this.selectedArea });
 
         try {
             // Zoom to area and start UI
             this.zoomToScanArea();
             
             setTimeout(async () => {
+                window.Logger?.lidar('debug', 'Building scan configuration...');
                 const config = this.buildScanConfig(enableDetection, structureType);
+                window.Logger?.lidar('debug', 'Scan config built', config);
                 
-                // Start scan UI with initial estimate
+                // Start scan UI
+                window.Logger?.lidar('debug', 'Starting scan UI...');
                 this.startScanUI();
                 
                 // Start backend scan
+                window.Logger?.lidar('info', 'Starting backend scan...');
                 const result = await this.startBackendScan(config);
+                window.Logger?.lidar('info', 'Backend scan started', { session_id: result.session_id });
                 this.currentLidarSession = result.session_id;
                 
                 // Update with actual resolution from backend
@@ -328,6 +393,7 @@ class REArchaeologyApp {
                     this.updateAnimationForResolution(result.actual_resolution, result.is_high_resolution);
                 }
                 
+                console.log('🔌 Connecting WebSocket...');
                 this.connectWebSocket();
                 console.log('✅ LiDAR scan started successfully');
                 
@@ -419,7 +485,7 @@ class REArchaeologyApp {
     }
 
     async clearLidarScan() {
-        console.log('🧹 Clearing LiDAR scan results...');
+        window.Logger?.lidar('info', 'Clearing LiDAR scan results...');
         
         await this.stopLidarScan();
         
@@ -435,6 +501,9 @@ class REArchaeologyApp {
         
         // Reset sessions
         this.currentLidarSession = null;
+        
+        // Reset scan area label to original state
+        this.updateScanAreaLabel();
     }
 
     // ========================================
@@ -512,8 +581,11 @@ class REArchaeologyApp {
 
     updateResolutionDisplay(actualResolution) {
         if (actualResolution && actualResolution !== 'Determining...') {
-            // Just log the resolution, don't show badge
-            console.log(`📊 LiDAR resolution detected: ${actualResolution}`);
+            // Update scan area label with resolution
+            this.updateScanAreaLabel(actualResolution);
+            
+            // Log the resolution
+            window.Logger?.lidar('info', `LiDAR resolution detected: ${actualResolution}`);
         }
     }
 
@@ -521,34 +593,24 @@ class REArchaeologyApp {
         if (!this.animationState || !actualResolution) return;
         
         // Use backend-provided flag as the single source of truth
-        const isHighRes = isHighResolution !== null ? isHighResolution : false; // Conservative fallback
+        const isHighRes = isHighResolution !== null ? isHighResolution : false;
         const newIconType = isHighRes ? 'airplane' : 'satellite';
         
-        console.log(`🔄 Resolution update: "${actualResolution}" -> ${isHighRes ? 'HIGH-RES' : 'LOW-RES'} -> ${newIconType.toUpperCase()}`);
-        console.log(`   - Backend provided is_high_resolution: ${isHighResolution}`);
+        window.Logger?.animation('info', `Resolution update: "${actualResolution}" -> ${isHighRes ? 'HIGH-RES' : 'LOW-RES'} -> ${newIconType.toUpperCase()}`);
         
         if (this.animationState.iconType !== newIconType) {
-            console.log(`🔄 Switching icon from ${this.animationState.iconType} to ${newIconType}`);
+            window.Logger?.animation('info', `Switching icon from ${this.animationState.iconType} to ${newIconType}`);
             
             this.animationState.iconType = newIconType;
             this.animationState.actualResolution = actualResolution;
             
             // Update the visual icon immediately
             if (this.scanningIcon) {
-                this.scanningIcon.innerHTML = isHighRes ? '✈️' : '🛰️';
+                this.scanningIcon.innerHTML = isHighRes ? '🚁' : '🛰️';
                 this.scanningIcon.className = `scanning-icon ${newIconType}`;
                 this.scanningIcon.style.fontSize = isHighRes ? '32px' : '28px';
             }
         }
-    }
-
-    /**
-     * This method is no longer used - backend provides the authoritative is_high_resolution flag
-     * Keeping for backward compatibility only
-     */
-    isHighResolutionData(actualResolution) {
-        console.log(`⚠️ Using fallback resolution detection - backend should provide is_high_resolution flag`);
-        return false; // Always default to satellite when backend flag is missing
     }
 
     // ========================================
@@ -558,15 +620,15 @@ class REArchaeologyApp {
     startScanningAnimation(iconType = 'satellite') {
         this.stopScanningAnimation();
         
-        console.log(`🛰️ Starting ${iconType} static animation`);
+        window.Logger?.animation('info', `Starting ${iconType} scanning animation`);
         
         // Create static icon positioned at top-center of map
         const scanIcon = document.createElement('div');
         scanIcon.className = `scanning-icon ${iconType}`;
-        scanIcon.innerHTML = iconType === 'airplane' ? '✈️' : '🛰️';
+        scanIcon.innerHTML = iconType === 'airplane' ? '🚁' : '🛰️';
         scanIcon.style.cssText = `
             position: absolute;
-            top: 15px;
+            top: 20px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 1500;
@@ -621,12 +683,6 @@ class REArchaeologyApp {
         };
         
         setTimeout(pulseAnimation, 1000);
-    }
-
-    animateScanningIcon(iconElement) {
-        // This method is now replaced by the simpler startIdleAnimation
-        // Keep for backward compatibility but redirect to idle animation
-        this.startIdleAnimation(iconElement);
     }
 
     stopScanningAnimation() {
@@ -708,9 +764,10 @@ class REArchaeologyApp {
         // Get icon position from its fixed location at top-center
         const mapContainer = this.map.getContainer();
         
-        // Icon is positioned at top: 15px, left: 50% (center)
-        const iconCenterX = mapContainer.offsetWidth / 2;
-        const iconCenterY = 15 + 25; // top + padding/icon height estimate
+        // Icon is positioned at top: 40px, left: 50% (center)
+        // Beam starts from below the icon with some offset
+        const iconCenterX = mapContainer.offsetWidth / 2 +10;
+        const iconCenterY = 40 + 45; // top position + icon height + offset for looser attachment
         
         const iconLatLng = this.map.containerPointToLatLng([iconCenterX, iconCenterY]);
         
@@ -947,20 +1004,375 @@ class REArchaeologyApp {
     }
 
     // ========================================
-    // MAP VISUALIZATION
+    // AUTHENTICATION
     // ========================================
 
-    initializeMapVisualization() {
-        if (window.MapVisualization) {
+    async initializeAuth() {
+        window.Logger?.app('info', 'Initializing authentication...');
+        
+        // Set up Google Sign-In callback
+        this.setupGoogleAuth();
+        
+        // Check for stored token
+        const storedToken = localStorage.getItem('auth_token');
+        if (storedToken) {
             try {
-                this.mapVisualization = new window.MapVisualization(this.map);
-                console.log('✅ MapVisualization initialized');
+                await this.validateStoredToken(storedToken);
             } catch (error) {
-                console.error('❌ Failed to initialize MapVisualization:', error);
-                this.mapVisualization = null;
+                window.Logger?.app('warn', 'Stored token validation failed:', error);
+                localStorage.removeItem('auth_token');
             }
+        }
+    }
+
+    async validateStoredToken(token) {
+        try {
+            const response = await fetch(`${window.AppConfig.apiBase}/auth/validate`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.accessToken = token;
+                this.currentUser = data.user;
+                this.updateAuthUI();
+                window.Logger?.app('info', 'User authenticated from stored token');
+                return true;
+            } else {
+                throw new Error('Token validation failed');
+            }
+        } catch (error) {
+            window.Logger?.app('error', 'Token validation error:', error);
+            throw error;
+        }
+    }
+
+    setupGoogleAuth() {
+        // Make handleGoogleLogin available globally
+        window.handleGoogleLogin = this.handleGoogleLogin.bind(this);
+        window.Logger?.app('info', 'Google Auth callback registered');
+    }
+
+    async handleGoogleLogin(response) {
+        window.Logger?.app('info', 'Processing Google login response...');
+        
+        try {
+            // Send the Google credential to our backend
+            const authResponse = await fetch(`${window.AppConfig.apiBase}/auth/google`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    token: response.credential
+                })
+            });
+
+            if (!authResponse.ok) {
+                const errorData = await authResponse.json();
+                throw new Error(errorData.detail || 'Authentication failed');
+            }
+
+            const authData = await authResponse.json();
+            
+            // Store authentication data
+            this.accessToken = authData.access_token;
+            this.currentUser = authData.user;
+            
+            // Store token for persistence
+            localStorage.setItem('auth_token', this.accessToken);
+            
+            // Update UI
+            this.updateAuthUI();
+            
+            window.Logger?.app('info', `User authenticated: ${this.currentUser.email}`);
+            
+        } catch (error) {
+            window.Logger?.app('error', 'Google authentication failed:', error);
+            this.showAuthError(error.message);
+        }
+    }
+
+    updateAuthUI() {
+        if (!this.currentUser) {
+            this.showLoginSection();
+            return;
+        }
+
+        // Hide login section
+        const loginSection = document.getElementById('login-section');
+        if (loginSection) {
+            loginSection.style.display = 'none';
+        }
+
+        // Show user profile
+        const userProfile = document.getElementById('user-profile');
+        if (userProfile) {
+            userProfile.style.display = 'block';
+        }
+
+        // Update user profile information
+        const userAvatar = document.getElementById('user-avatar');
+        const userName = document.getElementById('user-name');
+        const userEmail = document.getElementById('user-email');
+        const logoutBtn = document.getElementById('logout-btn');
+
+        if (userAvatar && this.currentUser.picture) {
+            userAvatar.src = this.currentUser.picture;
+            userAvatar.alt = this.currentUser.name;
+        }
+
+        if (userName) {
+            userName.textContent = this.currentUser.name;
+        }
+
+        if (userEmail) {
+            userEmail.textContent = this.currentUser.email;
+        }
+
+        if (logoutBtn) {
+            logoutBtn.style.display = 'block';
+            logoutBtn.onclick = () => this.handleLogout();
+        }
+
+        // Show chat input
+        const chatForm = document.getElementById('chat-input-form');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        if (chatForm) {
+            chatForm.style.display = 'flex';
+        }
+
+        if (chatInput) {
+            chatInput.disabled = false;
+            chatInput.placeholder = 'Ask Bella about discoveries...';
+        }
+
+        if (sendBtn) {
+            sendBtn.disabled = false;
+        }
+
+        // Update welcome message
+        const chatWelcome = document.getElementById('chat-welcome');
+        if (chatWelcome) {
+            chatWelcome.innerHTML = `
+                <p>👋 Welcome back, ${this.currentUser.name}!</p>
+                <p class="small">I'm Bella, your AI assistant for RE-Archaeology. How can I help you today?</p>
+            `;
+        }
+    }
+
+    showLoginSection() {
+        const loginSection = document.getElementById('login-section');
+        const userProfile = document.getElementById('user-profile');
+        const chatForm = document.getElementById('chat-input-form');
+
+        if (loginSection) {
+            loginSection.style.display = 'block';
+        }
+
+        if (userProfile) {
+            userProfile.style.display = 'none';
+        }
+
+        if (chatForm) {
+            chatForm.style.display = 'none';
+        }
+
+        // Reset welcome message
+        const chatWelcome = document.getElementById('chat-welcome');
+        if (chatWelcome) {
+            chatWelcome.innerHTML = `
+                <p>👋 Hi! I'm Bella, your AI assistant for RE-Archaeology.</p>
+                <p class="small">Sign in to start our conversation!</p>
+            `;
+        }
+    }
+
+    showAuthError(message) {
+        alert(`Authentication Error: ${message}`);
+    }
+
+    async handleLogout() {
+        try {
+            // Call logout endpoint
+            if (this.accessToken) {
+                await fetch(`${window.AppConfig.apiBase}/auth/logout`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+            }
+        } catch (error) {
+            window.Logger?.app('warn', 'Logout API call failed:', error);
+        } finally {
+            // Clear local state regardless of API call success
+            this.accessToken = null;
+            this.currentUser = null;
+            localStorage.removeItem('auth_token');
+            
+            // Update UI
+            this.showLoginSection();
+            
+            window.Logger?.app('info', 'User logged out');
+        }
+    }
+
+    // ========================================
+    // CHAT FUNCTIONALITY
+    // ========================================
+
+    async handleChatSubmit() {
+        const chatInput = document.getElementById('chat-input');
+        if (!chatInput) return;
+
+        const message = chatInput.value.trim();
+        if (!message) return;
+
+        // Clear input
+        chatInput.value = '';
+
+        // Add user message to chat
+        this.addChatMessage('user', message);
+
+        if (!this.currentUser || !this.accessToken) {
+            this.addChatMessage('assistant', "I'm sorry, but you need to be signed in to chat with me. Please sign in with your Google account.");
+            return;
+        }
+
+        try {
+            // Show typing indicator
+            this.showTypingIndicator();
+
+            // Send message to backend
+            const response = await fetch(`${window.AppConfig.apiBase}/ai/message`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: message,
+                    context: {
+                        scanning: this.isScanning,
+                        scan_area: this.selectedArea
+                    }
+                })
+            });
+
+            this.hideTypingIndicator();
+
+            if (response.ok) {
+                const data = await response.json();
+                this.addChatMessage('assistant', data.response);
+            } else {
+                throw new Error(`Chat API error: ${response.status}`);
+            }
+
+        } catch (error) {
+            this.hideTypingIndicator();
+            window.Logger?.app('error', 'Chat error:', error);
+            this.addChatMessage('assistant', "I'm sorry, I'm having trouble connecting right now. Please try again later.");
+        }
+    }
+
+    addChatMessage(role, content) {
+        const chatMessages = document.getElementById('chat-messages');
+        if (!chatMessages) return;
+
+        // Hide welcome message if it exists
+        const chatWelcome = document.getElementById('chat-welcome');
+        if (chatWelcome && role === 'user') {
+            chatWelcome.style.display = 'none';
+        }
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${role}-message`;
+        
+        if (role === 'user') {
+            messageDiv.innerHTML = `
+                <div class="message-content user-content">
+                    <div class="message-text">${this.escapeHtml(content)}</div>
+                </div>
+            `;
         } else {
-            console.warn('⚠️ MapVisualization not available');
+            messageDiv.innerHTML = `
+                <div class="message-content assistant-content">
+                    <div class="assistant-icon">🤖</div>
+                    <div class="message-text">${this.escapeHtml(content)}</div>
+                </div>
+            `;
+        }
+
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    showTypingIndicator() {
+        const chatMessages = document.getElementById('chat-messages');
+        if (!chatMessages) return;
+
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'chat-message typing-indicator';
+        typingDiv.id = 'typing-indicator';
+        typingDiv.innerHTML = `
+            <div class="message-content assistant-content">
+                <div class="assistant-icon">🤖</div>
+                <div class="message-text">
+                    <div class="typing-dots">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        chatMessages.appendChild(typingDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    hideTypingIndicator() {
+        const typingIndicator = document.getElementById('typing-indicator');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ========================================
+    // INITIALIZATION
+    // ========================================
+
+    async init() {
+        try {
+            window.Logger?.app('info', 'Starting application initialization...');
+            
+            await this.waitForDOM();
+            this.initializeMap();
+            this.initializeLayers();
+            this.setupDefaultScanArea();
+            this.setupEventListeners();
+            this.updateScanButtonText(false);
+            
+            // Initialize authentication
+            await this.initializeAuth();
+            
+            window.Logger?.app('info', 'Application initialized successfully');
+            
+        } catch (error) {
+            console.error('❌ Application initialization failed:', error);
+            throw error;
         }
     }
 }
