@@ -1131,6 +1131,17 @@ async def start_lidar_scan(
         center_lon = float(config.get('center_lon', 4.8156))
         radius_km = float(config.get('radius_km', 2.0))
         tile_size_m = int(config.get('tile_size_m', 64))  # Smaller default for streaming
+        prefer_high_resolution = config.get('prefer_high_resolution', False)
+        
+        # Determine optimal resolution based on preference and area size
+        if prefer_high_resolution:
+            preferred_resolution = 0.25  # High resolution for detailed areas
+        elif radius_km <= 1.0:
+            preferred_resolution = 0.5   # Medium resolution for small areas
+        else:
+            preferred_resolution = 1.0   # Standard resolution for large areas
+        
+        logger.info(f"🎯 Using preferred resolution: {preferred_resolution}m/px (high_res_requested: {prefer_high_resolution})")
         
         # Calculate scanning parameters
         radius_m = radius_km * 1000
@@ -1144,6 +1155,7 @@ async def start_lidar_scan(
             "type": "lidar_scan",
             "status": "started",
             "config": config,
+            "preferred_resolution": preferred_resolution,  # Store preferred resolution
             "start_time": datetime.now(timezone.utc).isoformat(),
             "total_tiles": scan_grid_size * scan_grid_size,
             "processed_tiles": 0,
@@ -1166,7 +1178,8 @@ async def start_lidar_scan(
             "session_id": session_id,
             "status": "started",
             "message": f"LiDAR scan started for {scan_grid_size}x{scan_grid_size} tiles",
-            "total_tiles": scan_grid_size * scan_grid_size
+            "total_tiles": scan_grid_size * scan_grid_size,
+            "actual_resolution": f"{preferred_resolution}m"
         }
         
     except Exception as e:
@@ -1187,6 +1200,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         tile_size_m = int(config.get('tile_size_m', 64))  # Smaller for streaming
         data_type = config.get('data_type', 'DSM')
         streaming_mode = config.get('streaming_mode', True)  # Enable by default
+        preferred_resolution = session_info.get('preferred_resolution', 1.0)  # Get from session info
         
         # Calculate scan area bounds (should match the green rectangle)
         radius_m = radius_km * 1000
@@ -1260,16 +1274,13 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                 tile_lon = west_lon + (col + 0.5) * lon_step   # Start from west, go east
                 
                 try:
-                    # Force AHN4 high-resolution LiDAR data
-                    # Use reasonable resolution to avoid Earth Engine limits
-                    preferred_resolution = max(1.0, tile_size_m / 256.0)  # Keep under 256x256 pixels
-                    
+                    # Use the preferred resolution determined at scan start
+                    # Don't override with calculation - let backend determine optimal resolution
                     elevation_data = LidarMapFactory.get_patch(
                         lat=tile_lat,
                         lon=tile_lon,
                         size_m=tile_size_m,
                         preferred_resolution_m=preferred_resolution,
-                        exact_dataset_name="AHN4",  # Force AHN4 (real LiDAR)
                         preferred_data_type=data_type
                     )
                     
@@ -1302,6 +1313,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "center_lon": tile_lon,
                             "size_m": tile_size_m,
                             "has_data": True,
+                            "actual_resolution": f"{preferred_resolution}m",  # Include actual resolution used
                             "grid_row": row,                 # Add grid position for visual effects
                             "grid_col": col,
                             "grid_total_rows": tiles_y,
@@ -1338,6 +1350,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "center_lon": tile_lon,
                             "size_m": tile_size_m,
                             "has_data": False,
+                            "actual_resolution": f"{preferred_resolution}m",  # Include resolution even for no-data tiles
                             "grid_row": row,                 # Add grid position for visual effects
                             "grid_col": col,
                             "grid_total_rows": tiles_y,
@@ -1365,6 +1378,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         "processed_tiles": session_info["processed_tiles"],
                         "total_tiles": session_info["total_tiles"],
                         "progress_percent": (session_info["processed_tiles"] / session_info["total_tiles"]) * 100,
+                        "actual_resolution": f"{preferred_resolution}m",  # Include resolution in progress updates
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }
                     

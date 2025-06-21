@@ -117,6 +117,14 @@ class REArchaeologyApp {
             attributionControl: true
         });
         
+        // Add scale indicator
+        L.control.scale({
+            position: 'bottomleft',
+            metric: true,
+            imperial: true,
+            maxWidth: 200
+        }).addTo(this.map);
+        
         this.addBaseLayers();
         this.setupMapEvents();
         
@@ -363,7 +371,7 @@ class REArchaeologyApp {
      */
     async startBackendScanAfterDelay(enableDetection, structureType, scanParams) {
         try {
-            // Configure scan
+            // Configure scan - let backend determine optimal resolution
             const config = {
                 center_lat: this.selectedArea.lat,
                 center_lon: this.selectedArea.lon,
@@ -371,7 +379,7 @@ class REArchaeologyApp {
                 tile_size_m: scanParams.tileSize,
                 heatmap_mode: true,
                 streaming_mode: true,
-                resolution: scanParams.resolution,
+                prefer_high_resolution: scanParams.requestHighRes, // Hint for backend
                 enable_detection: enableDetection,
                 structure_type: structureType
             };
@@ -379,9 +387,16 @@ class REArchaeologyApp {
             // Start backend scan
             const result = await this.startBackendScan(config);
             this.currentLidarHeatmapSession = result.session_id;
+            
+            // Update UI with actual resolution returned by backend
+            if (result.actual_resolution) {
+                this.updateResolutionDisplay(result.actual_resolution);
+                this.updateAnimationForResolution(result.actual_resolution);
+            }
+            
             this.monitorLidarHeatmapProgress();
             
-            console.log('✅ LiDAR scan started successfully');
+            console.log('✅ LiDAR scan started successfully with resolution:', result.actual_resolution);
             
         } catch (error) {
             console.error('❌ Failed to start backend scan:', error);
@@ -392,17 +407,19 @@ class REArchaeologyApp {
     
     /**
      * Calculate scan parameters based on zoom level and area
+     * Frontend is now resolution-agnostic - let backend determine best resolution
      */
     calculateScanParameters() {
         const zoomLevel = this.map.getZoom();
         const areaKm = this.selectedArea.radius;
         
+        // Frontend only determines UI parameters - backend will choose optimal resolution
         if (zoomLevel >= 16 || areaKm <= 0.5) {
-            return { tileSize: 32, resolution: '0.25m', iconType: 'airplane' };
+            return { tileSize: 32, iconType: 'airplane', requestHighRes: true };
         } else if (zoomLevel >= 14 || areaKm <= 2) {
-            return { tileSize: 64, resolution: '0.5m', iconType: 'satellite' };
+            return { tileSize: 64, iconType: 'satellite', requestHighRes: false };
         } else {
-            return { tileSize: 128, resolution: '1m', iconType: 'satellite' };
+            return { tileSize: 128, iconType: 'satellite', requestHighRes: false };
         }
     }
     
@@ -410,8 +427,9 @@ class REArchaeologyApp {
      * Start UI elements for scan
      */
     startScanUI(scanParams) {
-        this.showResolutionBadge(scanParams.resolution);
-        this.startScanningAnimation(scanParams.iconType, scanParams.resolution);
+        // Start with placeholder resolution - will be updated when backend responds
+        this.showResolutionBadge('Determining...');
+        this.startScanningAnimation(scanParams.iconType, null); // No resolution yet
         this.updateLidarScanButtonStates(true);
         
         // Set scan area to scanning state with consistent border
@@ -923,23 +941,23 @@ class REArchaeologyApp {
     /**
      * Start scanning animation with satellite or airplane icon
      */
-    startScanningAnimation(iconType = 'satellite', resolution = '0.5m') {
+    startScanningAnimation(iconType = 'satellite', actualResolution = null) {
         // Remove any existing scanning icon first
         this.stopScanningAnimation();
         
-        console.log(`🛰️ Creating ${iconType} scanning animation (${resolution} resolution)`);
+        console.log(`🛰️ Creating ${iconType} scanning animation`);
         
         // Create scanning icon element
         const scanIcon = document.createElement('div');
         scanIcon.className = `scanning-icon ${iconType}`;
         scanIcon.innerHTML = iconType === 'airplane' ? '✈️' : '🛰️';
         
-        // Set CSS styles
+        // Set CSS styles - size based on icon type, not resolution
         scanIcon.style.cssText = `
             position: absolute;
             z-index: 1000;
             pointer-events: none;
-            font-size: ${resolution.includes('0.25') ? '28px' : '24px'};
+            font-size: ${iconType === 'airplane' ? '28px' : '24px'};
             filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
             transition: all 0.2s ease;
             opacity: 0;
@@ -954,15 +972,15 @@ class REArchaeologyApp {
         
         // Initialize animation state with adaptive parameters
         const areaKm = this.selectedArea?.radius || 1;
-        const isHighRes = resolution.includes('0.25');
+        const isHighRes = iconType === 'airplane'; // Use icon type as high-res indicator
         
         this.animationState = {
             tileCount: 0,
             startTime: Date.now(),
             isActive: true,
             iconType: iconType,
-            resolution: resolution,
-            // Adaptive scanning parameters based on resolution and area
+            actualResolution: actualResolution,
+            // Adaptive scanning parameters based on icon type and area
             cols: isHighRes ? 16 : (areaKm > 2 ? 8 : 12),
             rows: isHighRes ? 12 : 8,
             cycleDuration: isHighRes ? 25000 : (areaKm > 2 ? 15000 : 20000),
@@ -1346,6 +1364,12 @@ class REArchaeologyApp {
     handleLidarTileUpdate(data) {
         console.log('🗺️ LiDAR tile update:', data);
         
+        // Update resolution display if we receive resolution info from first tile
+        if (data.actual_resolution && !this.animationState?.actualResolution) {
+            this.updateResolutionDisplay(data.actual_resolution);
+            this.updateAnimationForResolution(data.actual_resolution);
+        }
+        
         // Update animation progress
         this.updateAnimationProgress(data);
         
@@ -1379,6 +1403,12 @@ class REArchaeologyApp {
      */
     handleLidarProgressUpdate(data) {
         console.log('📊 LiDAR progress:', data);
+        
+        // Update resolution display if we receive resolution info
+        if (data.actual_resolution && !this.animationState?.actualResolution) {
+            this.updateResolutionDisplay(data.actual_resolution);
+            this.updateAnimationForResolution(data.actual_resolution);
+        }
         
         // Check if this progress update is for our current heatmap session
         if (data.session_id === this.currentLidarHeatmapSession || 
@@ -1494,6 +1524,36 @@ class REArchaeologyApp {
             return 2.5;  // Slightly thicker at low zoom for visibility
         } else {
             return 2;    // Standard weight for medium zoom levels
+        }
+    }
+    
+    /**
+     * Update resolution display with actual resolution from backend
+     */
+    updateResolutionDisplay(actualResolution) {
+        if (this.resolutionBadge && actualResolution) {
+            this.resolutionBadge.innerHTML = `LiDAR: ${actualResolution}`;
+            console.log(`📊 Updated resolution display: ${actualResolution}`);
+        }
+    }
+    
+    /**
+     * Update animation parameters based on actual resolution from backend
+     */
+    updateAnimationForResolution(actualResolution) {
+        if (this.animationState && actualResolution) {
+            this.animationState.actualResolution = actualResolution;
+            
+            // Adjust animation if we now know it's high resolution
+            const isHighRes = actualResolution.includes('0.25') || actualResolution.includes('0.1');
+            if (isHighRes && this.animationState.iconType !== 'airplane') {
+                // Fine-tune parameters for high resolution
+                this.animationState.cols = Math.min(16, this.animationState.cols + 4);
+                this.animationState.rows = Math.min(12, this.animationState.rows + 2);
+                this.animationState.smoothing = 0.2;
+            }
+            
+            console.log(`🎯 Updated animation for resolution: ${actualResolution}`);
         }
     }
     
