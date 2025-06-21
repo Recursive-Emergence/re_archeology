@@ -1,6 +1,7 @@
 import numpy as np
 import logging
 from typing import Dict, Optional, List, Any
+from dataclasses import dataclass
 
 from .registry import METADATA_REGISTRY, DatasetMetadata, get_dataset_by_name
 from .connectors import CONNECTOR_MAP, LidarConnector
@@ -11,6 +12,44 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 DEFAULT_DATA_TYPE = "DSM" # Default data type to fetch if not specified
+
+@dataclass
+class LidarPatchResult:
+    """Result containing both elevation data and metadata from LiDAR fetch operation."""
+    data: np.ndarray
+    source_dataset: str
+    resolution_m: float
+    resolution_description: str  # e.g., "0.5m", "30m"
+    is_high_resolution: bool
+    data_type: str  # e.g., "DSM", "DTM"
+    
+    @property
+    def shape(self) -> tuple:
+        return self.data.shape
+
+def _format_resolution(resolution_m: float) -> str:
+    """Format resolution as a human-readable string."""
+    if resolution_m < 1.0:
+        if resolution_m == 0.5:
+            return "0.5m"
+        else:
+            return f"{resolution_m:.1f}m"
+    else:
+        return f"{int(resolution_m)}m"
+
+def _is_high_resolution(resolution_m: float, dataset_name: str) -> bool:
+    """Determine if a dataset is considered high-resolution."""
+    # High-resolution threshold: anything 2m or better
+    # Also explicitly recognize known high-res datasets
+    if resolution_m <= 2.0:
+        return True
+    
+    # Known high-resolution datasets (even if resolution might be slightly > 2m)
+    high_res_datasets = ['AHN4', 'AHN3', 'AHN2']
+    if dataset_name in high_res_datasets:
+        return True
+    
+    return False
 
 # Global cache instance
 _cache_instance: Optional[LidarTileCache] = None
@@ -38,7 +77,7 @@ class LidarMapFactory:
                   preferred_resolution_m: Optional[float] = None,
                   exact_dataset_name: Optional[str] = None,
                   preferred_data_type: Optional[str] = None,
-                  use_cache: bool = True) -> Optional[np.ndarray]:
+                  use_cache: bool = True) -> Optional[LidarPatchResult]:
         """
         Fetches a LIDAR data patch for the given location and parameters with cloud caching.
 
@@ -60,8 +99,8 @@ class LidarMapFactory:
             cache_strategy: Cache strategy to use ("local", "gcs", "hybrid").
 
         Returns:
-            A NumPy array containing the elevation data, or None if no suitable
-            data could be fetched.
+            A LidarPatchResult containing the elevation data and metadata (resolution, 
+            source dataset, etc.), or None if no suitable data could be fetched.
         """
         
         data_type_to_fetch = (preferred_data_type or DEFAULT_DATA_TYPE).upper()
@@ -116,7 +155,17 @@ class LidarMapFactory:
                     source=ds_meta.name
                 )
                 if cached_data is not None:
-                    return cached_data
+                    # Cache returns raw numpy array, wrap it in LidarPatchResult
+                    logger.info(f"✅ Using cached data from {ds_meta.name}. Shape: {cached_data.shape}")
+                    result = LidarPatchResult(
+                        data=cached_data,
+                        source_dataset=ds_meta.name,
+                        resolution_m=ds_meta.resolution_m,
+                        resolution_description=_format_resolution(ds_meta.resolution_m),
+                        is_high_resolution=_is_high_resolution(ds_meta.resolution_m, ds_meta.name),
+                        data_type=data_type_to_fetch
+                    )
+                    return result
             
             logger.info(f"Attempting to use dataset: {ds_meta.name} (Resolution: {ds_meta.resolution_m}m) for data type '{data_type_to_fetch}'")
             ConnectorClass = CONNECTOR_MAP.get(ds_meta.access_method)
@@ -150,7 +199,17 @@ class LidarMapFactory:
                             tile_data=patch_data
                         )
                     
-                    return patch_data
+                    # Create result with metadata
+                    result = LidarPatchResult(
+                        data=patch_data,
+                        source_dataset=ds_meta.name,
+                        resolution_m=ds_meta.resolution_m,
+                        resolution_description=_format_resolution(ds_meta.resolution_m),
+                        is_high_resolution=_is_high_resolution(ds_meta.resolution_m, ds_meta.name),
+                        data_type=data_type_to_fetch
+                    )
+                    
+                    return result
                 else:
                     logger.warning(f"Failed to fetch '{data_type_to_fetch}' patch from {ds_meta.name} or data was empty. Trying next candidate.")
             except Exception as e:
@@ -159,6 +218,24 @@ class LidarMapFactory:
 
         logger.error(f"Exhausted all {len(candidate_datasets)} candidate datasets. Could not fetch '{data_type_to_fetch}' LIDAR data for location ({lat:.4f}, {lon:.4f}).")
         return None
+
+    @staticmethod
+    def get_patch_data_only(lat: float, 
+                           lon: float, 
+                           size_m: int = 128, 
+                           preferred_resolution_m: Optional[float] = None,
+                           exact_dataset_name: Optional[str] = None,
+                           preferred_data_type: Optional[str] = None,
+                           use_cache: bool = True) -> Optional[np.ndarray]:
+        """
+        Backward-compatible method that returns only the numpy array data.
+        
+        This method is for existing code that expects just the elevation data array.
+        For new code, use get_patch() which returns LidarPatchResult with metadata.
+        """
+        result = LidarMapFactory.get_patch(lat, lon, size_m, preferred_resolution_m, 
+                                         exact_dataset_name, preferred_data_type, use_cache)
+        return result.data if result else None
 
     @staticmethod
     def get_cache_stats() -> Dict[str, Any]:

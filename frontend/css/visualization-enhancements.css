@@ -1,46 +1,47 @@
 /* Enhanced styles for the windmill discovery visualization components */
 
+/* CSS Custom Properties for consistent theming */
+:root {
+    --panel-bg: rgba(45, 45, 45, 0.9);
+    --panel-bg-dark: rgba(26, 26, 26, 0.9);
+    --panel-bg-darker: rgba(0, 0, 0, 0.8);
+    --border-subtle: rgba(255, 255, 255, 0.1);
+    --border-normal: #404040;
+    --accent-primary: #00ff88;
+    --accent-alpha: rgba(0, 255, 136, 0.2);
+    --text-muted: #aaa;
+    --text-secondary: #ccc;
+    --shadow-normal: 0 2px 8px rgba(0, 255, 136, 0.3);
+    --shadow-strong: 0 8px 32px rgba(0, 0, 0, 0.8);
+    --transition-fast: 0.15s ease;
+    --transition-normal: 0.3s ease;
+    --border-radius-sm: 4px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+}
+
 /* Satellite/Airplane scanning animation - constrained to scan area only */
 .scanning-icon {
     position: absolute;
     z-index: 1000;
     pointer-events: none;
     font-size: 24px;
-    /* Remove CSS animation - using JS animation for precise bounds control */
-    transition: opacity 0.3s ease, transform 0.15s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
-    /* Ensure icon never goes outside container */
     max-width: 30px;
     max-height: 30px;
     overflow: visible;
-    /* Prevent multiple icons from accumulating */
+    transition: opacity var(--transition-normal), transform var(--transition-fast);
+    filter: drop-shadow(0 2px 4px var(--panel-bg-darker));
     will-change: transform, opacity;
 }
 
-.scanning-icon.satellite {
-    content: '🛰️';
-}
-
-.scanning-icon.airplane {
-    content: '✈️';
-}
-
-.scanning-icon.high-res {
-    font-size: 28px;
-}
+.scanning-icon.satellite { content: '🛰️'; }
+.scanning-icon.airplane { content: '✈️'; }
+.scanning-icon.high-res { font-size: 28px; }
 
 /* Animation state transitions */
-.scanning-icon[data-state="active"] {
-    opacity: 0.9;
-}
-
-.scanning-icon[data-state="inactive"] {
-    opacity: 0.3;
-}
-
-.scanning-icon[data-state="pulse"] {
-    transform: scale(1.2);
-}
+.scanning-icon[data-state="active"] { opacity: 0.9; }
+.scanning-icon[data-state="inactive"] { opacity: 0.3; }
+.scanning-icon[data-state="pulse"] { transform: scale(1.2); }
 
 /* Ensure only one scanning icon at a time */
 .leaflet-container .scanning-icon:not(:last-of-type) {
@@ -49,9 +50,8 @@
 
 /* Subtle pulse animation for tile processing feedback */
 @keyframes tilePulse {
-    0% { transform: scale(1); }
+    0%, 100% { transform: scale(1); }
     50% { transform: scale(1.2); }
-    100% { transform: scale(1); }
 }
 
 /* LiDAR heatmap tile styles - respect actual tile size */
@@ -59,48 +59,41 @@
     pointer-events: none !important;
     opacity: 0;
     transition: opacity 0.5s ease-in-out;
-    /* Ensure tiles maintain their actual size */
     image-rendering: pixelated; /* For sharp tile boundaries */
     image-rendering: -moz-crisp-edges;
     image-rendering: crisp-edges;
+    image-rendering: -webkit-optimize-contrast;
 }
 
-.lidar-heatmap-tile.visible {
-    opacity: 0.8;
-}
-
-.lidar-heatmap-container {
-    position: relative;
-    overflow: hidden;
-}
+.lidar-heatmap-tile.visible { opacity: 0.8; }
+.lidar-heatmap-container { position: relative; overflow: hidden; }
 
 /* Tile size indicator for debugging */
-.lidar-heatmap-tile[title*="40m"] {
-    border: 1px solid rgba(255, 255, 0, 0.3); /* Small tiles get yellow border */
-}
-
-.lidar-heatmap-tile[title*="128m"] {
-    border: 1px solid rgba(255, 0, 0, 0.3); /* Large tiles get red border */
-}
+.lidar-heatmap-tile[title*="40m"] { border: 1px solid rgba(255, 255, 0, 0.3); }
+.lidar-heatmap-tile[title*="128m"] { border: 1px solid rgba(255, 0, 0, 0.3); }
 
 /* LiDAR resolution indicator */
 .lidar-resolution-badge {
     position: absolute;
     top: 10px;
     right: 10px;
-    background: rgba(0, 0, 0, 0.8);
+    background: var(--panel-bg-darker);
     color: white;
     padding: 4px 8px;
-    border-radius: 12px;
+    border-radius: var(--border-radius-lg);
     font-size: 12px;
     z-index: 500;
     backdrop-filter: blur(4px);
 }
 
+/* ===========================================
+   ELEVATION GRID COMPONENTS
+   =========================================== */
+
 .elevation-cell {
     transition: all 0.2s ease;
     cursor: pointer;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-subtle);
     position: relative;
     min-height: 20px;
     display: flex;
@@ -115,10 +108,15 @@
 
 .elevation-cell:hover {
     transform: scale(1.1);
-    border-color: #00ff88;
+    border-color: var(--accent-primary);
     z-index: 10;
-    box-shadow: 0 2px 8px rgba(0, 255, 136, 0.3);
+    box-shadow: var(--shadow-normal);
     font-size: 10px; /* Show text on hover */
+}
+
+.elevation-cell:focus {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 1px;
 }
 
 .elevation-indicator {
@@ -136,8 +134,8 @@
     margin-bottom: 16px;
     padding: 12px;
     background: rgba(0, 0, 0, 0.3);
-    border-radius: 8px;
-    border: 1px solid #404040;
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--border-normal);
 }
 
 .grid-title {
@@ -148,29 +146,39 @@
 }
 
 .grid-title h4 {
-    color: #00ff88;
+    color: var(--accent-primary);
     margin: 0;
     font-size: 16px;
 }
 
-.detection-status {
+/* Detection Status Badges - Reusable Component */
+.detection-status,
+.status-badge {
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: var(--border-radius-sm);
     font-weight: bold;
     font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
-.detection-status.positive {
-    background: rgba(0, 255, 136, 0.2);
-    color: #00ff88;
-    border: 1px solid #00ff88;
+.detection-status.positive,
+.status-badge.positive {
+    background: var(--accent-alpha);
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
 }
 
-.detection-status.negative {
+.detection-status.negative,
+.status-badge.negative {
     background: rgba(136, 136, 136, 0.2);
     color: #888;
     border: 1px solid #888;
 }
+
+/* ===========================================
+   LEGEND COMPONENTS
+   =========================================== */
 
 .elevation-legend {
     display: flex;
@@ -179,7 +187,7 @@
 }
 
 .legend-label {
-    color: #ccc;
+    color: var(--text-secondary);
     font-size: 12px;
     font-weight: 600;
 }
@@ -202,26 +210,36 @@
         rgb(180, 120, 80), 
         rgb(140, 100, 80)
     );
-    border-radius: 8px;
-    border: 1px solid #404040;
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--border-normal);
 }
 
-.legend-min, .legend-max {
-    color: #aaa;
+.legend-min, 
+.legend-max {
+    color: var(--text-muted);
     font-size: 11px;
     font-family: 'Courier New', monospace;
 }
+
+/* ===========================================
+   POPUP & MODAL COMPONENTS  
+   =========================================== */
 
 .patch-popup {
     max-width: 300px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+.patch-popup.extended {
+    max-width: 400px;
+    min-width: 350px;
+}
+
 .patch-popup h4 {
     margin: 0 0 12px 0;
-    color: #00ff88;
+    color: var(--accent-primary);
     font-size: 16px;
-    border-bottom: 1px solid #404040;
+    border-bottom: 1px solid var(--border-normal);
     padding-bottom: 8px;
 }
 
@@ -237,7 +255,7 @@
 }
 
 .info-row span:first-child {
-    color: #aaa;
+    color: var(--text-muted);
     font-weight: 500;
 }
 
@@ -246,40 +264,31 @@
     font-weight: 600;
 }
 
-.info-row .positive {
-    color: #00ff88;
-}
+.info-row .positive { color: var(--accent-primary); }
+.info-row .negative { color: #ff6b6b; }
 
-.info-row .negative {
-    color: #ff6b6b;
-}
-
-.popup-actions {
-    text-align: center;
-    padding-top: 8px;
-    border-top: 1px solid #404040;
-}
-
+.popup-actions,
 .popup-footer {
     text-align: center;
     padding-top: 8px;
-    border-top: 1px solid #404040;
-    font-style: italic;
-}
-
-.popup-footer {
-    text-align: center;
-    padding-top: 8px;
-    border-top: 1px solid #404040;
+    border-top: 1px solid var(--border-normal);
     margin-top: 8px;
 }
 
+.popup-footer {
+    font-style: italic;
+}
+
+/* ===========================================
+   BUTTON COMPONENTS
+   =========================================== */
+
 .btn-small {
     padding: 6px 12px;
-    background: #00ff88;
+    background: var(--accent-primary);
     color: #000;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--border-radius-sm);
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
@@ -291,36 +300,12 @@
     transform: translateY(-1px);
 }
 
-.coords-display {
-    font-family: 'Courier New', monospace;
-    user-select: none;
+.btn-small:focus,
+.btn:focus {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
 }
 
-.patch.positive {
-    animation: fadeIn 0.3s ease-in;
-}
-
-.patch.negative {
-    animation: fadeIn 0.3s ease-in;
-    opacity: 0.6;
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: scale(0.8);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1);
-    }
-}
-
-.scan-animation {
-    animation: scanPulse 2s ease-out;
-}
-
-/* Patch details panel enhancements */
 .close-btn {
     position: absolute;
     top: 8px;
@@ -339,20 +324,78 @@
     justify-content: center;
 }
 
-.close-btn:hover {
-    background: #cc3333;
+.close-btn:hover { background: #cc3333; }
+
+/* ===========================================
+   UTILITY CLASSES
+   =========================================== */
+
+.coords-display {
+    font-family: 'Courier New', monospace;
+    user-select: none;
 }
+
+.loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid var(--accent-alpha);
+    border-radius: 50%;
+    border-top-color: var(--accent-primary);
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ===========================================
+   ANIMATIONS & EFFECTS
+   =========================================== */
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes scanPulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+}
+
+.patch.positive {
+    animation: fadeIn 0.3s ease-in;
+}
+
+.patch.negative {
+    animation: fadeIn 0.3s ease-in;
+    opacity: 0.6;
+}
+
+.scan-animation {
+    animation: scanPulse 2s ease-out;
+}
+
+/* ===========================================
+   ANALYSIS & PATCH DETAILS
+   =========================================== */
 
 .analysis-section {
     padding: 16px;
-    background: rgba(45, 45, 45, 0.9);
-    border-radius: 8px;
+    background: var(--panel-bg);
+    border-radius: var(--border-radius-md);
     margin-top: 16px;
 }
 
 .analysis-section h4,
 .analysis-section h5 {
-    color: #00ff88;
+    color: var(--accent-primary);
     margin-bottom: 12px;
     font-size: 14px;
 }
@@ -369,10 +412,10 @@
 .metric,
 .stat,
 .info {
-    background: rgba(26, 26, 26, 0.8);
+    background: var(--panel-bg-dark);
     padding: 8px;
-    border-radius: 4px;
-    border: 1px solid #404040;
+    border-radius: var(--border-radius-sm);
+    border: 1px solid var(--border-normal);
 }
 
 .metric label,
@@ -380,7 +423,7 @@
 .info label {
     display: block;
     font-size: 11px;
-    color: #aaa;
+    color: var(--text-muted);
     margin-bottom: 4px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -394,16 +437,16 @@
     color: #fff;
 }
 
-.score-high { color: #00ff88 !important; }
-.score-medium { color: #ffaa00 !important; }
-.score-low { color: #ff6b6b !important; }
-.score-unknown { color: #666 !important; }
-
-.confidence-high { color: #00ff88 !important; }
-.confidence-medium { color: #ffaa00 !important; }
-.confidence-low { color: #ffff00 !important; }
-.confidence-very-low { color: #ff6b6b !important; }
+/* Score and Confidence Classes */
+.score-high, .confidence-high { color: var(--accent-primary) !important; }
+.score-medium, .confidence-medium { color: #ffaa00 !important; }
+.score-low, .confidence-low { color: #ffff00 !important; }
+.score-unknown, .confidence-very-low { color: #ff6b6b !important; }
 .confidence-unknown { color: #666 !important; }
+
+/* ===========================================
+   PATCH INFO COMPONENTS
+   =========================================== */
 
 .patch-info-header {
     display: flex;
@@ -412,31 +455,10 @@
     margin-bottom: 12px;
 }
 
-.status-badge {
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.status-badge.positive {
-    background: rgba(0, 255, 136, 0.2);
-    color: #00ff88;
-    border: 1px solid #00ff88;
-}
-
-.status-badge.negative {
-    background: rgba(255, 107, 107, 0.2);
-    color: #ff6b6b;
-    border: 1px solid #ff6b6b;
-}
-
 .patch-coordinates {
     font-family: 'Courier New', monospace;
     font-size: 12px;
-    color: #aaa;
+    color: var(--text-muted);
     margin-bottom: 16px;
 }
 
@@ -451,33 +473,97 @@
     min-width: 80px;
 }
 
-.cell-details-modal {
+.patch-info-compact {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.patch-info-compact .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+}
+
+.patch-info-compact .info-row strong {
+    color: var(--accent-primary);
+    font-size: 14px;
+}
+
+.patch-info-compact .status-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+/* ===========================================
+   MODAL COMPONENTS
+   =========================================== */
+
+.cell-details-modal,
+.patch-details-modal {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.8);
+    background: var(--panel-bg-darker);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 2000;
-    animation: fadeIn 0.2s ease;
+    animation: fadeIn 0.3s ease;
+}
+
+.modal-content,
+.patch-modal-content {
+    background: #1a1a1a;
+    border-radius: var(--border-radius-lg);
+    border: 2px solid var(--accent-primary);
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: hidden;
+    box-shadow: var(--shadow-strong);
+}
+
+.patch-modal-content {
+    width: 1200px;
 }
 
 .modal-content {
-    background: #2d2d2d;
-    padding: 20px;
-    border-radius: 8px;
-    border: 1px solid #404040;
     max-width: 300px;
     width: 90%;
+    padding: 20px;
+    border: 1px solid var(--border-normal);
+}
+
+.patch-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: #252525;
+    border-bottom: 1px solid var(--border-normal);
+}
+
+.patch-modal-header h3,
+.modal-content h4 {
+    color: var(--accent-primary);
+    margin: 0;
+    font-size: 18px;
 }
 
 .modal-content h4 {
-    color: #00ff88;
     margin-bottom: 16px;
     font-size: 16px;
+}
+
+.patch-modal-body {
+    padding: 20px;
+    max-height: calc(90vh - 80px);
+    overflow-y: auto;
 }
 
 .cell-info {
@@ -491,50 +577,67 @@
     font-size: 14px;
 }
 
+/* ===========================================
+   LEAFLET MAP OVERRIDES
+   =========================================== */
+
 /* Enhanced tooltips */
 .leaflet-tooltip {
     background: rgba(0, 0, 0, 0.9) !important;
-    border: 1px solid #00ff88 !important;
-    border-radius: 4px !important;
+    border: 1px solid var(--accent-primary) !important;
+    border-radius: var(--border-radius-sm) !important;
     color: #fff !important;
     font-size: 12px !important;
 }
 
 .leaflet-tooltip:before {
-    border-top-color: #00ff88 !important;
+    border-top-color: var(--accent-primary) !important;
 }
 
 /* Map controls styling */
 .leaflet-control-layers {
-    background: rgba(45, 45, 45, 0.9) !important;
-    border: 1px solid #404040 !important;
-    border-radius: 8px !important;
+    background: var(--panel-bg) !important;
+    border: 1px solid var(--border-normal) !important;
+    border-radius: var(--border-radius-md) !important;
 }
 
 .leaflet-control-layers-toggle {
     background-color: #2d2d2d !important;
-    border: 1px solid #404040 !important;
+    border: 1px solid var(--border-normal) !important;
 }
 
-.leaflet-control-layers-list {
-    color: #fff !important;
-}
-
+.leaflet-control-layers-list,
 .leaflet-control-layers label {
     color: #fff !important;
 }
 
 .leaflet-control-scale-line {
-    background: rgba(0, 0, 0, 0.8) !important;
-    border: 1px solid #404040 !important;
+    background: var(--panel-bg-darker) !important;
+    border: 1px solid var(--border-normal) !important;
     color: #fff !important;
 }
 
-/* Responsive design */
+/* Dark theme popup enhancements */
+.leaflet-popup-content-wrapper {
+    background: #2d2d2d !important;
+    color: #fff !important;
+    border-radius: var(--border-radius-md) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+}
+
+.leaflet-popup-tip {
+    background: #2d2d2d !important;
+}
+
+.leaflet-container a {
+    color: var(--accent-primary) !important;
+}
+/* ===========================================
+   RESPONSIVE DESIGN
+   =========================================== */
+
 @media (max-width: 768px) {
-    .sidebar {
-        width: 280px;
-    }
+    .sidebar { width: 280px; }
     
     .patch-hover-info {
         max-width: 250px;
@@ -568,16 +671,11 @@
         top: 0;
         z-index: 1500;
         transform: translateY(-100%);
-        transition: transform 0.3s ease;
+        transition: transform var(--transition-normal);
     }
     
-    .sidebar.open {
-        transform: translateY(0);
-    }
-    
-    .map-container {
-        width: 100%;
-    }
+    .sidebar.open { transform: translateY(0); }
+    .map-container { width: 100%; }
     
     .patch-grid {
         left: 10px;
@@ -586,48 +684,25 @@
     }
 }
 
-/* Dark theme enhancements */
-.leaflet-popup-content-wrapper {
-    background: #2d2d2d !important;
-    color: #fff !important;
-    border-radius: 8px !important;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+@media (max-width: 800px) {
+    .patch-modal-content.compact {
+        width: 95vw;
+        max-height: 85vh;
+    }
+    
+    .compact-visualization-container {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .detection-analysis-section.compact .analysis-grid {
+        grid-template-columns: 1fr 1fr;
+    }
 }
 
-.leaflet-popup-tip {
-    background: #2d2d2d !important;
-}
-
-.leaflet-container a {
-    color: #00ff88 !important;
-}
-
-/* Loading animations */
-.loading-spinner {
-    display: inline-block;
-    width: 20px;
-    height: 20px;
-    border: 3px solid rgba(0, 255, 136, 0.3);
-    border-radius: 50%;
-    border-top-color: #00ff88;
-    animation: spin 1s ease-in-out infinite;
-}
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
-/* Accessibility improvements */
-.btn:focus,
-.btn-small:focus {
-    outline: 2px solid #00ff88;
-    outline-offset: 2px;
-}
-
-.elevation-cell:focus {
-    outline: 2px solid #00ff88;
-    outline-offset: 1px;
-}
+/* ===========================================
+   ACCESSIBILITY & USER PREFERENCES
+   =========================================== */
 
 /* High contrast mode support */
 @media (prefers-contrast: high) {
@@ -656,63 +731,10 @@
     }
 }
 
-/* Patch Details Modal Styles */
-.patch-details-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-    animation: fadeIn 0.3s ease;
-}
+/* ===========================================
+   COMPACT MODAL STYLES
+   =========================================== */
 
-.patch-modal-content {
-    background: #1a1a1a;
-    border-radius: 12px;
-    border: 2px solid #00ff88;
-    max-width: 90vw;
-    max-height: 90vh;
-    width: 1200px;
-    overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
-}
-
-.patch-modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    background: #252525;
-    border-bottom: 1px solid #404040;
-}
-
-.patch-modal-header h3 {
-    color: #00ff88;
-    margin: 0;
-    font-size: 18px;
-}
-
-.patch-modal-body {
-    padding: 20px;
-    max-height: calc(90vh - 80px);
-    overflow-y: auto;
-}
-
-/* Patch Information Panel */
-.patch-info-section {
-    margin-bottom: 20px;
-    padding: 16px;
-    background: rgba(45, 45, 45, 0.9);
-    border-radius: 8px;
-    border: 1px solid #404040;
-}
-
-/* Compact Modal Styles */
 .patch-modal-content.compact {
     width: 700px;
     max-width: 85vw;
@@ -724,11 +746,13 @@
     max-height: calc(80vh - 60px);
 }
 
+.patch-info-section,
 .patch-info-section.compact {
     margin-bottom: 16px;
     padding: 12px;
     background: rgba(37, 37, 37, 0.8);
     border-radius: 6px;
+    border: 1px solid var(--border-normal);
 }
 
 .compact-visualization-container {
@@ -740,15 +764,15 @@
 
 .elevation-visualization-section.mini,
 .histogram-visualization-section.mini {
-    background: rgba(26, 26, 26, 0.9);
+    background: var(--panel-bg-dark);
     border-radius: 6px;
     padding: 12px;
-    border: 1px solid #404040;
+    border: 1px solid var(--border-normal);
 }
 
 .elevation-visualization-section.mini h5,
 .histogram-visualization-section.mini h5 {
-    color: #00ff88;
+    color: var(--accent-primary);
     margin: 0 0 8px 0;
     font-size: 14px;
     font-weight: 600;
@@ -774,14 +798,14 @@
 }
 
 .detection-analysis-section.compact {
-    background: rgba(26, 26, 26, 0.9);
+    background: var(--panel-bg-dark);
     border-radius: 6px;
-    border: 1px solid #404040;
+    border: 1px solid var(--border-normal);
     padding: 12px;
 }
 
 .detection-analysis-section.compact h4 {
-    color: #00ff88;
+    color: var(--accent-primary);
     margin: 0 0 12px 0;
     font-size: 16px;
 }
@@ -793,14 +817,14 @@
 
 .detection-analysis-section.compact .metric {
     padding: 8px;
-    background: rgba(45, 45, 45, 0.8);
-    border-radius: 4px;
+    background: var(--panel-bg);
+    border-radius: var(--border-radius-sm);
     text-align: center;
 }
 
 .detection-analysis-section.compact .metric label {
     font-size: 12px;
-    color: #aaa;
+    color: var(--text-muted);
     display: block;
     margin-bottom: 4px;
 }
@@ -810,71 +834,14 @@
     font-weight: bold;
 }
 
-/* Compact Patch Info Styles */
-.patch-info-compact {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.patch-info-compact .info-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-}
-
-.patch-info-compact .info-row strong {
-    color: #00ff88;
-    font-size: 14px;
-}
-
-.patch-info-compact .status-badge {
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-weight: bold;
-}
-
-.patch-info-compact .status-badge.positive {
-    background: rgba(0, 255, 136, 0.2);
-    color: #00ff88;
-    border: 1px solid #00ff88;
-}
-
-.patch-info-compact .status-badge.negative {
-    background: rgba(136, 136, 136, 0.2);
-    color: #888;
-    border: 1px solid #888;
-}
-
-/* Responsive adjustments for compact modal */
-@media (max-width: 800px) {
-    .patch-modal-content.compact {
-        width: 95vw;
-        max-height: 85vh;
-    }
-    
-    .compact-visualization-container {
-        grid-template-columns: 1fr;
-        gap: 12px;
-    }
-    
-    .detection-analysis-section.compact .analysis-grid {
-        grid-template-columns: 1fr 1fr;
-    }
-}
-
-/* Extended Popup Styles */
-.patch-popup.extended {
-    max-width: 400px;
-    min-width: 350px;
-}
+/* ===========================================
+   EXTENDED POPUP VISUALIZATIONS
+   =========================================== */
 
 .popup-visualization {
     margin-top: 12px;
     padding-top: 12px;
-    border-top: 1px solid #404040;
+    border-top: 1px solid var(--border-normal);
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;

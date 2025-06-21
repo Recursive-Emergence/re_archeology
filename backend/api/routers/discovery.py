@@ -82,7 +82,7 @@ def load_elevation_patch_unified(lat, lon, patch_name, buffer_radius_m=20, resol
         patch_size_m = int(buffer_radius_m * 2)
         
         # Use LidarFactory to get elevation data
-        elevation_array = LidarMapFactory.get_patch(
+        result = LidarMapFactory.get_patch(
             lat=lat,
             lon=lon,
             size_m=patch_size_m,
@@ -90,16 +90,35 @@ def load_elevation_patch_unified(lat, lon, patch_name, buffer_radius_m=20, resol
             preferred_data_type=data_type
         )
         
-        if elevation_array is None:
+        if result is None:
             raise Exception(f"No elevation data available from LidarFactory for {patch_name}")
+        
+        # Safety check: ensure result is LidarPatchResult, not raw numpy array
+        if isinstance(result, np.ndarray):
+            logger.error(f"❌ BUG: LidarMapFactory.get_patch returned numpy array instead of LidarPatchResult! Shape: {result.shape}")
+            # Create a fallback LidarPatchResult
+            from lidar_factory.factory import LidarPatchResult
+            result = LidarPatchResult(
+                data=result,
+                source_dataset="Unknown",
+                resolution_m=resolution_m,
+                resolution_description=f"{resolution_m}m",
+                is_high_resolution=resolution_m <= 2.0,
+                data_type=data_type
+            )
+            logger.warning(f"Created fallback LidarPatchResult for safety")
+        
+        elevation_array = result.data
         
         # Fill any remaining nans with the mean of valid values
         elevation_array = clean_patch_data(elevation_array)
         
         logger.info(f"✅ Loaded elevation patch via LidarFactory: {elevation_array.shape}, "
-                   f"range: [{np.nanmin(elevation_array):.2f}, {np.nanmax(elevation_array):.2f}]")
+                   f"range: [{np.nanmin(elevation_array):.2f}, {np.nanmax(elevation_array):.2f}], "
+                   f"source: {result.source_dataset}, resolution: {result.resolution_description}, "
+                   f"high_res: {result.is_high_resolution}")
         
-        return elevation_array
+        return elevation_array, result  # Return both data and metadata
         
     except Exception as e:
         logger.error(f"❌ LidarFactory elevation loading failed for {patch_name}: {e}")
@@ -149,7 +168,7 @@ def load_elevation_patch_lidar_factory(lat: float, lon: float, buffer_radius_m: 
         patch_size_m = buffer_radius_m * 2
         
         # Use LidarMapFactory to get the best available data
-        elevation_array = LidarMapFactory.get_patch(
+        result = LidarMapFactory.get_patch(
             lat=lat,
             lon=lon,
             size_m=patch_size_m,
@@ -157,8 +176,25 @@ def load_elevation_patch_lidar_factory(lat: float, lon: float, buffer_radius_m: 
             preferred_data_type="DSM"  # Digital Surface Model includes structures
         )
         
-        if elevation_array is None:
+        if result is None:
             raise Exception(f"No LiDAR data available at location")
+        
+        # Safety check: ensure result is LidarPatchResult, not raw numpy array
+        if isinstance(result, np.ndarray):
+            logger.error(f"❌ BUG: LidarMapFactory.get_patch returned numpy array instead of LidarPatchResult! Shape: {result.shape}")
+            # Create a fallback LidarPatchResult
+            from lidar_factory.factory import LidarPatchResult
+            result = LidarPatchResult(
+                data=result,
+                source_dataset="Unknown",
+                resolution_m=resolution_m,
+                resolution_description=f"{resolution_m}m",
+                is_high_resolution=resolution_m <= 2.0,
+                data_type="DSM"
+            )
+            logger.warning(f"Created fallback LidarPatchResult for safety")
+        
+        elevation_array = result.data
         
         # Clean the patch data
         elevation_array = clean_patch_data(elevation_array)
@@ -798,7 +834,15 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                 
                 # Load REAL elevation data from Google Earth Engine
                 buffer_radius_m = patch_size_m // 2  # Half the patch size
-                elevation_patch = load_elevation_patch_unified(lat, lon, f"patch_{patch_number}", buffer_radius_m, resolution_m=0.5)
+                elevation_result = load_elevation_patch_unified(lat, lon, f"patch_{patch_number}", buffer_radius_m, resolution_m=0.5)
+                
+                # Handle the new return format (data, metadata)
+                if isinstance(elevation_result, tuple) and len(elevation_result) == 2:
+                    elevation_patch, lidar_metadata = elevation_result
+                else:
+                    # Backward compatibility
+                    elevation_patch = elevation_result
+                    lidar_metadata = None
                 
                 # Initialize patch data
                 elevation_data = None
@@ -1276,7 +1320,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                 try:
                     # Use the preferred resolution determined at scan start
                     # Don't override with calculation - let backend determine optimal resolution
-                    elevation_data = LidarMapFactory.get_patch(
+                    result = LidarMapFactory.get_patch(
                         lat=tile_lat,
                         lon=tile_lon,
                         size_m=tile_size_m,
@@ -1284,7 +1328,33 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         preferred_data_type=data_type
                     )
                     
-                    if elevation_data is not None:
+                    if result is not None:
+                        # Safety check: ensure result is LidarPatchResult, not raw numpy array
+                        if isinstance(result, np.ndarray):
+                            logger.error(f"❌ BUG: LidarMapFactory.get_patch returned numpy array instead of LidarPatchResult! Shape: {result.shape}")
+                            # Create a fallback LidarPatchResult
+                            from lidar_factory.factory import LidarPatchResult
+                            result = LidarPatchResult(
+                                data=result,
+                                source_dataset="Unknown",
+                                resolution_m=preferred_resolution,
+                                resolution_description=f"{preferred_resolution}m",
+                                is_high_resolution=preferred_resolution <= 2.0,
+                                data_type=data_type
+                            )
+                            logger.warning(f"Created fallback LidarPatchResult for safety")
+                        
+                        elevation_data = result.data
+                        
+                        # Store resolution metadata in session for consistency
+                        if "resolution_metadata" not in session_info:
+                            session_info["resolution_metadata"] = {
+                                "resolution_description": result.resolution_description,
+                                "is_high_resolution": result.is_high_resolution,
+                                "source_dataset": result.source_dataset,
+                                "resolution_m": result.resolution_m
+                            }
+                        
                         # Log elevation statistics for debugging
                         elev_min = float(np.nanmin(elevation_data))
                         elev_max = float(np.nanmax(elevation_data))
@@ -1304,6 +1374,17 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             viz_elevation = elevation_data.tolist()
                             viz_shape = [h, w]
                         
+                        # Calculate explicit tile bounds for consistent rendering
+                        lat_delta = (tile_size_m / 2) / 111320  # Half tile size in degrees latitude
+                        lon_delta = (tile_size_m / 2) / (111320 * np.cos(np.radians(tile_lat)))  # Half tile size in degrees longitude
+                        
+                        tile_bounds = {
+                            "south": tile_lat - lat_delta,
+                            "west": tile_lon - lon_delta,
+                            "north": tile_lat + lat_delta,
+                            "east": tile_lon + lon_delta
+                        }
+
                         # Create tile result with scan area bounds and grid position
                         tile_result = {
                             "session_id": session_id,
@@ -1312,8 +1393,11 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "center_lat": tile_lat,
                             "center_lon": tile_lon,
                             "size_m": tile_size_m,
+                            "tile_bounds": tile_bounds,          # Add explicit tile bounds
                             "has_data": True,
-                            "actual_resolution": f"{preferred_resolution}m",  # Include actual resolution used
+                            "actual_resolution": result.resolution_description,  # Use actual resolution from dataset
+                            "is_high_resolution": result.is_high_resolution,     # Add high-resolution flag
+                            "source_dataset": result.source_dataset,            # Add source dataset name
                             "grid_row": row,                 # Add grid position for visual effects
                             "grid_col": col,
                             "grid_total_rows": tiles_y,
@@ -1342,6 +1426,17 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         
                     else:
                         # No data available for this tile
+                        # Calculate explicit tile bounds for consistent rendering
+                        lat_delta = (tile_size_m / 2) / 111320  # Half tile size in degrees latitude
+                        lon_delta = (tile_size_m / 2) / (111320 * np.cos(np.radians(tile_lat)))  # Half tile size in degrees longitude
+                        
+                        tile_bounds = {
+                            "south": tile_lat - lat_delta,
+                            "west": tile_lon - lon_delta,
+                            "north": tile_lat + lat_delta,
+                            "east": tile_lon + lon_delta
+                        }
+                        
                         tile_result = {
                             "session_id": session_id,
                             "tile_id": tile_id,
@@ -1349,8 +1444,11 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "center_lat": tile_lat,
                             "center_lon": tile_lon,
                             "size_m": tile_size_m,
+                            "tile_bounds": tile_bounds,          # Add explicit tile bounds
                             "has_data": False,
-                            "actual_resolution": f"{preferred_resolution}m",  # Include resolution even for no-data tiles
+                            "actual_resolution": session_info.get("resolution_metadata", {}).get("resolution_description", f"{preferred_resolution}m"),
+                            "is_high_resolution": session_info.get("resolution_metadata", {}).get("is_high_resolution", False),
+                            "source_dataset": session_info.get("resolution_metadata", {}).get("source_dataset", "unknown"),
                             "grid_row": row,                 # Add grid position for visual effects
                             "grid_col": col,
                             "grid_total_rows": tiles_y,
@@ -1378,7 +1476,9 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         "processed_tiles": session_info["processed_tiles"],
                         "total_tiles": session_info["total_tiles"],
                         "progress_percent": (session_info["processed_tiles"] / session_info["total_tiles"]) * 100,
-                        "actual_resolution": f"{preferred_resolution}m",  # Include resolution in progress updates
+                        "actual_resolution": session_info.get("resolution_metadata", {}).get("resolution_description", f"{preferred_resolution}m"),
+                        "is_high_resolution": session_info.get("resolution_metadata", {}).get("is_high_resolution", False),
+                        "source_dataset": session_info.get("resolution_metadata", {}).get("source_dataset", "unknown"),
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }
                     

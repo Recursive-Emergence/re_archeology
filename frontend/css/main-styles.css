@@ -1334,3 +1334,84 @@ html, body {
         transform: scale(0.8);
     }
 }
+
+/* LiDAR Scanning Icon Animations */
+.scanning-icon {
+    animation: scanning-idle 3s ease-in-out infinite;
+}
+
+@keyframes scanning-idle {
+    0%, 100% {
+        opacity: 0.8;
+        transform: translateX(-50%) scale(1);
+    }
+    50% {
+        opacity: 0.9;
+        transform: translateX(-50%) scale(1.05);
+    }
+}
+
+.scanning-icon.processing {
+    animation: scanning-active 0.6s ease-in-out;
+}
+
+@keyframes scanning-active {
+    0% {
+        transform: translateX(-50%) scale(1);
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+    }
+    50% {
+        transform: translateX(-50%) scale(1.3);
+        filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.8));
+    }
+    100% {
+        transform: translateX(-50%) scale(1);
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+    }
+}
+
+/* LiDAR Beam Animation */
+@keyframes pulse-beam {
+    0% {
+        opacity: 0.8;
+        stroke-width: 3;
+    }
+    100% {
+        opacity: 0.4;
+        stroke-width: 2;
+    }
+}
+
+.lidar-beam {
+    animation: pulse-beam 1s ease-in-out infinite alternate;
+}
+
+/* LiDAR Resolution Badge */
+.lidar-resolution-badge {
+    position: absolute;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: var(--accent-color);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid var(--accent-color);
+    box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3);
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+    animation: badge-appear 0.5s ease-out;
+}
+
+@keyframes badge-appear {
+    0% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-10px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}

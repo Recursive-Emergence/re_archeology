@@ -27,7 +27,7 @@ class MapVisualization {
         this.heatmapMode = false;
         
         this.initLayerGroups();
-        console.log('✅ MapVisualization initialized (clean version)');
+        window.Logger?.visualization('info', 'MapVisualization initialized (clean version)');
     }
 
     /**
@@ -50,7 +50,7 @@ class MapVisualization {
         // Reset global elevation range for new scan
         this.resetGlobalElevationRange();
         
-        console.log('🔥 Enabled LiDAR heatmap mode with global elevation range');
+        window.Logger?.visualization('debug', 'Enabled LiDAR heatmap mode with global elevation range');
     }
     
     /**
@@ -59,7 +59,7 @@ class MapVisualization {
     disableHeatmapMode() {
         this.heatmapMode = false;
         this.clearHeatmapTiles();
-        console.log('❄️ Disabled LiDAR heatmap mode');
+        window.Logger?.visualization('debug', 'Disabled LiDAR heatmap mode');
     }
 
     /**
@@ -93,7 +93,7 @@ class MapVisualization {
             }
         }
         
-        console.log(`🌍 Global elevation range: ${this.globalElevationRange.min?.toFixed(2)}m to ${this.globalElevationRange.max?.toFixed(2)}m`);
+        window.Logger?.visualization('debug', `Global elevation range: ${this.globalElevationRange.min?.toFixed(2)}m to ${this.globalElevationRange.max?.toFixed(2)}m`);
     }
 
     /**
@@ -101,7 +101,7 @@ class MapVisualization {
      */
     addLidarHeatmapTile(tileData) {
         if (!this.heatmapMode) {
-            console.warn('⚠️ Heatmap mode not enabled');
+            window.Logger?.visualization('warn', 'Heatmap mode not enabled');
             return;
         }
 
@@ -109,16 +109,26 @@ class MapVisualization {
             // Extract tile bounds
             const bounds = this.extractTileBounds(tileData);
             if (!bounds) {
-                console.error('❌ No valid bounds found in tile data');
+                window.Logger?.visualization('error', 'No valid bounds found in tile data', tileData);
                 return;
             }
 
             // Extract elevation data
             const elevationData = this.extractElevationData(tileData);
             if (!elevationData) {
-                console.error('❌ No valid elevation data in tile');
+                window.Logger?.visualization('error', 'No valid elevation data in tile', tileData);
                 return;
             }
+
+            // Log tile information for debugging
+            const tileSizeM = tileData.size_m || tileData.tile_size_m || 40;
+            const actualTileSize = tileSizeM > 200 ? 40 : tileSizeM;
+            // Use logger for reduced console noise
+            window.Logger?.visualization('debug', `Adding tile ${tileData.tile_id}`, {
+                dataSize: `${elevationData.length}×${elevationData[0].length}`,
+                tileSize: `${actualTileSize}m`,
+                bounds: bounds
+            });
 
             // Create heatmap canvas
             const canvas = this.createHeatmapCanvas(elevationData, tileData);
@@ -130,10 +140,10 @@ class MapVisualization {
             // Store tile reference
             this.heatmapTiles.set(tileData.tile_id, heatmapOverlay);
 
-            console.log(`✅ Added LiDAR heatmap tile ${tileData.tile_id}`);
+            window.Logger?.visualization('debug', `Added heatmap tile ${tileData.tile_id}`);
 
         } catch (error) {
-            console.error(`❌ Failed to add heatmap tile ${tileData.tile_id}:`, error);
+            window.Logger?.visualization('error', `Failed to add heatmap tile ${tileData.tile_id}`, error);
         }
     }
 
@@ -141,8 +151,9 @@ class MapVisualization {
      * Extract tile bounds from tile data
      */
     extractTileBounds(tileData) {
-        // Try different bound formats
+        // Try different bound formats - prioritize explicit tile_bounds
         if (tileData.tile_bounds) {
+            window.Logger?.visualization('debug', `Using explicit tile bounds for ${tileData.tile_id}`, tileData.tile_bounds);
             return tileData.tile_bounds;
         }
         
@@ -154,20 +165,30 @@ class MapVisualization {
         if (tileData.center_lat && tileData.center_lon) {
             const centerLat = tileData.center_lat;
             const centerLon = tileData.center_lon;
-            const tileSizeM = tileData.tile_size_m || tileData.size_m || 40;
+            const tileSizeM = tileData.size_m || tileData.tile_size_m || 40;
             
             // Prevent using scan area size as tile size
             const actualTileSize = tileSizeM > 200 ? 40 : tileSizeM;
             
-            const latDelta = actualTileSize / 222000; // Half size in degrees
-            const lonDelta = actualTileSize / (222000 * Math.cos(centerLat * Math.PI / 180));
+            window.Logger?.visualization('debug', `Calculating bounds for tile ${tileData.tile_id}`, {
+                center: `(${centerLat}, ${centerLon})`,
+                size: `${actualTileSize}m`
+            });
             
-            return {
+            // Correct conversion: 1 degree ≈ 111,320 meters at the equator
+            // For half-tile size (radius from center)
+            const latDelta = (actualTileSize / 2) / 111320; // Half tile size in degrees latitude
+            const lonDelta = (actualTileSize / 2) / (111320 * Math.cos(centerLat * Math.PI / 180)); // Half tile size in degrees longitude
+            
+            const calculatedBounds = {
                 south: centerLat - latDelta,
                 west: centerLon - lonDelta,
                 north: centerLat + latDelta,
                 east: centerLon + lonDelta
             };
+            
+            window.Logger?.visualization('debug', 'Calculated bounds', calculatedBounds);
+            return calculatedBounds;
         }
 
         return null;
@@ -197,12 +218,13 @@ class MapVisualization {
         
         const rows = elevationData.length;
         const cols = elevationData[0].length;
-        const tileSizeM = tileData.tile_size_m || tileData.size_m || 40;
         
-        // Set canvas dimensions
-        const pixelsPerMeter = tileSizeM <= 40 ? 2 : tileSizeM <= 100 ? 1.5 : 1;
-        canvas.width = Math.max(cols, tileSizeM * pixelsPerMeter);
-        canvas.height = Math.max(rows, tileSizeM * pixelsPerMeter);
+        // Use actual data dimensions for canvas size
+        // This ensures 1:1 pixel mapping with the elevation data
+        canvas.width = cols;
+        canvas.height = rows;
+
+        window.Logger?.visualization('debug', `Creating heatmap canvas: ${cols}×${rows} for tile ${tileData.tile_id || 'unknown'}`);
 
         // Render heatmap
         this.renderHeatmapCanvas(ctx, elevationData, canvas.width, canvas.height);
@@ -220,11 +242,19 @@ class MapVisualization {
             [bounds.north, bounds.east]
         );
         
-        return L.imageOverlay(imageUrl, leafletBounds, {
+        const overlay = L.imageOverlay(imageUrl, leafletBounds, {
             opacity: 0.85,
-            className: 'lidar-heatmap-tile',
-            interactive: false
+            className: 'lidar-heatmap-tile visible',
+            interactive: false,
+            crossOrigin: true
         });
+        
+        // Add debugging information
+        overlay.on('add', function() {
+            window.Logger?.visualization('debug', 'Tile overlay added to map', { bounds: leafletBounds });
+        });
+        
+        return overlay;
     }
 
     /**
@@ -242,10 +272,11 @@ class MapVisualization {
         const maxElev = this.globalElevationRange.max;
         const elevRange = maxElev - minElev;
         
+        // Calculate cell dimensions - ensure we fill the entire canvas
         const cellWidth = canvasWidth / cols;
         const cellHeight = canvasHeight / rows;
 
-        // Render each cell
+        // Render each cell with precise positioning
         for (let i = 0; i < rows; i++) {
             for (let j = 0; j < cols; j++) {
                 const elev = elevationData[i][j];
@@ -256,7 +287,14 @@ class MapVisualization {
                     const color = this.getHeatmapColor(normalized);
                     
                     ctx.fillStyle = color;
-                    ctx.fillRect(j * cellWidth, i * cellHeight, cellWidth, cellHeight);
+                    
+                    // Use Math.floor to ensure pixels align to grid
+                    const x = Math.floor(j * cellWidth);
+                    const y = Math.floor(i * cellHeight);
+                    const w = Math.ceil(cellWidth);
+                    const h = Math.ceil(cellHeight);
+                    
+                    ctx.fillRect(x, y, w, h);
                 }
             }
         }
@@ -317,7 +355,7 @@ class MapVisualization {
         }
         
         this.resetGlobalElevationRange();
-        console.log('🧹 Cleared heatmap tiles and reset elevation range');
+        window.Logger?.visualization('debug', 'Cleared heatmap tiles and reset elevation range');
     }
 
     /**
@@ -325,7 +363,7 @@ class MapVisualization {
      */
     clearLidarHeatmap() {
         this.clearHeatmapTiles();
-        console.log('🧹 Cleared LiDAR heatmap data');
+        window.Logger?.visualization('debug', 'Cleared LiDAR heatmap data');
     }
 
     /**
@@ -339,7 +377,7 @@ class MapVisualization {
             elevationLayer.clearLayers();
         }
         
-        console.log('🧹 Cleared elevation data');
+        window.Logger?.visualization('debug', 'Cleared elevation data');
     }
 
     /**
@@ -348,14 +386,14 @@ class MapVisualization {
     clearAll() {
         this.layers.forEach(layer => layer.clearLayers());
         this.clearLidarHeatmap();
-        console.log('🧹 Cleared all visualization layers');
+        window.Logger?.visualization('debug', 'Cleared all visualization layers');
     }
 
     /**
      * Destroy the visualization instance
      */
     destroy() {
-        console.log('🧹 Destroying MapVisualization instance...');
+        window.Logger?.visualization('debug', 'Destroying MapVisualization instance...');
         
         this.clearAll();
         
@@ -364,7 +402,7 @@ class MapVisualization {
         }
         
         this.heatmapMode = false;
-        console.log('✅ MapVisualization destroyed');
+        window.Logger?.visualization('debug', 'MapVisualization destroyed');
     }
 }
 
