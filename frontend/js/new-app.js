@@ -31,7 +31,18 @@ class REArchaeologyApp {
         // Animation state
         this.animationState = null;
         
-        // Data layers
+        // Detection UX state (pure frontend animation)
+        this.detectionActive = false;
+        this.detectionLens = null;
+        this.detectionOverlay = null;
+        this.detectionStepSize = 2; // Default 2 meters per step (customizable: 1m, 2m, etc.)
+        this.detectionStepInterval = 800; // Slower 800ms between steps for better visibility
+        
+        // Current scanning position
+        this.currentScanPosition = { row: 0, col: 0 };
+        this.scanGrid = null;
+        this.scanAnimationId = null;
+        
         this.layers = {
             patches: null,
             detections: null,
@@ -55,7 +66,13 @@ class REArchaeologyApp {
             this.initializeLayers();
             this.setupDefaultScanArea();
             this.setupEventListeners();
-            this.updateScanButtonText(false);
+            
+            // Set initial scan button text based on the default checkbox state
+            const enableDetection = document.getElementById('enableDetection')?.checked || false;
+            this.updateScanButtonText(enableDetection);
+            
+            // Initialize detection overlay
+            this.initializeDetectionOverlay();
             
             // Initialize authentication
             await this.initializeAuth();
@@ -338,7 +355,7 @@ class REArchaeologyApp {
         let labelText = `📡 Scan Area (${radiusKm}km)`;
         
         if (resolution && resolution !== 'Determining...') {
-            labelText += ` • ${resolution}`;
+            labelText += ` • Res: ${resolution} `;
         }
         
         // Update the label content
@@ -515,6 +532,12 @@ class REArchaeologyApp {
         this.startScanningAnimation('satellite'); // Conservative default
         this.updateLidarScanButtonStates(true);
         
+        // Start detection animation if enabled
+        const enableDetection = document.getElementById('enableDetection')?.checked || false;
+        if (enableDetection) {
+            this.startDetectionAnimation();
+        }
+        
         // Lock scan area
         if (this.scanAreaRectangle) {
             this.scanAreaRectangle.setStyle({
@@ -535,6 +558,7 @@ class REArchaeologyApp {
         this.isScanning = false;
         this.currentLidarSession = null;
         this.stopScanningAnimation();
+        this.stopDetectionAnimation();
         this.updateButtonStates();
         
         // Reset scan area
@@ -574,6 +598,437 @@ class REArchaeologyApp {
     updateButtonStates() {
         this.updateLidarScanButtonStates(this.currentLidarSession !== null);
     }
+
+    // ========================================
+    // DETECTION ANIMATION - PURE UX SYSTEM
+    // ========================================
+    //
+    // This is a pure frontend UX animation system that creates a visual 
+    // "sliding lens" effect moving systematically across the scan area.
+    // 
+    // Features:
+    // - Typewriter-style movement: left-to-right, then down
+    // - Configurable step size: 1m, 2m, 4m, 8m (default: 2m)
+    // - Configurable speed: 100ms - 500ms intervals (default: 300ms)  
+    // - Visual effects: pulse, flash, celebration on completion
+    // - Structure-specific lens emojis (windmill, tower, mound, generic)
+    // - No backend integration - pure visual animation
+    // 
+    // Usage:
+    // - app.setDetectionMode('precise')  // 1m steps, 500ms interval
+    // - app.setDetectionMode('standard') // 2m steps, 300ms interval  
+    // - app.setDetectionMode('rapid')    // 4m steps, 150ms interval
+    // - app.setDetectionMode('coarse')   // 8m steps, 100ms interval
+    // 
+    // Or customize directly:
+    // - app.setDetectionStepSize(1.5)    // 1.5 meter steps
+    // - app.setDetectionStepInterval(250) // 250ms between steps
+    //
+    // ========================================
+
+    initializeDetectionOverlay() {
+        this.detectionOverlay = document.getElementById('detectionOverlay');
+        this.detectionProgress = document.getElementById('detectionProgress');
+        this.detectionProfileText = document.getElementById('detectionProfileText');
+    }
+
+    startDetectionAnimation() {
+        if (!this.detectionOverlay) {
+            this.initializeDetectionOverlay();
+        }
+
+        const enableDetection = document.getElementById('enableDetection')?.checked || false;
+        if (!enableDetection) return;
+
+        this.detectionActive = true;
+        
+        // Show detection overlay (but hide the noisy progress text)
+        this.detectionOverlay.classList.add('active');
+        // Note: Removed detectionProgress.classList.add('active') to hide the text badge
+        
+        // Initialize scanning grid for systematic movement (pure UX)
+        this.initializeScanningGrid();
+        
+        // Start the scanning animation (typewriter style: left-to-right, then down)
+        this.startScanningMovement();
+        
+        window.Logger?.app('info', 'Pure UX detection animation started - typewriter pattern', { 
+            structureType, 
+            stepSize: this.detectionStepSize + 'm',
+            interval: this.detectionStepInterval + 'ms',
+            mode: 'typewriter'
+        });
+    }
+
+    stopDetectionAnimation() {
+        this.detectionActive = false;
+        
+        // Hide detection overlay
+        if (this.detectionOverlay) {
+            this.detectionOverlay.classList.remove('active');
+            // Note: Progress text badge was already hidden in startDetectionAnimation
+        }
+        
+        // Stop animation and remove lens
+        if (this.scanAnimationId) {
+            clearTimeout(this.scanAnimationId);
+            this.scanAnimationId = null;
+        }
+        
+        if (this.detectionLens && this.detectionLens.parentNode) {
+            this.detectionLens.remove();
+            this.detectionLens = null;
+        }
+        
+        // Reset scanning state
+        this.currentScanPosition = { row: 0, col: 0 };
+        this.scanGrid = null;
+        
+        window.Logger?.app('info', 'Detection animation stopped');
+    }
+
+    updateDetectionProfileText(structureType) {
+        if (!this.detectionProfileText) return;
+        
+        const profileTexts = {
+            'windmill': 'Analyzing Windmill Structures',
+            'tower': 'Analyzing Tower Structures', 
+            'mound': 'Analyzing Archaeological Mounds',
+            'generic': 'Analyzing Generic Structures'
+        };
+        
+        this.detectionProfileText.textContent = profileTexts[structureType] || 'Analyzing Structures';
+    }
+
+    // Initialize scanning grid for typewriter-style movement
+    initializeScanningGrid() {
+        if (!this.map || !this.selectedArea) return;
+        
+        const bounds = this.selectedArea.bounds;
+        const stepSizeMeters = this.detectionStepSize; // Configurable: 1m, 2m, etc.
+        
+        // Convert step size from meters to degrees
+        const latStepDegrees = stepSizeMeters / 111320; // ~111,320 meters per degree lat
+        const avgLat = (bounds[0][0] + bounds[1][0]) / 2;
+        const lngStepDegrees = stepSizeMeters / (111320 * Math.cos(avgLat * Math.PI / 180));
+        
+        // Calculate grid dimensions - FIXED: ensure we cover the full area
+        const latRange = bounds[1][0] - bounds[0][0];
+        const lngRange = bounds[1][1] - bounds[0][1];
+        const cols = Math.max(3, Math.ceil(lngRange / lngStepDegrees)); // Minimum 3 columns
+        const rows = Math.max(3, Math.ceil(latRange / latStepDegrees)); // Minimum 3 rows
+        
+        this.scanGrid = {
+            bounds: bounds,
+            stepSizeMeters: stepSizeMeters,
+            latStepDegrees: latStepDegrees,
+            lngStepDegrees: lngStepDegrees,
+            cols: cols,
+            rows: rows,
+            totalSteps: cols * rows
+        };
+        
+        // Reset scan position to top-left (0,0)
+        this.currentScanPosition = { row: 0, col: 0 };
+        
+        window.Logger?.app('debug', `Scanning grid initialized: ${cols}x${rows} = ${this.scanGrid.totalSteps} steps (${stepSizeMeters}m each)`);
+        window.Logger?.app('debug', `Scan area bounds: N:${bounds[1][0].toFixed(6)}, S:${bounds[0][0].toFixed(6)}, E:${bounds[1][1].toFixed(6)}, W:${bounds[0][1].toFixed(6)}`);
+    }
+    
+    // Start the typewriter-style scanning movement
+    startScanningMovement() {
+        if (!this.detectionActive || !this.scanGrid) return;
+        
+        // Create or update detection lens
+        this.createDetectionLens();
+        
+        // Start the scanning animation
+        this.moveToNextScanPosition();
+    }
+    
+    // Create the visual detection lens
+    createDetectionLens() {
+        // Remove existing lens
+        if (this.detectionLens && this.detectionLens.parentNode) {
+            this.detectionLens.remove();
+        }
+        
+        // Choose lens emoji based on structure type
+        const structureType = document.getElementById('structureType')?.value || 'windmill';
+        const lensEmoji = this.getDetectorEmoji(structureType);
+        
+        // Create lens element
+        this.detectionLens = document.createElement('div');
+        this.detectionLens.className = 'detection-lens';
+        this.detectionLens.textContent = lensEmoji;
+        this.detectionLens.style.cssText = `
+            position: absolute;
+            font-size: 28px;
+            z-index: 1400;
+            pointer-events: none;
+            transition: all ${this.detectionStepInterval * 0.8}ms ease-in-out;
+            opacity: 0.85;
+            filter: drop-shadow(0 0 12px rgba(0, 255, 136, 0.8)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.6));
+            transform: scale(1);
+            background: radial-gradient(circle, rgba(0, 255, 136, 0.15) 0%, transparent 70%);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: pulse 2s infinite ease-in-out;
+        `;
+        
+        // Add CSS animation for pulse effect
+        if (!document.getElementById('lens-pulse-style')) {
+            const style = document.createElement('style');
+            style.id = 'lens-pulse-style';
+            style.textContent = `
+                @keyframes pulse {
+                    0%, 100% { 
+                        transform: scale(1);
+                        box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+                    }
+                    50% { 
+                        transform: scale(1.1);
+                        box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        // Add to detection overlay
+        this.detectionOverlay.appendChild(this.detectionLens);
+        
+        window.Logger?.app('debug', 'Detection lens created with enhanced styling');
+    }
+    
+    // Move lens to next position in typewriter pattern
+    moveToNextScanPosition() {
+        if (!this.detectionActive || !this.scanGrid || !this.detectionLens) return;
+        
+        const { row, col } = this.currentScanPosition;
+        
+        // Check if scanning is complete
+        if (row >= this.scanGrid.rows) {
+            window.Logger?.app('info', 'Scanning animation completed');
+            this.completeScanningAnimation();
+            return;
+        }
+        
+        // Calculate position at center of current grid cell
+        const latRange = this.scanGrid.bounds[1][0] - this.scanGrid.bounds[0][0];
+        const lngRange = this.scanGrid.bounds[1][1] - this.scanGrid.bounds[0][1];
+        
+        // Calculate step sizes for grid cells
+        const latStepSize = latRange / this.scanGrid.rows;
+        const lngStepSize = lngRange / this.scanGrid.cols;
+        
+        // Position at CENTER of current grid cell
+        // Start from north-west corner and move to center of first cell
+        const lat = this.scanGrid.bounds[1][0] - (row + 0.5) * latStepSize; // North to South, center of cell
+        const lng = this.scanGrid.bounds[0][1] + (col + 0.5) * lngStepSize; // West to East, center of cell
+        
+        // Convert to screen coordinates
+        const screenPoint = this.map.latLngToContainerPoint([lat, lng]);
+        
+        // Move lens to new position with smooth transition
+        this.detectionLens.style.left = (screenPoint.x ) + 'px'; // Center the 40px lens
+        this.detectionLens.style.top = (screenPoint.y ) + 'px';
+        
+        // Enhanced visual feedback for row changes
+        const isNewRow = col === 0 && row > 0;
+        if (isNewRow) {
+            // Make lens more prominent when starting a new row
+            this.detectionLens.style.transform = 'scale(1.3)';
+            this.detectionLens.style.filter = 'drop-shadow(0 0 20px rgba(255, 255, 0, 1)) drop-shadow(0 0 8px rgba(255, 255, 255, 1))';
+            console.log(`🔄 NEW ROW ${row}! Moving south to start row ${row} of ${this.scanGrid.rows}`);
+            
+            setTimeout(() => {
+                if (this.detectionLens) {
+                    this.detectionLens.style.transform = 'scale(1)';
+                    this.detectionLens.style.filter = 'drop-shadow(0 0 12px rgba(0, 255, 136, 0.8)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.6))';
+                }
+            }, 600);
+        }
+        
+        // Add scanning pulse effect
+        this.detectionLens.style.animation = 'none'; // Reset animation
+        setTimeout(() => {
+            if (this.detectionLens) {
+                this.detectionLens.style.animation = 'pulse 1.5s ease-in-out';
+            }
+        }, 10);
+        
+        // Add scanning flash effect at position
+        const scanFlash = document.createElement('div');
+        scanFlash.style.cssText = `
+            position: absolute;
+            left: ${screenPoint.x - 15}px;
+            top: ${screenPoint.y - 15}px;
+            width: 30px;
+            height: 30px;
+            background: radial-gradient(circle, rgba(0, 255, 136, 0.6) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1350;
+            animation: flash 0.8s ease-out forwards;
+        `;
+        
+        // Add flash animation if not exists
+        if (!document.getElementById('flash-animation-style')) {
+            const style = document.createElement('style');
+            style.id = 'flash-animation-style';
+            style.textContent = `
+                @keyframes flash {
+                    0% { 
+                        transform: scale(0.5);
+                        opacity: 0.8;
+                    }
+                    50% { 
+                        transform: scale(1.2);
+                        opacity: 0.4;
+                    }
+                    100% { 
+                        transform: scale(2);
+                        opacity: 0;
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        this.detectionOverlay.appendChild(scanFlash);
+        
+        // Remove flash after animation
+        setTimeout(() => {
+            if (scanFlash && scanFlash.parentNode) {
+                scanFlash.remove();
+            }
+        }, 800);
+        
+        // Enhanced logging with more detail
+        const progressPercent = ((row * this.scanGrid.cols + col + 1) / this.scanGrid.totalSteps * 100).toFixed(1);
+        console.log(`🔍 Scan [${row}, ${col}] (${progressPercent}%) -> (${lat.toFixed(6)}, ${lng.toFixed(6)}) [ROW ${row}/${this.scanGrid.rows-1}]`);
+        
+        // Calculate next position (typewriter style: left-to-right, then down)
+        if (col < this.scanGrid.cols - 1) {
+            // Move right (same row)
+            this.currentScanPosition.col++;
+        } else {
+            // Move to next row, reset column (go down and restart from left)
+            this.currentScanPosition.row++;
+            this.currentScanPosition.col = 0;
+        }
+        
+        // Schedule next movement (slower for better visibility)
+        const nextInterval = isNewRow ? this.detectionStepInterval * 2 : this.detectionStepInterval; // Pause longer at row changes
+        this.scanAnimationId = setTimeout(() => {
+            this.moveToNextScanPosition();
+        }, nextInterval);
+    }
+    
+    // Complete the scanning animation
+    completeScanningAnimation() {
+        if (this.detectionLens) {
+            // Final animation - lens celebrates completion
+            this.detectionLens.style.animation = 'none';
+            this.detectionLens.style.transition = 'all 1s ease-out';
+            this.detectionLens.style.transform = 'scale(1.5) rotate(360deg)';
+            this.detectionLens.style.opacity = '1';
+            this.detectionLens.style.filter = 'drop-shadow(0 0 20px rgba(0, 255, 136, 1)) drop-shadow(0 0 8px rgba(255, 255, 255, 1))';
+            
+            // After celebration, fade out
+            setTimeout(() => {
+                if (this.detectionLens) {
+                    this.detectionLens.style.opacity = '0';
+                    this.detectionLens.style.transform = 'scale(0.5) rotate(360deg)';
+                }
+            }, 1000);
+            
+            // Remove after fade
+            setTimeout(() => {
+                if (this.detectionLens && this.detectionLens.parentNode) {
+                    this.detectionLens.remove();
+                    this.detectionLens = null;
+                }
+            }, 2000);
+        }
+        
+        // Reset scanning state but keep detection active for potential restart
+        this.currentScanPosition = { row: 0, col: 0 };
+        this.scanAnimationId = null;
+        
+        // Note: Removed completion text update to keep animation clean and minimal
+        
+        window.Logger?.app('info', 'Detection scanning animation completed with celebration');
+    }
+    
+    // Get detector emoji based on structure type
+    getDetectorEmoji(structureType) {
+        const emojis = {
+            'windmill': '🔍',  // Generic lens for windmills
+            'tower': '🔍',     // Generic lens for towers
+            'mound': '🏺',     // Archaeological artifact for mounds
+            'generic': '🔍'    // Default lens
+        };
+        
+        return emojis[structureType] || '🔍';
+    }
+
+    // Configure step size (for future customization)
+    setDetectionStepSize(stepSizeMeters) {
+        this.detectionStepSize = stepSizeMeters;
+        window.Logger?.app('info', `Detection step size set to ${stepSizeMeters}m`);
+        
+        // If currently scanning, reinitialize grid with new step size
+        if (this.detectionActive && this.scanGrid) {
+            this.initializeScanningGrid();
+        }
+    }
+    
+    // Configure step interval (for future customization)
+    setDetectionStepInterval(intervalMs) {
+        this.detectionStepInterval = intervalMs;
+        window.Logger?.app('info', `Detection step interval set to ${intervalMs}ms`);
+    }
+    
+    // Preset configurations for different scanning modes
+    setDetectionMode(mode) {
+        const modes = {
+            'precise': { stepSize: 1, interval: 5 },      // 1m steps, slow
+            'standard': { stepSize: 2, interval: 3 },     // 2m steps, medium
+            'rapid': { stepSize: 4, interval: 2 },        // 4m steps, fast
+            'coarse': { stepSize: 8, interval: 1 }        // 8m steps, very fast
+        };
+        
+        if (modes[mode]) {
+            this.setDetectionStepSize(modes[mode].stepSize);
+            this.setDetectionStepInterval(modes[mode].interval);
+            window.Logger?.app('info', `Detection mode set to '${mode}'`);
+        } else {
+            window.Logger?.app('warn', `Unknown detection mode: ${mode}`);
+        }
+    }
+
+    // ========================================
+    // PURE UX ANIMATION - NO BACKEND INTEGRATION
+    // ========================================
+    
+    // NOTE: The following methods are kept for future backend integration,
+    // but the current animation is purely frontend UX focused.
+    
+    // Future: handleBackendPatchDetectionResult(patchData) {
+    //     // Will integrate with backend detection results
+    // }
+    
+    // Future: sendPatchToDetectionKernel(patchCenterLat, patchCenterLng) {
+    //     // Will send coordinates to backend for actual analysis
+    // }
+    
+    // Current animation is self-contained and independent of backend
 
     // ========================================
     // RESOLUTION DETECTION & ANIMATION
@@ -762,12 +1217,9 @@ class REArchaeologyApp {
         }
         
         // Get icon position from its fixed location at top-center
-        const mapContainer = this.map.getContainer();
-        
-        // Icon is positioned at top: 40px, left: 50% (center)
         // Beam starts from below the icon with some offset
         const iconCenterX = mapContainer.offsetWidth / 2 +10;
-        const iconCenterY = 40 + 45; // top position + icon height + offset for looser attachment
+        const iconCenterY = 60; // top position + icon height + offset for looser attachment
         
         const iconLatLng = this.map.containerPointToLatLng([iconCenterX, iconCenterY]);
         
@@ -935,6 +1387,9 @@ class REArchaeologyApp {
         
         this.updateAnimationProgress(data);
         
+        // Note: Detection animation runs independently as pure UX
+        // Future backend integration would process detection results here
+        
         if (this.mapVisualization?.heatmapMode) {
             this.mapVisualization.addLidarHeatmapTile(data);
         }
@@ -981,6 +1436,14 @@ class REArchaeologyApp {
         if (data.session_id === this.currentLidarSession) {
             this.currentLidarSession = null;
             this.stopScanningAnimation();
+            
+            // DON'T stop detection animation - it's independent UX that should complete naturally
+            // this.stopDetectionAnimation(); // REMOVED - detection continues until it finishes
+            
+            // Reset button states - change "Stop" back to "Scan"
+            this.updateButtonStates();
+            
+            window.Logger?.app('info', 'LiDAR session completed - UI reset to scan mode (detection continues)');
         }
     }
 
@@ -989,17 +1452,36 @@ class REArchaeologyApp {
         
         if (data.session_id === this.currentLidarSession) {
             this.currentLidarSession = null;
-            this.cleanupAfterStop();
+            this.stopScanningAnimation();
+            
+            // DON'T stop detection animation - it's independent UX that should complete naturally
+            // this.stopDetectionAnimation(); // REMOVED - detection continues until it finishes
+            
+            // Reset button states - change "Stop" back to "Scan"
+            this.updateButtonStates();
+            
+            window.Logger?.app('info', 'LiDAR session stopped - UI reset to scan mode (detection continues)');
         }
     }
 
     handleSessionFailed(data) {
-        console.log('❌ Session failed:', data.session_id);
+        console.error('❌ Session failed:', data.session_id, data.error || data.message);
         
         if (data.session_id === this.currentLidarSession) {
             this.currentLidarSession = null;
-            this.cleanupAfterStop();
-            alert('LiDAR scan failed: ' + (data.message || 'Unknown error'));
+            this.stopScanningAnimation();
+            
+            // DON'T stop detection animation - it's independent UX that should complete naturally
+            // this.stopDetectionAnimation(); // REMOVED - detection continues until it finishes
+            
+            // Reset button states - change "Stop" back to "Scan"
+            this.updateButtonStates();
+            
+            // Show error to user
+            const errorMessage = data.error || data.message || 'Unknown error occurred';
+            alert(`LiDAR scan failed: ${errorMessage}`);
+            
+            window.Logger?.app('error', 'LiDAR session failed - UI reset to scan mode (detection continues)', { error: errorMessage });
         }
     }
 
@@ -1348,32 +1830,6 @@ class REArchaeologyApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
-    }
-
-    // ========================================
-    // INITIALIZATION
-    // ========================================
-
-    async init() {
-        try {
-            window.Logger?.app('info', 'Starting application initialization...');
-            
-            await this.waitForDOM();
-            this.initializeMap();
-            this.initializeLayers();
-            this.setupDefaultScanArea();
-            this.setupEventListeners();
-            this.updateScanButtonText(false);
-            
-            // Initialize authentication
-            await this.initializeAuth();
-            
-            window.Logger?.app('info', 'Application initialized successfully');
-            
-        } catch (error) {
-            console.error('❌ Application initialization failed:', error);
-            throw error;
-        }
     }
 }
 

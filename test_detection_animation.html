@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔬 Client-Side Detection UX Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            min-height: 100vh;
+        }
+
+        .detection-container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            margin: 20px auto;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        /* Detector Emoji Animation */
+        .detector-emoji {
+            position: absolute;
+            font-size: 2em;
+            z-index: 100;
+            transition: all 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            opacity: 0;
+            transform: scale(0.5);
+            pointer-events: none;
+        }
+
+        .detector-emoji.active {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .detector-emoji.analyzing {
+            animation: detectingPulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes detectingPulse {
+            0%, 100% { 
+                transform: scale(1); 
+                filter: brightness(1);
+            }
+            50% { 
+                transform: scale(1.2); 
+                filter: brightness(1.5);
+            }
+        }
+
+        /* Detection Progress Indicator */
+        .detection-progress {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 20px;
+            border-radius: 20px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .detection-progress.active {
+            opacity: 1;
+        }
+
+        .progress-bar {
+            width: 200px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 2px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 2px;
+        }
+
+        /* Profile Selection Panel */
+        .profile-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .profile-select {
+            width: 200px;
+            padding: 8px;
+            margin: 10px 0;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 5px;
+        }
+
+        .profile-select option {
+            background: #2c3e50;
+            color: white;
+        }
+
+        /* Control Buttons */
+        .control-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .detect-button {
+            display: block;
+            width: 100%;
+            padding: 12px 20px;
+            margin: 10px 0;
+            background: linear-gradient(135deg, #e74c3c, #c0392b);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .detect-button:hover {
+            background: linear-gradient(135deg, #c0392b, #a93226);
+            transform: translateY(-2px);
+        }
+
+        .detect-button:disabled {
+            background: gray;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Detection Results */
+        .detection-result {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid;
+            min-width: 200px;
+            z-index: 200;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.4s ease;
+        }
+
+        .detection-result.show {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .result-positive {
+            border-color: #2ecc71;
+            background: rgba(46, 204, 113, 0.2);
+        }
+
+        .result-negative {
+            border-color: #e74c3c;
+            background: rgba(231, 76, 60, 0.2);
+        }
+
+        .result-uncertain {
+            border-color: #f39c12;
+            background: rgba(243, 156, 18, 0.2);
+        }
+
+        /* Status Messages */
+        .status-log {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            max-height: 150px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .status-item {
+            margin: 5px 0;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9em;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .timestamp {
+            color: #95a5a6;
+            font-size: 0.8em;
+        }
+
+        /* Grid overlay for reference */
+        .detection-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔬 Client-Side Detection UX System</h1>
+    <p>Integration test for detection effects with backend communication</p>
+
+    <!-- Profile Selection -->
+    <div class="profile-panel">
+        <h3>📋 Detection Profile</h3>
+        <select class="profile-select" id="profileSelect">
+            <option value="archaeological">🏛️ Archaeological Structures</option>
+            <option value="geometric">📐 Geometric Patterns</option>
+            <option value="elevation">⛰️ Elevation Anomalies</option>
+            <option value="vegetation">🌿 Vegetation Patterns</option>
+            <option value="thermal">🌡️ Thermal Signatures</option>
+        </select>
+        
+        <div style="margin-top: 15px;">
+            <label>🎯 Sensitivity:</label>
+            <input type="range" id="sensitivitySlider" min="1" max="10" value="5" style="width: 100%; margin: 5px 0;">
+            <span id="sensitivityValue">5</span>
+        </div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="control-panel">
+        <h3>🎮 Detection Controls</h3>
+        <button class="detect-button" id="startDetection">🔍 Start Detection</button>
+        <button class="detect-button" id="simulateBackend">🖥️ Simulate Backend</button>
+        <button class="detect-button" id="clearResults">🗑️ Clear Results</button>
+        
+        <div style="margin-top: 15px; font-size: 0.9em;">
+            <div>Status: <span id="detectionStatus">Ready</span></div>
+            <div>Active: <span id="activeDetections">0</span></div>
+        </div>
+    </div>
+
+    <!-- Main Detection Area -->
+    <div class="detection-container" id="detectionContainer">
+        <div class="detection-grid"></div>
+        
+        <!-- Detection Progress Indicator -->
+        <div class="detection-progress" id="detectionProgress">
+            <div>🔬 Analyzing with <span id="currentProfile">Archaeological</span> profile...</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div id="progressText">0%</div>
+        </div>
+    </div>
+
+    <!-- Status Log -->
+    <div class="status-log" id="statusLog">
+        <div class="status-item">
+            <span class="timestamp">[Ready]</span> Detection system initialized
+        </div>
+    </div>
+
+    <script>
+        class ClientDetectionSystem {
+            constructor() {
+                this.isDetecting = false;
+                this.activeDetections = 0;
+                this.detectionResults = [];
+                this.currentProfile = 'archaeological';
+                this.sensitivity = 5;
+                
+                this.initializeElements();
+                this.bindEvents();
+                this.logStatus('System ready for detection');
+            }
+            
+            initializeElements() {
+                this.container = document.getElementById('detectionContainer');
+                this.progressIndicator = document.getElementById('detectionProgress');
+                this.progressFill = document.getElementById('progressFill');
+                this.progressText = document.getElementById('progressText');
+                this.statusLog = document.getElementById('statusLog');
+                this.profileSelect = document.getElementById('profileSelect');
+                this.sensitivitySlider = document.getElementById('sensitivitySlider');
+                this.startButton = document.getElementById('startDetection');
+            }
+            
+            bindEvents() {
+                // Profile selection
+                this.profileSelect.addEventListener('change', (e) => {
+                    this.currentProfile = e.target.value;
+                    this.updateProfileDisplay();
+                    this.logStatus(`Profile changed to: ${e.target.options[e.target.selectedIndex].text}`);
+                });
+                
+                // Sensitivity slider
+                this.sensitivitySlider.addEventListener('input', (e) => {
+                    this.sensitivity = e.target.value;
+                    document.getElementById('sensitivityValue').textContent = e.target.value;
+                });
+                
+                // Detection buttons
+                document.getElementById('startDetection').addEventListener('click', () => {
+                    this.startDetection();
+                });
+                
+                document.getElementById('simulateBackend').addEventListener('click', () => {
+                    this.simulateBackendResponse();
+                });
+                
+                document.getElementById('clearResults').addEventListener('click', () => {
+                    this.clearAllResults();
+                });
+                
+                // Click to detect at location
+                this.container.addEventListener('click', (e) => {
+                    if (!this.isDetecting) {
+                        const rect = this.container.getBoundingClientRect();
+                        const x = e.clientX - rect.left;
+                        const y = e.clientY - rect.top;
+                        this.triggerDetectionAt(x, y);
+                    }
+                });
+            }
+            
+            // Main Detection Flow
+            startDetection() {
+                if (this.isDetecting) return;
+                
+                this.isDetecting = true;
+                this.startButton.disabled = true;
+                this.startButton.textContent = '🔬 Detecting...';
+                
+                // Random detection location
+                const x = Math.random() * (this.container.offsetWidth - 100) + 50;
+                const y = Math.random() * (this.container.offsetHeight - 100) + 50;
+                
+                this.triggerDetectionAt(x, y);
+            }
+            
+            triggerDetectionAt(x, y) {
+                this.logStatus(`Detection initiated at coordinates (${Math.floor(x)}, ${Math.floor(y)})`);
+                
+                // 1. Create detector emoji
+                const detector = this.createDetectorEmoji(x, y);
+                
+                // 2. Show progress indicator
+                this.showDetectionProgress();
+                
+                // 3. Simulate backend communication
+                this.communicateWithBackend(x, y, detector);
+            }
+            
+            createDetectorEmoji(x, y) {
+                const detector = document.createElement('div');
+                detector.className = 'detector-emoji';
+                
+                // Choose emoji based on profile
+                const profileEmojis = {
+                    'archaeological': '🔬',
+                    'geometric': '📐',
+                    'elevation': '⛰️',
+                    'vegetation': '🌿',
+                    'thermal': '🌡️'
+                };
+                
+                detector.textContent = profileEmojis[this.currentProfile] || '🔍';
+                detector.style.left = x + 'px';
+                detector.style.top = y + 'px';
+                
+                this.container.appendChild(detector);
+                
+                // Animate in
+                setTimeout(() => {
+                    detector.classList.add('active');
+                    detector.classList.add('analyzing');
+                }, 100);
+                
+                this.activeDetections++;
+                this.updateDetectionStatus();
+                
+                return detector;
+            }
+            
+            showDetectionProgress() {
+                this.progressIndicator.classList.add('active');
+                this.updateProfileDisplay();
+                
+                // Animate progress bar
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += Math.random() * 15 + 5; // 5-20% increments
+                    progress = Math.min(progress, 100);
+                    
+                    this.progressFill.style.width = progress + '%';
+                    this.progressText.textContent = Math.floor(progress) + '%';
+                    
+                    if (progress >= 100) {
+                        clearInterval(progressInterval);
+                        setTimeout(() => {
+                            this.progressIndicator.classList.remove('active');
+                        }, 500);
+                    }
+                }, 200);
+            }
+            
+            // Backend Communication Simulation
+            communicateWithBackend(x, y, detectorElement) {
+                this.logStatus('📡 Communicating with backend kernel...');
+                
+                // Simulate API call delay
+                setTimeout(() => {
+                    // Simulate backend processing based on profile and sensitivity
+                    const result = this.generateDetectionResult(x, y);
+                    this.handleBackendResponse(x, y, detectorElement, result);
+                }, 2000 + Math.random() * 1000); // 2-3 second delay
+            }
+            
+            generateDetectionResult(x, y) {
+                // Simulate realistic detection logic based on profile
+                const profileWeights = {
+                    'archaeological': { positive: 0.3, uncertain: 0.4, negative: 0.3 },
+                    'geometric': { positive: 0.4, uncertain: 0.3, negative: 0.3 },
+                    'elevation': { positive: 0.5, uncertain: 0.2, negative: 0.3 },
+                    'vegetation': { positive: 0.6, uncertain: 0.2, negative: 0.2 },
+                    'thermal': { positive: 0.2, uncertain: 0.5, negative: 0.3 }
+                };
+                
+                const weights = profileWeights[this.currentProfile];
+                const random = Math.random();
+                const sensitivityFactor = this.sensitivity / 10;
+                
+                let resultType;
+                if (random < weights.positive * sensitivityFactor) {
+                    resultType = 'positive';
+                } else if (random < (weights.positive + weights.uncertain) * sensitivityFactor) {
+                    resultType = 'uncertain';
+                } else {
+                    resultType = 'negative';
+                }
+                
+                return {
+                    type: resultType,
+                    confidence: Math.random() * 0.4 + 0.3, // 30-70%
+                    profile: this.currentProfile,
+                    coordinates: { x, y },
+                    details: this.generateResultDetails(resultType)
+                };
+            }
+            
+            generateResultDetails(type) {
+                const details = {
+                    positive: [
+                        'Strong structural signatures detected',
+                        'Geometric patterns match archaeological profiles',
+                        'Elevation anomalies suggest artificial construction',
+                        'Spectral analysis indicates cultural materials'
+                    ],
+                    uncertain: [
+                        'Partial pattern match detected',
+                        'Geological features may mask structures',
+                        'Additional analysis recommended',
+                        'Inconclusive spectral signatures'
+                    ],
+                    negative: [
+                        'No significant patterns detected',
+                        'Natural geological formation',
+                        'Background noise levels normal',
+                        'No structural indicators found'
+                    ]
+                };
+                
+                return details[type][Math.floor(Math.random() * details[type].length)];
+            }
+            
+            handleBackendResponse(x, y, detectorElement, result) {
+                this.logStatus(`📊 Backend response: ${result.type} (${Math.floor(result.confidence * 100)}% confidence)`);
+                
+                // Update detector emoji based on result
+                detectorElement.classList.remove('analyzing');
+                
+                // Show result popup
+                this.showDetectionResult(x, y, result);
+                
+                // Clean up detector after delay
+                setTimeout(() => {
+                    detectorElement.style.opacity = '0';
+                    detectorElement.style.transform = 'scale(0.5)';
+                    setTimeout(() => {
+                        detectorElement.remove();
+                        this.activeDetections--;
+                        this.updateDetectionStatus();
+                    }, 500);
+                }, 3000);
+                
+                // Reset detection state
+                this.isDetecting = false;
+                this.startButton.disabled = false;
+                this.startButton.textContent = '🔍 Start Detection';
+                
+                this.detectionResults.push(result);
+            }
+            
+            showDetectionResult(x, y, result) {
+                const resultElement = document.createElement('div');
+                resultElement.className = `detection-result result-${result.type}`;
+                
+                const resultIcons = {
+                    positive: '✅',
+                    uncertain: '❓',
+                    negative: '❌'
+                };
+                
+                resultElement.innerHTML = `
+                    <div style="font-weight: bold; margin-bottom: 8px;">
+                        ${resultIcons[result.type]} Detection Result
+                    </div>
+                    <div style="font-size: 0.9em; margin-bottom: 5px;">
+                        Profile: ${this.currentProfile}
+                    </div>
+                    <div style="font-size: 0.9em; margin-bottom: 5px;">
+                        Confidence: ${Math.floor(result.confidence * 100)}%
+                    </div>
+                    <div style="font-size: 0.8em; color: #bdc3c7;">
+                        ${result.details}
+                    </div>
+                `;
+                
+                // Position near detection point
+                resultElement.style.left = Math.min(x + 20, this.container.offsetWidth - 220) + 'px';
+                resultElement.style.top = Math.min(y + 20, this.container.offsetHeight - 100) + 'px';
+                
+                this.container.appendChild(resultElement);
+                
+                // Show with animation
+                setTimeout(() => {
+                    resultElement.classList.add('show');
+                }, 100);
+                
+                // Auto-remove after delay
+                setTimeout(() => {
+                    resultElement.classList.remove('show');
+                    setTimeout(() => {
+                        resultElement.remove();
+                    }, 400);
+                }, 5000);
+            }
+            
+            // Utility methods
+            updateProfileDisplay() {
+                const profileText = this.profileSelect.options[this.profileSelect.selectedIndex].text;
+                document.getElementById('currentProfile').textContent = profileText.replace(/^[^\s]+\s/, '');
+            }
+            
+            updateDetectionStatus() {
+                document.getElementById('detectionStatus').textContent = this.isDetecting ? 'Detecting' : 'Ready';
+                document.getElementById('activeDetections').textContent = this.activeDetections;
+            }
+            
+            logStatus(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const statusItem = document.createElement('div');
+                statusItem.className = 'status-item';
+                statusItem.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+                
+                this.statusLog.appendChild(statusItem);
+                this.statusLog.scrollTop = this.statusLog.scrollHeight;
+                
+                // Limit log entries
+                while (this.statusLog.children.length > 10) {
+                    this.statusLog.removeChild(this.statusLog.firstChild);
+                }
+            }
+            
+            simulateBackendResponse() {
+                if (this.isDetecting) return;
+                
+                const x = Math.random() * (this.container.offsetWidth - 100) + 50;
+                const y = Math.random() * (this.container.offsetHeight - 100) + 50;
+                
+                this.logStatus('🧪 Simulating backend detection response...');
+                const result = this.generateDetectionResult(x, y);
+                this.showDetectionResult(x, y, result);
+                this.detectionResults.push(result);
+            }
+            
+            clearAllResults() {
+                // Remove all result elements
+                const results = this.container.querySelectorAll('.detection-result');
+                results.forEach(result => result.remove());
+                
+                // Clear detectors
+                const detectors = this.container.querySelectorAll('.detector-emoji');
+                detectors.forEach(detector => detector.remove());
+                
+                this.detectionResults = [];
+                this.activeDetections = 0;
+                this.updateDetectionStatus();
+                this.logStatus('🗑️ All detection results cleared');
+            }
+        }
+        
+        // Initialize system when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new ClientDetectionSystem();
+        });
+    </script>
+</body>
+</html>
