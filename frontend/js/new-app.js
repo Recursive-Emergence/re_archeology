@@ -60,29 +60,57 @@ class REArchaeologyApp {
     async init() {
         try {
             window.Logger?.app('info', 'Starting application initialization...');
-            
             await this.waitForDOM();
             this.initializeMap();
             this.initializeLayers();
+
+            // Parse URL for lat/lon params and center if present
+            this.handleUrlCoordinates();
+
             this.setupDefaultScanArea();
             this.setupEventListeners();
-            
             // Set initial scan button text based on the default checkbox state
             const enableDetection = document.getElementById('enableDetection')?.checked || false;
             this.updateScanButtonText(enableDetection);
-            
             // Initialize detection overlay
             this.initializeDetectionOverlay();
-            
             // Initialize authentication
             await this.initializeAuth();
-            
             window.Logger?.app('info', 'Application initialized successfully');
-            
         } catch (error) {
             console.error('❌ Application initialization failed:', error);
             throw error;
         }
+    }
+
+    // Handle URL lat/lon params and browser navigation
+    handleUrlCoordinates() {
+        const params = new URLSearchParams(window.location.search);
+        const lat = parseFloat(params.get('lat'));
+        const lon = parseFloat(params.get('lon'));
+        const valid = !isNaN(lat) && !isNaN(lon);
+        if (valid) {
+            this.selectScanArea(lat, lon, 1.0);
+            this.map.setView([lat, lon], 13, { animate: true });
+        }
+        // Listen for browser navigation (back/forward)
+        window.addEventListener('popstate', () => {
+            const params = new URLSearchParams(window.location.search);
+            const lat = parseFloat(params.get('lat'));
+            const lon = parseFloat(params.get('lon'));
+            if (!isNaN(lat) && !isNaN(lon)) {
+                this.selectScanArea(lat, lon, 1.0);
+                this.map.setView([lat, lon], 13, { animate: true });
+            }
+        });
+    }
+
+    // Update URL with new coordinates (no reload)
+    updateUrlWithCoordinates(lat, lon) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('lat', lat);
+        url.searchParams.set('lon', lon);
+        window.history.pushState({}, '', url);
     }
 
     async waitForDOM() {
@@ -313,6 +341,8 @@ class REArchaeologyApp {
         // Store area data
         this.selectedArea = { lat, lon, radius: radiusKm, bounds };
         this.updateButtonStates();
+        // Update URL with new coordinates
+        this.updateUrlWithCoordinates(lat, lon);
     }
 
     calculateAreaBounds(lat, lon, radiusKm) {
@@ -1203,7 +1233,7 @@ class REArchaeologyApp {
                 if (this.scanningIcon) {
                     this.scanningIcon.classList.remove('processing');
                     this.scanningIcon.style.transform = 'translateX(-50%) scale(1)';
-                    this.scanningIcon.style.filter = 'drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(0, 255, 136, 0.6))';
+                    this.scanningIcon.style.filter = 'drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(255, 255, 136, 0.6))';
                 }
             }, 1200);
         }
