@@ -29,7 +29,6 @@ REQUIRED_FILES=(
     ".env.cloudrun"
     "requirements.cloudrun.txt"
     "sage-striker-294302-b89a8b7e205b.json"
-    "phi0_core.py"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -39,27 +38,13 @@ for file in "${REQUIRED_FILES[@]}"; do
     fi
 done
 
-echo "✅ All required files found"
-
-# Validate scipy dependencies in requirements.cloudrun.txt
-echo "🔬 Validating scipy dependencies in Cloud Run requirements..."
-if grep -q "scipy==" requirements.cloudrun.txt; then
-    echo "✅ scipy found in requirements.cloudrun.txt"
-else
-    echo "❌ Error: scipy missing from requirements.cloudrun.txt"
-    echo "   This is required for phi0_core.py functionality"
+# Check that kernel/ directory exists
+if [ ! -d "kernel" ]; then
+    echo "❌ Error: Required directory not found: kernel/"
     exit 1
 fi
 
-# Run scipy compatibility test
-echo "🧪 Running scipy compatibility test..."
-if python3 test_scipy_deployment.py; then
-    echo "✅ Scipy deployment test passed"
-else
-    echo "❌ Scipy deployment test failed"
-    echo "   Please check scipy dependencies before deploying"
-    exit 1
-fi
+echo "✅ All required files and directories found"
 
 echo "🚀 Starting deployment to Google Cloud Run..."
 echo "================================================"

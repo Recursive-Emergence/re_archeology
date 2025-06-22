@@ -7,7 +7,7 @@ window.AppConfig = {
     // Logging configuration
     logging: {
         // Default log level: 'DEBUG', 'INFO', 'WARN', 'ERROR', 'SILENT'
-        level: 'SILENT', // Set to SILENT to disable console noise by default
+        level: 'INFO', // Set to SILENT to disable console noise by default
         
         // Enable/disable specific logging categories
         categories: {

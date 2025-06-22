@@ -1307,7 +1307,9 @@ class REArchaeologyApp {
 
     connectWebSocket() {
         try {
-            const wsUrl = `ws://${window.location.host}/api/v1/ws/discovery`;
+            // Use wss:// for HTTPS, ws:// for HTTP (localhost/dev)
+            const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/ws/discovery`;
             console.log('🔌 Connecting to WebSocket:', wsUrl);
             this.websocket = new WebSocket(wsUrl);
             
