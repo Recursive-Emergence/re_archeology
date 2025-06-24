@@ -143,7 +143,7 @@ class G2ValidationSystem:
         # Use LidarMapFactory to get the patch
         # Let the factory choose the best available dataset (AHN4 preferred, with fallbacks)
         # We specify preferred_data_type as DSM.
-        lidar_data = LidarMapFactory.get_patch(
+        lidar_patch_result = LidarMapFactory.get_patch(
             lat=site.lat,
             lon=site.lon,
             size_m=patch_edge_size_m,
@@ -151,13 +151,19 @@ class G2ValidationSystem:
             preferred_data_type="DSM"   # Digital Surface Model
         )
         
-        if lidar_data is not None and lidar_data.size > 0:
-            logger.info(f"Successfully fetched LiDAR data for {site.name}. Shape: {lidar_data.shape}")
-            # Expected shape for 40m at 0.5m/px is (80, 80) - should be square
-            expected_shape = (80, 80)
-            if lidar_data.shape != expected_shape:
-                logger.warning(f"Expected square patch {expected_shape}, got {lidar_data.shape}. This may indicate factory/GEE projection issues.")
-            return lidar_data
+        # Extract numpy array from LidarPatchResult
+        if lidar_patch_result is not None and hasattr(lidar_patch_result, 'data'):
+            lidar_data = lidar_patch_result.data
+            if lidar_data is not None and lidar_data.size > 0:
+                logger.info(f"Successfully fetched LiDAR data for {site.name}. Shape: {lidar_data.shape}")
+                # Expected shape for 40m at 0.5m/px is (80, 80) - should be square
+                expected_shape = (80, 80)
+                if lidar_data.shape != expected_shape:
+                    logger.warning(f"Expected square patch {expected_shape}, got {lidar_data.shape}. This may indicate factory/GEE projection issues.")
+                return lidar_data
+            else:
+                logger.error(f"LiDAR data for {site.name} is empty or None.")
+                return None
         else:
             logger.error(f"Failed to fetch LiDAR data for {site.name} using LidarMapFactory.")
             return None

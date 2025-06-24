@@ -2,35 +2,42 @@
 Discovery router for real-time archaeological structure detection.
 """
 
+# ==============================================================================
+# IMPORTS
+# ==============================================================================
+
+# Standard library imports
 import asyncio
 import json
 import logging
-import uuid
-import time
 import os
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
-
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
-from fastapi.websockets import WebSocketState
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import numpy as np
-import ee
-
-from backend.api.routers.auth import get_current_user_optional
-
-# Import the new G2 kernel system
 import sys
-import os
+import time
+import uuid
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+# Third-party imports
+import ee
+import numpy as np
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+from fastapi.websockets import WebSocketState
+from pydantic import BaseModel
+
+# Local imports
+from backend.api.routers.auth import get_current_user_optional
+from backend.utils.earth_engine import get_earth_engine_status, is_earth_engine_available
+
+# Kernel system imports
 # Add the root directory to Python path to import kernel system
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 try:
-    from kernel import G2StructureDetector, G2DetectionResult
+    from kernel import G2DetectionResult, G2StructureDetector
     from kernel.core_detector import ElevationPatch
     logger = logging.getLogger(__name__)
     logger.info("✅ Successfully imported G2StructureDetector from kernel system")
@@ -47,11 +54,21 @@ except ImportError as e:
     class G2StructureDetector:
         def __init__(self, *args, **kwargs):
             raise NotImplementedError("Kernel system not available")
+
+# ==============================================================================
+# LOGGING CONFIGURATION
+# ==============================================================================
+
 # Temporarily enable debug logging to diagnose WebSocket issues
 logger.setLevel(logging.DEBUG)
 
-# Import shared Earth Engine utilities
-from backend.utils.earth_engine import is_earth_engine_available, get_earth_engine_status
+# Reduce G2 kernel logging to avoid flooding during detection
+kernel_logger = logging.getLogger('kernel.core_detector')
+kernel_logger.setLevel(logging.WARNING)
+
+# ==============================================================================
+# UTILITY FUNCTIONS
+# ==============================================================================
 
 def clean_patch_data(elevation_data: np.ndarray) -> np.ndarray:
     """Replace NaNs with mean of valid values"""
@@ -247,7 +264,10 @@ def safe_asdict(dataclass_obj):
     data = asdict(dataclass_obj)
     return safe_serialize(data)
 
-@dataclass
+# ==============================================================================
+# DATA MODELS
+# ==============================================================================
+
 @dataclass
 class ScanPatch:
     """Information about a single scanned patch"""
@@ -278,6 +298,10 @@ class DiscoverySession:
     end_time: Optional[str] = None
     error_message: Optional[str] = None
 
+# ==============================================================================
+# CONNECTION MANAGEMENT
+# ==============================================================================
+
 class EnhancedConnectionManager:
     """Enhanced WebSocket connection manager with better status tracking"""
     
@@ -288,9 +312,9 @@ class EnhancedConnectionManager:
         self.last_heartbeat: Dict[WebSocket, float] = {}
     
     async def connect(self, websocket: WebSocket, user_id: str = None):
-        logger.info(f"Accepting WebSocket connection...")
+        logger.info(f"🔌 Accepting WebSocket connection from {websocket.client}...")
         await websocket.accept()
-        logger.info(f"WebSocket accepted successfully")
+        logger.info(f"✅ WebSocket accepted successfully")
         
         self.active_connections.append(websocket)
         
@@ -305,11 +329,16 @@ class EnhancedConnectionManager:
         
         self.last_heartbeat[websocket] = time.time()
         
-        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+        logger.info(f"🔗 WebSocket connected. Total active connections: {len(self.active_connections)}")
         
-        # Don't send connection confirmation immediately - let the connection stabilize
-        # The frontend will send a ping if needed
-        logger.info(f"WebSocket connection established successfully for user: {user_id}")
+        # Send a welcome message to confirm connection
+        await self.send_to_connection(websocket, {
+            'type': 'connection_established',
+            'timestamp': datetime.now().isoformat(),
+            'total_connections': len(self.active_connections)
+        })
+        
+        logger.info(f"✅ WebSocket connection established successfully for user: {user_id}")
     
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
@@ -368,10 +397,13 @@ class EnhancedConnectionManager:
     
     async def send_message(self, message: dict):
         """Broadcast message to all connected clients with better error handling"""
+        message_type = message.get('type', 'unknown')
+        
         if not self.active_connections:
-            logger.debug(f"No active connections, skipping message broadcast: {message.get('type')}")
+            logger.warning(f"❌ No active connections, skipping message broadcast: {message_type}")
             return 0
             
+        logger.debug(f"📡 Broadcasting {message_type} to {len(self.active_connections)} connections")
         successful_sends = 0
         failed_connections = []
         
@@ -388,7 +420,11 @@ class EnhancedConnectionManager:
         for connection in failed_connections:
             self.disconnect(connection)
         
-        logger.debug(f"Broadcast {message.get('type')} to {successful_sends}/{len(self.active_connections)} connections")
+        if successful_sends > 0:
+            logger.debug(f"✅ Broadcast {message_type} to {successful_sends}/{len(self.active_connections)} connections")
+        else:
+            logger.warning(f"❌ Failed to broadcast {message_type} - no successful sends")
+        
         return successful_sends
     
     async def send_heartbeat(self):
@@ -407,20 +443,31 @@ class EnhancedConnectionManager:
             'average_messages_sent': sum(meta['messages_sent'] for meta in self.connection_metadata.values()) / max(len(self.connection_metadata), 1)
         }
 
+# ==============================================================================
+# GLOBAL VARIABLES AND CONSTANTS
+# ==============================================================================
+
 # Global manager instance
 discovery_manager = EnhancedConnectionManager()
 active_sessions: Dict[str, DiscoverySession] = {}
 session_patches: Dict[str, List[ScanPatch]] = {}
 
-# Request models for API endpoints
+# ==============================================================================
+# API REQUEST MODELS
+# ==============================================================================
+
 class SessionRequest(BaseModel):
     session_id: str
 
+# ==============================================================================
+# ROUTER INITIALIZATION
+# ==============================================================================
+
 router = APIRouter()
 
-# =============================================================================
-# WEBSOCKET ENDPOINT
-# =============================================================================
+# ==============================================================================
+# WEBSOCKET ENDPOINTS
+# ==============================================================================
 
 @router.websocket("/ws/discovery")
 async def websocket_discovery_endpoint(
@@ -484,9 +531,9 @@ async def websocket_discovery_endpoint(
         logger.error(f"Exception type: {type(e)}")
         discovery_manager.disconnect(websocket)
 
-# =============================================================================
-# DISCOVERY SESSION API ENDPOINTS
-# =============================================================================
+# ==============================================================================
+# DISCOVERY SESSION ENDPOINTS
+# ==============================================================================
 
 @router.post("/discovery/start")
 async def start_discovery_session(config: Dict[str, Any]):
@@ -544,11 +591,50 @@ async def stop_discovery_session(session_id: str):
             session.end_time = datetime.now().isoformat()
             logger.info(f"🛑 Stopped discovery session {session_id}")
         
+        # Cancel any active detection for this session first
+        if session_id in _active_detection_tasks:
+            detection_task = _active_detection_tasks[session_id]
+            if not detection_task.done():
+                detection_task.cancel()
+                logger.info(f"🛑 Cancelled active detection task for session {session_id}")
+            del _active_detection_tasks[session_id]
+        
+        # Check if we should run coordinated detection before cleanup
+        should_run_detection = False
+        scan_area = None
+        
+        if isinstance(session, dict) and session.get("type") == "lidar_scan":
+            enable_detection = session.get("enable_detection", False)
+            if enable_detection:
+                # Sliding detection was already running during LiDAR scan
+                logger.info(f"✅ Sliding detection was running during LiDAR scan for session {session_id}")
+                logger.info(f"🛑 Detection will be cancelled by the task cancellation above")
+        
+        # Send stopped message first
         await discovery_manager.send_message({
             'type': 'session_stopped',
             'session_id': session_id,
             'timestamp': datetime.now().isoformat()
         })
+        
+        # Start coordinated detection if needed (before cleanup)
+        if should_run_detection and scan_area:
+            logger.info(f"🎯 Starting coordinated detection for stopped session {session_id}")
+            
+            # Send detection starting message
+            await discovery_manager.send_message({
+                "type": "detection_starting",
+                "session_id": session_id,
+                "message": "Starting coordinated detection on collected tiles",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Run coordinated detection asynchronously and store task for cancellation
+            detection_task = asyncio.create_task(run_coordinated_detection(session_id, scan_area))
+            _active_detection_tasks[session_id] = detection_task
+        else:
+            # Clean up detector cache only if not running detection
+            cleanup_session_detector(session_id)
         
         return {
             'status': 'success',
@@ -594,9 +680,9 @@ async def get_session_details(session_id: str):
         logger.error(f"Failed to get session details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# =============================================================================
-# KERNEL MANAGEMENT API ENDPOINTS
-# =============================================================================
+# ==============================================================================
+# KERNEL MANAGEMENT ENDPOINTS
+# ==============================================================================
 
 @router.get("/discovery/kernels")
 async def get_cached_kernels(structure_type: str = None):
@@ -700,9 +786,9 @@ async def clear_kernel_cache(structure_type: str = None, confirm: bool = False):
         logger.error(f"Failed to clear kernel cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# =============================================================================
-# DISCOVERY SIMULATION (Placeholder for actual discovery logic)
-# =============================================================================
+# ==============================================================================
+# DISCOVERY LOGIC
+# ==============================================================================
 
 async def run_discovery_session(session: DiscoverySession, manager: EnhancedConnectionManager):
     """Run a discovery session with real GEE elevation data loading"""
@@ -1062,6 +1148,7 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                     await manager.send_message({
                         'type': 'patch_result',
                         'patch': safe_patch_message,
+                        'session_id': session.session_id,
                         'session_progress': {
                             'processed': int(session.processed_patches),
                             'total': int(session.total_patches),
@@ -1083,6 +1170,20 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                 except Exception as send_error:
                     logger.warning(f"Failed to send patch result: {send_error}")
                     # Continue processing even if send fails
+                
+                # Send dedicated detection_result for high-confidence windmills
+                if is_positive and confidence > 0.7:
+                    logger.info(f"🎯 Sending detection_result for windmill: confidence={confidence:.3f} at ({lat:.6f}, {lon:.6f})")
+                    await manager.send_message({
+                        'type': 'detection_result',
+                        'structure_type': 'windmill',
+                        'confidence': confidence,
+                        'lat': lat,
+                        'lon': lon,
+                        'session_id': session.session_id,
+                        'patch_id': patch_id,
+                        'timestamp': datetime.now().isoformat()
+                    })
                 
                 # Small delay to simulate processing time and avoid overwhelming GEE
                 await asyncio.sleep(0.2)  # Increased delay for GEE rate limiting
@@ -1122,9 +1223,9 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
         except Exception as send_error:
             logger.warning(f"Failed to send session failure notification: {send_error}")
 
-# =============================================================================
+# ==============================================================================
 # STATUS AND HEALTH ENDPOINTS
-# =============================================================================
+# ==============================================================================
 
 @router.get("/discovery/status")
 async def get_discovery_status():
@@ -1152,9 +1253,9 @@ async def get_earth_engine_status():
         "timestamp": datetime.now().isoformat()
     }
 
-# =============================================================================
-# LI DAR SCANNING ENDPOINT
-# =============================================================================
+# ==============================================================================
+# LIDAR SCANNING ENDPOINTS
+# ==============================================================================
 
 @router.post("/discovery/lidar-scan")
 async def start_lidar_scan(
@@ -1176,6 +1277,8 @@ async def start_lidar_scan(
         radius_km = float(config.get('radius_km', 2.0))
         tile_size_m = int(config.get('tile_size_m', 64))  # Smaller default for streaming
         prefer_high_resolution = config.get('prefer_high_resolution', False)
+        enable_detection = config.get('enable_detection', False)
+        structure_type = config.get('structure_type', 'windmill')
         
         # Determine optimal resolution based on preference and area size
         if prefer_high_resolution:
@@ -1200,6 +1303,8 @@ async def start_lidar_scan(
             "status": "started",
             "config": config,
             "preferred_resolution": preferred_resolution,  # Store preferred resolution
+            "enable_detection": enable_detection,  # Store detection configuration
+            "structure_type": structure_type,
             "start_time": datetime.now(timezone.utc).isoformat(),
             "total_tiles": scan_grid_size * scan_grid_size,
             "processed_tiles": 0,
@@ -1213,17 +1318,28 @@ async def start_lidar_scan(
         # Store session
         active_sessions[session_id] = session_info
         
+        # Send detection starting message if detection is enabled
+        if enable_detection:
+            await discovery_manager.send_message({
+                "type": "detection_starting",
+                "session_id": session_id,
+                "message": "Starting real-time sliding detection during LiDAR scan",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        
         # Start background task for tile scanning
         asyncio.create_task(run_lidar_scan_async(session_id, session_info))
         
-        logger.info(f"✅ Started LiDAR scan session {session_id}")
+        logger.info(f"✅ Started LiDAR scan session {session_id} (detection: {enable_detection})")
         
         return {
             "session_id": session_id,
             "status": "started",
-            "message": f"LiDAR scan started for {scan_grid_size}x{scan_grid_size} tiles",
+            "message": f"LiDAR scan started for {scan_grid_size}x{scan_grid_size} tiles" + (" with detection" if enable_detection else ""),
             "total_tiles": scan_grid_size * scan_grid_size,
-            "actual_resolution": f"{preferred_resolution}m"
+            "actual_resolution": f"{preferred_resolution}m",
+            "enable_detection": enable_detection,
+            "structure_type": structure_type
         }
         
     except Exception as e:
@@ -1245,6 +1361,8 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         data_type = config.get('data_type', 'DSM')
         streaming_mode = config.get('streaming_mode', True)  # Enable by default
         preferred_resolution = session_info.get('preferred_resolution', 1.0)  # Get from session info
+        enable_detection = config.get('enable_detection', False)
+        structure_type = config.get('structure_type', 'windmill')
         
         # Calculate scan area bounds (should match the green rectangle)
         radius_m = radius_km * 1000
@@ -1424,6 +1542,44 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         # Send tile result to connected clients
                         await discovery_manager.send_message(tile_result)
                         
+                        # Store tile data for coordinated detection later
+                        logger.debug(f"🔧 Detection enabled: {enable_detection} for tile {tile_id}")
+                        if enable_detection:
+                            logger.info(f"🎯 Storing tile {tile_id} for coordinated detection at ({tile_lat:.6f}, {tile_lon:.6f})")
+                            # Store tile data for later coordinated detection
+                            if session_id not in _session_tile_data:
+                                _session_tile_data[session_id] = {}
+                            _session_tile_data[session_id][tile_id] = {
+                                'lat': tile_lat,
+                                'lon': tile_lon, 
+                                'elevation_data': elevation_data,
+                                'lidar_result': result,
+                                'structure_type': structure_type
+                            }
+                            
+                            # Store tile for real-time sliding detection (don't run tile-level detection for lens)
+                            logger.info(f"🎯 Tile {tile_id} stored for real-time sliding detection at ({tile_lat:.6f}, {tile_lon:.6f})")
+                            
+                            # Start sliding detection after collecting enough tiles
+                            tiles_collected = len(_session_tile_data[session_id])
+                            if tiles_collected == 5 and session_id not in _active_detection_tasks:  # Start after 5 tiles
+                                logger.info(f"🎯 Starting sliding detection with {tiles_collected} tiles collected")
+                                # Start background sliding detection
+                                config = session_info.get('config', {})
+                                center_lat = config.get('center_lat')
+                                center_lon = config.get('center_lon') 
+                                radius_km = config.get('radius_km')
+                                
+                                if center_lat and center_lon and radius_km:
+                                    scan_area = {
+                                        'lat': center_lat,
+                                        'lon': center_lon,
+                                        'size_km': radius_km * 2  # Convert radius to diameter
+                                    }
+                                    detection_task = asyncio.create_task(run_coordinated_detection(session_id, scan_area))
+                                    _active_detection_tasks[session_id] = detection_task
+                        # Note: Removed test patch_result for non-detection mode to avoid confusion
+                        
                     else:
                         # No data available for this tile
                         # Calculate explicit tile bounds for consistent rendering
@@ -1465,6 +1621,33 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         
                         logger.debug(f"⚠️ Sending tile {tile_id} with no data")
                         await discovery_manager.send_message(tile_result)
+                        
+                        # Send empty patch_result if detection is enabled to keep lens moving
+                        if enable_detection:
+                            patch_message = {
+                                'session_id': str(session_id),
+                                'patch_id': str(tile_id),
+                                'lat': float(tile_lat),
+                                'lon': float(tile_lon),
+                                'timestamp': datetime.now(timezone.utc).isoformat(),
+                                'is_positive': False,
+                                'confidence': 0.0,
+                                'detection_result': {
+                                    'confidence': 0.0,
+                                    'method': f'G2_{structure_type}_no_data',
+                                    'elevation_source': 'none'
+                                },
+                                'elevation_stats': {},
+                                'patch_size_m': int(tile_size_m)
+                            }
+                            
+                            logger.info(f"🔍 Sending patch_result (no data) for tile {tile_id} at ({tile_lat:.6f}, {tile_lon:.6f})")
+                            await discovery_manager.send_message({
+                                'type': 'patch_result',
+                                'patch': patch_message,
+                                'timestamp': datetime.now(timezone.utc).isoformat()
+                            })
+                            logger.debug(f"✅ No-data patch result sent for {tile_id}")
                     
                     # Update progress
                     session_info["processed_tiles"] = row * tiles_x + col + 1
@@ -1504,6 +1687,9 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         }
         
         await discovery_manager.send_message(completion_message)
+        
+        # Detection will be handled by coordinated sliding detection when session is stopped
+        
         logger.info(f"✅ Completed LiDAR scan session {session_id}")
         
     except Exception as e:
@@ -1519,6 +1705,549 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         }
         
         await discovery_manager.send_message(error_message)
+
+# ==============================================================================
+# SESSION UTILITIES
+# ==============================================================================
+
+# Session detector cache to avoid redundant initialization
+_session_detectors = {}
+
+# Session-based tile data storage for coordinated detection
+_session_tile_data = {}
+
+# Active detection tasks that can be cancelled
+_active_detection_tasks = {}
+
+async def get_session_detector(session_id: str, structure_type: str):
+    """Get or create a cached detector for the session"""
+    cache_key = f"{session_id}_{structure_type}"
+    
+    if cache_key not in _session_detectors:
+        try:
+            # Initialize detector once per session
+            from kernel import G2StructureDetector
+            from kernel.detector_profile import DetectorProfileManager
+            
+            kernel_dir = "/media/im3/plus/lab4/RE/re_archaeology/kernel"
+            profile_manager = DetectorProfileManager(
+                profiles_dir=f"{kernel_dir}/profiles",
+                templates_dir=f"{kernel_dir}/templates"
+            )
+            
+            profile_name = "dutch_windmill.json"  # Default to windmill profile
+            if structure_type == "tower":
+                profile_name = "tower.json" if os.path.exists(f"{kernel_dir}/profiles/tower.json") else "dutch_windmill.json"
+            elif structure_type == "mound":
+                profile_name = "mound.json" if os.path.exists(f"{kernel_dir}/profiles/mound.json") else "dutch_windmill.json"
+            
+            logger.info(f"🔧 Initializing G2 detector for session {session_id} with {structure_type} profile")
+            profile = profile_manager.load_profile(profile_name)
+            detector = G2StructureDetector(profile=profile)
+            
+            _session_detectors[cache_key] = detector
+            logger.info(f"✅ G2 detector cached for session {session_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize G2 detector: {e}")
+            # Return None and handle gracefully
+            return None
+    
+    return _session_detectors[cache_key]
+
+def cleanup_session_detector(session_id: str):
+    """Clean up detector cache when session ends"""
+    keys_to_remove = [key for key in _session_detectors.keys() if key.startswith(f"{session_id}_")]
+    for key in keys_to_remove:
+        del _session_detectors[key]
+    logger.info(f"🧹 Cleaned up {len(keys_to_remove)} detector(s) for session {session_id}")
+    
+    # Also clean up tile data
+    if session_id in _session_tile_data:
+        del _session_tile_data[session_id]
+        logger.info(f"🧹 Cleaned up tile data for session {session_id}")
+
+async def run_coordinated_detection(session_id: str, scan_area):
+    """Run detection across entire scan area in typewriter pattern"""
+    logger.info(f"🎯 Coordinated detection called for session {session_id}")
+    logger.info(f"🎯 Scan area: {scan_area}")
+    logger.info(f"🎯 Available tile data: {list(_session_tile_data.get(session_id, {}).keys())}")
+    
+    if session_id not in _session_tile_data:
+        logger.warning(f"❌ No tile data found for session {session_id}")
+        return
+        
+    tile_count = len(_session_tile_data[session_id])
+    logger.info(f"🎯 Starting coordinated detection for session {session_id} with {tile_count} tiles")
+    
+    # Send detection starting message to activate frontend
+    await discovery_manager.send_message({
+        "type": "detection_starting",
+        "session_id": session_id,
+        "message": "Starting coordinated detection across scanned area",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Detection parameters
+    detection_patch_size_m = 40
+    detection_step_size_m = 10
+    
+    # Calculate scan area bounds with safety checks
+    lat_center = scan_area.get('lat')
+    lon_center = scan_area.get('lon') 
+    size_km = scan_area.get('size_km')
+    
+    # Validate required parameters
+    if lat_center is None or lon_center is None or size_km is None:
+        logger.error(f"❌ Invalid scan_area parameters: lat={lat_center}, lon={lon_center}, size_km={size_km}")
+        logger.error(f"❌ Full scan_area: {scan_area}")
+        return
+    
+    logger.info(f"🎯 Scan center: ({lat_center:.6f}, {lon_center:.6f}), size: {size_km}km")
+    
+    # Convert to coordinate deltas
+    lat_m_per_deg = 111320
+    lon_m_per_deg = 111320 * np.cos(np.radians(lat_center))
+    
+    # Calculate detection grid bounds
+    half_size_m = (size_km * 1000) / 2
+    
+    # Calculate number of detection steps across entire scan area
+    steps_lat = int(size_km * 1000 / detection_step_size_m)
+    steps_lon = int(size_km * 1000 / detection_step_size_m)
+    
+    logger.info(f"🎯 Detection grid: {steps_lat} x {steps_lon} patches ({detection_step_size_m}m steps)")
+    logger.info(f"🎯 Grid bounds: ±{half_size_m}m from center")
+    
+    # Get detector
+    structure_type = "windmill"  # Default for now
+    detector = await get_session_detector(session_id, structure_type)
+    if not detector:
+        logger.error("❌ Failed to get detector for coordinated detection")
+        return
+    
+    logger.info(f"✅ Detector ready for session {session_id}")
+    
+    # Typewriter pattern: row by row (north to south), left to right within each row
+    for i in range(steps_lat):  # North-South rows
+        # Check if detection was cancelled
+        if session_id not in _active_detection_tasks:
+            logger.info(f"🛑 Detection cancelled for session {session_id}")
+            return
+            
+        for j in range(steps_lon):  # East-West columns (typewriter style)
+            # Calculate patch coordinates (start from top-left, move east then south)
+            # Note: negative offset_lat_m moves north (higher latitude)
+            offset_lat_m = half_size_m - (i * detection_step_size_m) - (detection_patch_size_m / 2)  # Start north, go south
+            offset_lon_m = -half_size_m + (j * detection_step_size_m) + (detection_patch_size_m / 2)  # Start west, go east
+            
+            patch_lat = lat_center + offset_lat_m / lat_m_per_deg
+            patch_lon = lon_center + offset_lon_m / lon_m_per_deg
+            
+            logger.debug(f"🎯 Detection patch {i},{j}: ({patch_lat:.6f}, {patch_lon:.6f})")
+            
+            # Find which tile(s) contain this patch and get elevation data
+            logger.debug(f"🔍 Getting elevation for patch {i},{j} at ({patch_lat:.6f}, {patch_lon:.6f})")
+            elevation_patch = await get_elevation_for_patch(session_id, patch_lat, patch_lon, detection_patch_size_m)
+            
+            if elevation_patch is not None:
+                logger.debug(f"✅ Got elevation data for patch {i},{j}, shape: {elevation_patch.shape}")
+                # Run detection on this patch
+                patch_id = f"coord_patch_{i}_{j}"
+                await run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch, session_id, patch_id, structure_type)
+            else:
+                logger.debug(f"❌ No elevation data for patch {i},{j} at ({patch_lat:.6f}, {patch_lon:.6f})")
+            
+            # Small delay to make progression visible
+            await asyncio.sleep(0.15)
+    
+    logger.info(f"🎯 Coordinated detection completed for session {session_id}")
+    
+    # Clean up detection task
+    if session_id in _active_detection_tasks:
+        del _active_detection_tasks[session_id]
+    
+    # Send completion message
+    await discovery_manager.send_message({
+        "type": "detection_completed",
+        "session_id": session_id,
+        "message": "Coordinated detection completed",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Clean up detector cache and tile data
+    cleanup_session_detector(session_id)
+
+async def run_realtime_tile_detection(session_id: str, tile_id: str, tile_lat: float, tile_lon: float, elevation_data: np.ndarray, structure_type: str):
+    """Run real-time detection on a single tile during LiDAR scan"""
+    try:
+        logger.debug(f"🔍 Starting real-time detection on {tile_id}")
+        
+        # Get detector for this session
+        detector = await get_session_detector(session_id, structure_type)
+        if not detector:
+            logger.warning(f"❌ No detector available for real-time detection on {tile_id}")
+            return
+        
+        # Create ElevationPatch for detection
+        patch_obj = ElevationPatch(
+            elevation_data=elevation_data,
+            lat=tile_lat,
+            lon=tile_lon,
+            source="RealtimeDetection",
+            resolution_m=0.5
+        )
+        
+        # Run detection
+        result = detector.detect_structure(patch_obj)
+        
+        # Extract results with safe conversion
+        confidence = float(getattr(result, 'confidence', 0.0)) if hasattr(result, 'confidence') else 0.0
+        is_positive = bool(getattr(result, 'detected', False)) if hasattr(result, 'detected') else False
+        
+        # Create patch message for frontend lens movement
+        patch_message = {
+            'lat': float(tile_lat),
+            'lon': float(tile_lon),
+            'confidence': confidence,
+            'is_positive': is_positive,
+            'session_id': str(session_id),
+            'patch_id': str(tile_id),
+            'structure_type': str(structure_type),
+            'patch_size_m': 64  # Tile size for real-time detection
+        }
+        
+        # Send patch_result message for lens movement
+        logger.info(f"🔍 Sending real-time patch_result {tile_id} at ({tile_lat:.6f}, {tile_lon:.6f}) - confidence: {confidence:.3f}")
+        await discovery_manager.send_message({
+            'type': 'patch_result',
+            'patch': patch_message,
+            'session_id': session_id,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        
+        logger.debug(f"✅ Real-time detection completed for {tile_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Real-time detection failed for {tile_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+async def get_elevation_for_patch(session_id: str, patch_lat: float, patch_lon: float, patch_size_m: float):
+    """Get elevation data for a patch from stored tile data"""
+    logger.debug(f"🔍 Looking for elevation data for patch at ({patch_lat:.6f}, {patch_lon:.6f})")
+    
+    if session_id not in _session_tile_data:
+        logger.debug(f"❌ No session data for {session_id}")
+        return None
+    
+    available_tiles = list(_session_tile_data[session_id].keys())
+    logger.debug(f"🔍 Available tiles: {available_tiles}")
+        
+    min_distance = float('inf')
+    closest_tile = None
+    closest_tile_id = None
+    
+    for tile_id, tile_data in _session_tile_data[session_id].items():
+        # Calculate distance to tile center
+        lat_diff = abs(tile_data['lat'] - patch_lat)
+        lon_diff = abs(tile_data['lon'] - patch_lon)
+        distance = (lat_diff ** 2 + lon_diff ** 2) ** 0.5
+        
+        logger.debug(f"🔍 Tile {tile_id} at ({tile_data['lat']:.6f}, {tile_data['lon']:.6f}) - distance: {distance:.6f}")
+        
+        if distance < min_distance:
+            min_distance = distance
+            closest_tile = tile_data
+            closest_tile_id = tile_id
+    
+    if closest_tile:
+        logger.debug(f"✅ Using closest tile {closest_tile_id} (distance: {min_distance:.6f})")
+        logger.debug(f"🔍 Tile elevation shape: {closest_tile['elevation_data'].shape}")
+        
+        # Extract patch from tile (simplified - assumes patch fits within tile)
+        result = extract_patch_from_tile(
+            closest_tile['elevation_data'],
+            0, 0,  # Simplified offset - could be improved
+            patch_size_m,
+            closest_tile['lidar_result'].resolution_m
+        )
+        
+        if result is not None:
+            logger.debug(f"✅ Extracted patch shape: {result.shape}")
+        else:
+            logger.debug(f"❌ Failed to extract patch from tile {closest_tile_id}")
+        
+        return result
+    
+    logger.debug(f"❌ No suitable tile found for patch at ({patch_lat:.6f}, {patch_lon:.6f})")
+    return None
+
+async def run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch, session_id, patch_id, structure_type):
+    """Run detection on a single patch and send results"""
+    try:
+        # Clean elevation data
+        elevation_patch = clean_patch_data(elevation_patch)
+        
+        # Create elevation patch object
+        from kernel.core_detector import ElevationPatch
+        patch_obj = ElevationPatch(
+            elevation_data=elevation_patch,
+            lat=patch_lat,
+            lon=patch_lon,
+            source="CoordinatedDetection",
+            resolution_m=0.5  # Default resolution
+        )
+        
+        # Run G2 detection
+        result = detector.detect_structure(patch_obj)
+        
+        # Extract results with safe conversion
+        confidence = float(getattr(result, 'confidence', 0.0)) if hasattr(result, 'confidence') else 0.0
+        is_positive = bool(getattr(result, 'detected', False)) if hasattr(result, 'detected') else False
+        
+        # Create patch message with explicit type conversion
+        patch_message = {
+            'lat': float(patch_lat),
+            'lon': float(patch_lon),
+            'confidence': confidence,
+            'is_positive': is_positive,
+            'session_id': str(session_id),
+            'patch_id': str(patch_id),
+            'structure_type': str(structure_type),
+            'patch_size_m': 40
+        }
+        
+        # Send patch_result message
+        logger.info(f"🔍 Sending coordinated patch_result {patch_id} at ({patch_lat:.6f}, {patch_lon:.6f}) - confidence: {confidence:.3f}")
+        await discovery_manager.send_message({
+            'type': 'patch_result',
+            'patch': patch_message,
+            'session_id': session_id,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        logger.info(f"✅ Sent patch_result for {patch_id}")
+        
+        # Send detection_result for high confidence detections
+        if is_positive and confidence > 0.7:
+            logger.info(f"🎯 High confidence detection: {confidence:.3f} at ({patch_lat:.6f}, {patch_lon:.6f})")
+            await discovery_manager.send_message({
+                'type': 'detection_result',
+                'structure_type': structure_type,
+                'confidence': confidence,
+                'lat': patch_lat,
+                'lon': patch_lon,
+                'session_id': session_id,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+            
+    except Exception as e:
+        logger.error(f"Detection failed for patch {patch_id}: {e}")
+
+def extract_patch_from_tile(elevation_data, offset_lat_m, offset_lon_m, patch_size_m, resolution_m):
+    """
+    Extract a patch from tile elevation data at given offset
+    """
+    try:
+        tile_shape = elevation_data.shape
+        tile_center_y, tile_center_x = tile_shape[0] // 2, tile_shape[1] // 2
+        
+        # Convert offset to pixels
+        offset_y_px = int(offset_lat_m / resolution_m)
+        offset_x_px = int(offset_lon_m / resolution_m)
+        
+        # Calculate patch size in pixels
+        patch_size_px = int(patch_size_m / resolution_m)
+        half_patch_px = patch_size_px // 2
+        
+        # Calculate patch bounds in tile coordinates
+        patch_center_y = tile_center_y + offset_y_px
+        patch_center_x = tile_center_x + offset_x_px
+        
+        y_start = patch_center_y - half_patch_px
+        y_end = patch_center_y + half_patch_px
+        x_start = patch_center_x - half_patch_px
+        x_end = patch_center_x + half_patch_px
+        
+        # Check bounds
+        if (y_start < 0 or y_end >= tile_shape[0] or 
+            x_start < 0 or x_end >= tile_shape[1]):
+            return None  # Patch extends outside tile
+        
+        # Extract patch
+        patch = elevation_data[y_start:y_end, x_start:x_end]
+        
+        # Ensure patch is the right size
+        if patch.shape[0] < patch_size_px * 0.8 or patch.shape[1] < patch_size_px * 0.8:
+            return None  # Patch too small
+            
+        return patch
+        
+    except Exception as e:
+        logger.warning(f"Failed to extract patch: {e}")
+        return None
+
+async def run_detection_on_tile(lat, lon, elevation_data, lidar_result, session_id, tile_id, structure_type):
+    """
+    Deprecated: replaced with coordinated detection - this is now a stub
+    """
+    logger.debug(f"🔄 Skipping per-tile detection for {tile_id} - using coordinated detection instead")
+    return
+    try:
+        # Detection parameters
+        detection_patch_size_m = 40  # Optimal patch size for windmill detection
+        detection_step_size_m = 10   # Step size for sliding window (10m steps)
+        
+        # Calculate tile bounds
+        tile_size_m = elevation_data.shape[0] * lidar_result.resolution_m
+        
+        # Convert to coordinate deltas
+        lat_m_per_deg = 111320
+        lon_m_per_deg = 111320 * np.cos(np.radians(lat))
+        
+        # Calculate number of detection patches within this tile
+        steps_per_axis = max(1, int((tile_size_m - detection_patch_size_m) / detection_step_size_m) + 1)
+        
+        logger.debug(f"Running sliding window detection on tile {tile_id}: {steps_per_axis}x{steps_per_axis} patches")
+        
+        # Get or create detector for this session (cached to avoid redundant initialization)
+        detector = await get_session_detector(session_id, structure_type)
+        
+        # Sliding window detection within the tile (east-west first, then north-south like typewriter)
+        for i in range(steps_per_axis):  # North-South rows
+            for j in range(steps_per_axis):  # East-West columns (typewriter style)
+                # Calculate patch center offset from tile center
+                offset_lat_m = (i - (steps_per_axis - 1) / 2) * detection_step_size_m
+                offset_lon_m = (j - (steps_per_axis - 1) / 2) * detection_step_size_m
+                
+                # Convert to coordinates
+                patch_lat = lat + offset_lat_m / lat_m_per_deg
+                patch_lon = lon + offset_lon_m / lon_m_per_deg
+                
+                # Extract patch from tile elevation data
+                patch_elevation = extract_patch_from_tile(
+                    elevation_data, 
+                    offset_lat_m, offset_lon_m, 
+                    detection_patch_size_m, 
+                    lidar_result.resolution_m
+                )
+                
+                if patch_elevation is None:
+                    continue  # Skip if patch extraction failed
+                
+                # Create ElevationPatch for the G2 detector
+                patch = ElevationPatch(
+                    elevation_data=patch_elevation,
+                    lat=patch_lat,
+                    lon=patch_lon,
+                    source="LidarFactory",
+                    resolution_m=lidar_result.resolution_m,
+                    patch_size_m=detection_patch_size_m
+                )
+                
+                # Run detection on this patch
+                if detector is None:
+                    # Fallback if detector initialization failed
+                    is_positive = False
+                    confidence = 0.0
+                    detection_result = None
+                    logger.warning(f"Detector not available for {patch_id_detailed}")
+                else:
+                    detection_result = detector.detect_structure(patch)
+                    is_positive = detection_result.detected if detection_result else False
+                    confidence = detection_result.confidence if detection_result else 0.0
+                
+                # Create patch ID for this detection patch
+                patch_id_detailed = f"{tile_id}_patch_{i}_{j}"
+                
+                # Calculate elevation statistics for the patch
+                elevation_stats = {
+                    'min': float(np.nanmin(patch_elevation)),
+                    'max': float(np.nanmax(patch_elevation)),
+                    'mean': float(np.nanmean(patch_elevation)),
+                    'std': float(np.nanstd(patch_elevation)),
+                    'range': float(np.nanmax(patch_elevation) - np.nanmin(patch_elevation))
+                }
+                
+                # Create detection result data
+                detection_result_data = {
+                    'confidence': float(confidence),
+                    'method': f'G2_{structure_type}_sliding',
+                    'elevation_source': str(lidar_result.source_dataset),
+                    'g2_detected': bool(is_positive),
+                    'g2_confidence': float(confidence),
+                }
+                
+                # Create patch message for this detection patch
+                patch_message = {
+                    'session_id': str(session_id),
+                    'patch_id': str(patch_id_detailed),
+                    'lat': float(patch_lat),
+                    'lon': float(patch_lon),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'is_positive': bool(is_positive),
+                    'confidence': float(confidence),
+                    'detection_result': detection_result_data,
+                    'elevation_stats': elevation_stats,
+                    'patch_size_m': int(detection_patch_size_m)
+                }
+                
+                # Send patch_result message for detection progression (lens follows detection pattern)
+                logger.debug(f"🔍 Sending patch_result for detection {patch_id_detailed} at ({patch_lat:.6f}, {patch_lon:.6f}) - confidence: {confidence:.3f}")
+                await discovery_manager.send_message({
+                    'type': 'patch_result',
+                    'patch': patch_message,
+                    'session_id': session_id,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                })
+                
+                # Small delay to make detection progression visible
+                await asyncio.sleep(0.1)
+                
+                # Also send detection_result for high confidence detections
+                if is_positive and confidence > 0.7:
+                    logger.info(f"🎯 Sending detection_result for {structure_type}: confidence={confidence:.3f} at ({patch_lat:.6f}, {patch_lon:.6f})")
+                    await discovery_manager.send_message({
+                        'type': 'detection_result',
+                        'structure_type': structure_type,
+                        'confidence': confidence,
+                        'lat': patch_lat,
+                        'lon': patch_lon,
+                        'session_id': session_id,
+                        'patch_id': patch_id_detailed,
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    })
+                
+                # Small delay to control detection pace
+                await asyncio.sleep(0.1)
+        
+        logger.debug(f"Sliding window detection completed for tile {tile_id}")
+        
+    except Exception as e:
+        logger.warning(f"Detection failed for tile {tile_id}: {e}")
+        # Send a single patch result as fallback
+        patch_message = {
+            'session_id': str(session_id),
+            'patch_id': str(tile_id),
+            'lat': float(lat),
+            'lon': float(lon),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'is_positive': False,
+            'confidence': 0.0,
+            'detection_result': {
+                'confidence': 0.0,
+                'method': f'G2_{structure_type}_failed',
+                'error': str(e)
+            },
+            'elevation_stats': {},
+            'patch_size_m': 64  # Default fallback
+        }
+        
+        await discovery_manager.send_message({
+            'type': 'patch_result',
+            'patch': patch_message,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
 
 @router.post("/discovery/pause-resume-lidar")
 async def pause_resume_lidar_scan(

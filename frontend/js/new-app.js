@@ -26,22 +26,17 @@ class REArchaeologyApp {
         // UI elements
         this.scanningIcon = null;
         this.resolutionBadge = null;
-        this.satelliteBeam = null;
+        this.satelliteBeam = null; // Optional: for future satellite beam effects
         
         // Animation state
         this.animationState = null;
         
-        // Detection UX state (pure frontend animation)
+        // Detection UX state (synchronized with backend)
         this.detectionActive = false;
         this.detectionLens = null;
         this.detectionOverlay = null;
-        this.detectionStepSize = 2; // Default 2 meters per step (customizable: 1m, 2m, etc.)
-        this.detectionStepInterval = 800; // Slower 800ms between steps for better visibility
-        
-        // Current scanning position
-        this.currentScanPosition = { row: 0, col: 0 };
-        this.scanGrid = null;
-        this.scanAnimationId = null;
+        this.processedPatches = new Set();
+        this.totalPatches = 0;
         
         this.layers = {
             patches: null,
@@ -49,6 +44,7 @@ class REArchaeologyApp {
             animations: null
         };
         this.patches = new Map();
+        this.detections = [];
         
         window.Logger?.app('info', 'RE-Archaeology App initialized');
     }
@@ -74,6 +70,8 @@ class REArchaeologyApp {
             this.updateScanButtonText(enableDetection);
             // Initialize detection overlay
             this.initializeDetectionOverlay();
+            // Initialize WebSocket connection
+            this.connectWebSocket();
             // Initialize authentication
             await this.initializeAuth();
             window.Logger?.app('info', 'Application initialized successfully');
@@ -440,8 +438,13 @@ class REArchaeologyApp {
                     this.updateAnimationForResolution(result.actual_resolution, result.is_high_resolution);
                 }
                 
-                console.log('🔌 Connecting WebSocket...');
-                this.connectWebSocket();
+                // Ensure WebSocket is connected (reconnect if needed)
+                if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+                    console.log('🔌 WebSocket not connected, connecting...');
+                    this.connectWebSocket();
+                    // Wait a bit for connection to establish
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
                 console.log('✅ LiDAR scan started successfully');
                 
             }, 500);
@@ -630,29 +633,25 @@ class REArchaeologyApp {
     }
 
     // ========================================
-    // DETECTION ANIMATION - PURE UX SYSTEM
+    // DETECTION ANIMATION - SYNCHRONIZED WITH BACKEND
     // ========================================
     //
-    // This is a pure frontend UX animation system that creates a visual 
-    // "sliding lens" effect moving systematically across the scan area.
+    // This system synchronizes the frontend lens animation with backend detection progress.
+    // The lens moves to each patch location only when a `patch_result` message is received
+    // from the backend, ensuring perfect synchronization with actual detection processing.
     // 
     // Features:
-    // - Typewriter-style movement: left-to-right, then down
-    // - Configurable step size: 1m, 2m, 4m, 8m (default: 2m)
-    // - Configurable speed: 100ms - 500ms intervals (default: 300ms)  
-    // - Visual effects: pulse, flash, celebration on completion
+    // - Backend-synchronized movement: lens moves only on patch_result messages
+    // - Visual feedback for each patch detection
     // - Structure-specific lens emojis (windmill, tower, mound, generic)
-    // - No backend integration - pure visual animation
+    // - Confidence-based visual effects and animations
+    // - Real-time progress tracking with backend detection
     // 
-    // Usage:
-    // - app.setDetectionMode('precise')  // 1m steps, 500ms interval
-    // - app.setDetectionMode('standard') // 2m steps, 300ms interval  
-    // - app.setDetectionMode('rapid')    // 4m steps, 150ms interval
-    // - app.setDetectionMode('coarse')   // 8m steps, 100ms interval
-    // 
-    // Or customize directly:
-    // - app.setDetectionStepSize(1.5)    // 1.5 meter steps
-    // - app.setDetectionStepInterval(250) // 250ms between steps
+    // Message Flow:
+    // 1. Backend processes each patch and sends patch_result message
+    // 2. Frontend receives patch_result and moves lens to that location
+    // 3. Lens shows detection confidence and result visually
+    // 4. Animation completes when all patches are processed
     //
     // ========================================
 
@@ -676,18 +675,263 @@ class REArchaeologyApp {
         this.detectionOverlay.classList.add('active');
         // Note: Removed detectionProgress.classList.add('active') to hide the text badge
         
-        // Initialize scanning grid for systematic movement (pure UX)
-        this.initializeScanningGrid();
+        // Create detection lens but don't start movement yet - wait for backend messages
+        this.createDetectionLens();
         
-        // Start the scanning animation (typewriter style: left-to-right, then down)
-        this.startScanningMovement();
+        // Reset detection state for new scan
+        this.processedPatches = new Set();
+        this.totalPatches = 0;
         
-        window.Logger?.app('info', 'Pure UX detection animation started - typewriter pattern', { 
-            structureType, 
-            stepSize: this.detectionStepSize + 'm',
-            interval: this.detectionStepInterval + 'ms',
-            mode: 'typewriter'
+        // Add test movement to verify lens is working
+        if (this.detectionLens && this.selectedArea) {
+            const testLat = this.selectedArea.lat;
+            const testLon = this.selectedArea.lon;
+            console.log(`🧪 Testing lens movement to scan center: (${testLat}, ${testLon})`);
+            
+            setTimeout(() => {
+                if (this.detectionLens && this.map) {
+                    const testPoint = this.map.latLngToContainerPoint([testLat, testLon]);
+                    console.log(`🧪 Test movement to screen coordinates: (${testPoint.x}, ${testPoint.y})`);
+                    this.detectionLens.style.left = (testPoint.x - 20) + 'px';
+                    this.detectionLens.style.top = (testPoint.y - 20) + 'px';
+                    console.log('🧪 Test movement applied');
+                }
+            }, 1000);
+        }
+        
+        window.Logger?.app('info', 'Detection animation initialized - waiting for backend patch_result messages');
+    }
+
+    // Test method for debugging lens movement (call from browser console)
+    testLensMovement() {
+        if (!this.detectionActive) {
+            console.log('🧪 Starting detection animation for test...');
+            this.startDetectionAnimation();
+        }
+        
+        if (!this.selectedArea) {
+            console.error('❌ No scan area selected');
+            return;
+        }
+        
+        // Test movement to different corners of the scan area
+        const testPositions = [
+            { lat: this.selectedArea.lat + 0.002, lon: this.selectedArea.lon - 0.002, name: 'North-West' },
+            { lat: this.selectedArea.lat + 0.002, lon: this.selectedArea.lon + 0.002, name: 'North-East' },
+            { lat: this.selectedArea.lat - 0.002, lon: this.selectedArea.lon + 0.002, name: 'South-East' },
+            { lat: this.selectedArea.lat - 0.002, lon: this.selectedArea.lon - 0.002, name: 'South-West' },
+            { lat: this.selectedArea.lat, lon: this.selectedArea.lon, name: 'Center' }
+        ];
+        
+        testPositions.forEach((pos, index) => {
+            setTimeout(() => {
+                console.log(`🧪 Test movement ${index + 1}: ${pos.name} (${pos.lat.toFixed(6)}, ${pos.lon.toFixed(6)})`);
+                const testPatch = {
+                    lat: pos.lat,
+                    lon: pos.lon,
+                    confidence: Math.random(),
+                    is_positive: Math.random() > 0.5
+                };
+                this.handlePatchResult(testPatch);
+            }, index * 1000);
         });
+        
+        console.log('🧪 Test sequence started - lens should move to 5 positions over 5 seconds');
+    }
+
+    // Test the entire detection system (call from browser console)
+    testDetectionSystem() {
+        console.log('🧪 Testing entire detection system...');
+        
+        // Test 1: Start detection animation
+        console.log('🧪 Test 1: Starting detection animation');
+        this.startDetectionAnimation();
+        
+        // Test 2: Simulate patch_result message
+        setTimeout(() => {
+            console.log('🧪 Test 2: Simulating patch_result message');
+            const testPatch = {
+                lat: this.selectedArea?.lat || 52.4751,
+                lon: this.selectedArea?.lon || 4.8156,
+                confidence: 0.25,
+                is_positive: true
+            };
+            
+            // Simulate WebSocket message
+            this.handleWebSocketMessage({
+                type: 'patch_result',
+                patch: testPatch
+            });
+        }, 2000);
+        
+        // Test 3: Simulate detection_result message
+        setTimeout(() => {
+            console.log('🧪 Test 3: Simulating detection_result message');
+            const testDetection = {
+                type: 'detection_result',
+                structure_type: 'windmill',
+                confidence: 0.25,
+                lat: this.selectedArea?.lat || 52.4751,
+                lon: this.selectedArea?.lon || 4.8156
+            };
+            
+            this.handleWebSocketMessage(testDetection);
+        }, 4000);
+        
+        console.log('🧪 Detection system test started - watch console and map for 6 seconds');
+    }
+
+    // Handle patch result message from backend - move lens for detection progression
+    handlePatchResult(patchData) {
+        console.log('🔍 ENTER handlePatchResult with data:', patchData);
+        console.log('🔍 Detection active state:', this.detectionActive);
+        console.log('🔍 Lens exists:', !!this.detectionLens);
+        console.log('🔍 Map exists:', !!this.map);
+        
+        if (!this.detectionActive) {
+            console.warn('⚠️ Detection not active, ignoring patch result');
+            console.warn('⚠️ You may need to ensure detection is activated first');
+            return;
+        }
+        
+        if (!this.detectionLens) {
+            console.warn('⚠️ Detection lens not found, creating it');
+            this.createDetectionLens();
+            if (!this.detectionLens) {
+                console.error('❌ Failed to create detection lens');
+                return;
+            }
+        }
+
+        // Clear any pending visual effect timeouts to prevent conflicts
+        if (this.lensTimeouts) {
+            this.lensTimeouts.forEach(timeout => clearTimeout(timeout));
+            this.lensTimeouts = [];
+        } else {
+            this.lensTimeouts = [];
+        }
+
+        const { lat, lon, confidence, is_positive, patch_size_m } = patchData;
+        
+        if (!lat || !lon) {
+            console.warn('⚠️ Invalid patch coordinates:', patchData);
+            return;
+        }
+        
+        console.log(`🎯 Moving lens to detection patch at (${lat.toFixed(6)}, ${lon.toFixed(6)}) - size: ${patch_size_m}m`);
+        
+        // Convert patch coordinates to screen position
+        const screenPoint = this.map.latLngToContainerPoint([lat, lon]);
+        console.log(`📍 Screen coordinates: (${screenPoint.x}, ${screenPoint.y})`);
+        
+        // Check if the point is visible on screen
+        const mapContainer = this.map.getContainer();
+        const mapBounds = mapContainer.getBoundingClientRect();
+        const isInView = screenPoint.x >= 0 && screenPoint.x <= mapBounds.width && 
+                        screenPoint.y >= 0 && screenPoint.y <= mapBounds.height;
+        
+        if (!isInView) {
+            console.warn(`⚠️ Patch location (${screenPoint.x}, ${screenPoint.y}) is outside map view bounds (${mapBounds.width}x${mapBounds.height})`);
+            // Still update the position but log the issue
+        }
+        
+        // Force immediate positioning by temporarily disabling transitions
+        const originalTransition = this.detectionLens.style.transition;
+        this.detectionLens.style.transition = 'all 80ms ease-in-out';
+        
+        // Move lens to this detection patch location
+        const newLeft = (screenPoint.x - 20) + 'px';
+        const newTop = (screenPoint.y - 20) + 'px';
+        console.log(`🎯 Setting lens position: left=${newLeft}, top=${newTop} (inView: ${isInView})`);
+        
+        this.detectionLens.style.left = newLeft; // Center the lens (40px wide)
+        this.detectionLens.style.top = newTop; // Center the lens (40px tall)
+        
+        // Restore original transition after a brief moment
+        setTimeout(() => {
+            if (this.detectionLens) {
+                this.detectionLens.style.transition = originalTransition;
+            }
+        }, 50);
+        
+        console.log(`✅ Lens position updated: left=${this.detectionLens.style.left}, top=${this.detectionLens.style.top}`);
+        
+        // Update visual feedback based on detection result
+        this.updateLensVisualFeedback(is_positive, confidence);
+        
+        // Track progress
+        this.processedPatches.add(`${lat},${lon}`);
+        
+        window.Logger?.app('info', `Lens moved to patch (${lat.toFixed(6)}, ${lon.toFixed(6)}) - confidence: ${confidence.toFixed(3)}`);
+    }
+
+    // Ensure detection lens is ready for coordinated detection
+    ensureDetectionLensReady() {
+        console.log('🔧 Ensuring detection lens is ready for coordinated detection');
+        
+        // Activate detection if not already active
+        if (!this.detectionActive) {
+            console.log('🎯 Activating detection animation for coordinated detection');
+            this.startDetectionAnimation();
+        }
+        
+        // Create detection lens if it doesn't exist
+        if (!this.detectionLens) {
+            console.log('🔧 Creating detection lens for coordinated detection');
+            this.createDetectionLens();
+        }
+        
+        // Position lens at scan area center initially
+        if (this.selectedArea && this.detectionLens) {
+            const screenPoint = this.map.latLngToContainerPoint([this.selectedArea.lat, this.selectedArea.lon]);
+            this.detectionLens.style.left = (screenPoint.x - 20) + 'px';
+            this.detectionLens.style.top = (screenPoint.y - 20) + 'px';
+            console.log('📍 Positioned detection lens at scan area center');
+        }
+    }
+
+    // Update lens visual feedback based on detection results
+    updateLensVisualFeedback(isPositive, confidence) {
+        if (!this.detectionLens) return;
+
+        // Reset animation
+        this.detectionLens.style.animation = 'none';
+        
+        if (isPositive && confidence > 0.7) {
+            // High confidence detection - bright flash
+            this.detectionLens.style.transform = 'scale(1.5)';
+            this.detectionLens.style.filter = 'drop-shadow(0 0 20px rgba(255, 215, 0, 1)) drop-shadow(0 0 8px rgba(255, 255, 255, 1))';
+            this.detectionLens.textContent = '⭐'; // Star for high confidence
+            
+            // Flash effect
+            const timeout1 = setTimeout(() => {
+                if (this.detectionLens) {
+                    this.detectionLens.style.transform = 'scale(1)';
+                    this.detectionLens.style.filter = 'drop-shadow(0 0 12px rgba(0, 255, 136, 0.8)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.6))';
+                    
+                    const structureType = document.getElementById('structureType')?.value || 'windmill';
+                    this.detectionLens.textContent = this.getDetectorEmoji(structureType);
+                }
+            }, 500);
+            if (!this.lensTimeouts) this.lensTimeouts = [];
+            this.lensTimeouts.push(timeout1);
+        } else if (isPositive && confidence > 0.4) {
+            // Medium confidence detection - pulse
+            this.detectionLens.style.transform = 'scale(1.2)';
+            this.detectionLens.style.filter = 'drop-shadow(0 0 15px rgba(255, 165, 0, 0.8)) drop-shadow(0 0 6px rgba(255, 255, 255, 0.8))';
+            
+            const timeout2 = setTimeout(() => {
+                if (this.detectionLens) {
+                    this.detectionLens.style.transform = 'scale(1)';
+                    this.detectionLens.style.filter = 'drop-shadow(0 0 12px rgba(0, 255, 136, 0.8)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.6))';
+                }
+            }, 300);
+            if (!this.lensTimeouts) this.lensTimeouts = [];
+            this.lensTimeouts.push(timeout2);
+        } else {
+            // No detection or low confidence - subtle pulse
+            this.detectionLens.style.animation = 'pulse 1s ease-in-out';
+        }
     }
 
     stopDetectionAnimation() {
@@ -710,9 +954,9 @@ class REArchaeologyApp {
             this.detectionLens = null;
         }
         
-        // Reset scanning state
-        this.currentScanPosition = { row: 0, col: 0 };
-        this.scanGrid = null;
+        // Reset detection state
+        this.processedPatches = new Set();
+        this.totalPatches = 0;
         
         window.Logger?.app('info', 'Detection animation stopped');
     }
@@ -730,62 +974,31 @@ class REArchaeologyApp {
         this.detectionProfileText.textContent = profileTexts[structureType] || 'Analyzing Structures';
     }
 
-    // Initialize scanning grid for typewriter-style movement
-    initializeScanningGrid() {
-        if (!this.map || !this.selectedArea) return;
-        
-        const bounds = this.selectedArea.bounds;
-        const stepSizeMeters = this.detectionStepSize; // Configurable: 1m, 2m, etc.
-        
-        // Convert step size from meters to degrees
-        const latStepDegrees = stepSizeMeters / 111320; // ~111,320 meters per degree lat
-        const avgLat = (bounds[0][0] + bounds[1][0]) / 2;
-        const lngStepDegrees = stepSizeMeters / (111320 * Math.cos(avgLat * Math.PI / 180));
-        
-        // Calculate grid dimensions - FIXED: ensure we cover the full area
-        const latRange = bounds[1][0] - bounds[0][0];
-        const lngRange = bounds[1][1] - bounds[0][1];
-        const cols = Math.max(3, Math.ceil(lngRange / lngStepDegrees)); // Minimum 3 columns
-        const rows = Math.max(3, Math.ceil(latRange / latStepDegrees)); // Minimum 3 rows
-        
-        this.scanGrid = {
-            bounds: bounds,
-            stepSizeMeters: stepSizeMeters,
-            latStepDegrees: latStepDegrees,
-            lngStepDegrees: lngStepDegrees,
-            cols: cols,
-            rows: rows,
-            totalSteps: cols * rows
-        };
-        
-        // Reset scan position to top-left (0,0)
-        this.currentScanPosition = { row: 0, col: 0 };
-        
-        window.Logger?.app('debug', `Scanning grid initialized: ${cols}x${rows} = ${this.scanGrid.totalSteps} steps (${stepSizeMeters}m each)`);
-        window.Logger?.app('debug', `Scan area bounds: N:${bounds[1][0].toFixed(6)}, S:${bounds[0][0].toFixed(6)}, E:${bounds[1][1].toFixed(6)}, W:${bounds[0][1].toFixed(6)}`);
-    }
-    
-    // Start the typewriter-style scanning movement
-    startScanningMovement() {
-        if (!this.detectionActive || !this.scanGrid) return;
-        
-        // Create or update detection lens
-        this.createDetectionLens();
-        
-        // Start the scanning animation
-        this.moveToNextScanPosition();
-    }
     
     // Create the visual detection lens
     createDetectionLens() {
+        console.log('🔧 Creating detection lens...');
+        
         // Remove existing lens
         if (this.detectionLens && this.detectionLens.parentNode) {
             this.detectionLens.remove();
+            console.log('🗑️ Removed existing lens');
+        }
+        
+        // Ensure detection overlay exists
+        if (!this.detectionOverlay) {
+            console.error('❌ Detection overlay not found!');
+            this.initializeDetectionOverlay();
+            if (!this.detectionOverlay) {
+                console.error('❌ Failed to initialize detection overlay');
+                return;
+            }
         }
         
         // Choose lens emoji based on structure type
         const structureType = document.getElementById('structureType')?.value || 'windmill';
         const lensEmoji = this.getDetectorEmoji(structureType);
+        console.log(`🎭 Using lens emoji: ${lensEmoji} for structure: ${structureType}`);
         
         // Create lens element
         this.detectionLens = document.createElement('div');
@@ -796,7 +1009,7 @@ class REArchaeologyApp {
             font-size: 28px;
             z-index: 1400;
             pointer-events: none;
-            transition: all ${this.detectionStepInterval * 0.8}ms ease-in-out;
+            transition: all 80ms ease-in-out;
             opacity: 0.85;
             filter: drop-shadow(0 0 12px rgba(0, 255, 136, 0.8)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.6));
             transform: scale(1);
@@ -808,6 +1021,8 @@ class REArchaeologyApp {
             align-items: center;
             justify-content: center;
             animation: pulse 2s infinite ease-in-out;
+            left: 50px;
+            top: 50px;
         `;
         
         // Add CSS animation for pulse effect
@@ -827,174 +1042,21 @@ class REArchaeologyApp {
                 }
             `;
             document.head.appendChild(style);
+            console.log('✨ Added lens pulse CSS animation');
         }
         
         // Add to detection overlay
         this.detectionOverlay.appendChild(this.detectionLens);
+        console.log('✅ Detection lens created and added to overlay');
+        console.log('🔧 Lens DOM element:', this.detectionLens);
+        console.log('🔧 Lens parent element:', this.detectionLens.parentElement);
+        console.log('🔧 Detection overlay element:', this.detectionOverlay);
+        
+        // Lens is now properly configured and working
         
         window.Logger?.app('debug', 'Detection lens created with enhanced styling');
     }
     
-    // Move lens to next position in typewriter pattern
-    moveToNextScanPosition() {
-        if (!this.detectionActive || !this.scanGrid || !this.detectionLens) return;
-        
-        const { row, col } = this.currentScanPosition;
-        
-        // Check if scanning is complete
-        if (row >= this.scanGrid.rows) {
-            window.Logger?.app('info', 'Scanning animation completed');
-            this.completeScanningAnimation();
-            return;
-        }
-        
-        // Calculate position at center of current grid cell
-        const latRange = this.scanGrid.bounds[1][0] - this.scanGrid.bounds[0][0];
-        const lngRange = this.scanGrid.bounds[1][1] - this.scanGrid.bounds[0][1];
-        
-        // Calculate step sizes for grid cells
-        const latStepSize = latRange / this.scanGrid.rows;
-        const lngStepSize = lngRange / this.scanGrid.cols;
-        
-        // Position at CENTER of current grid cell
-        // Start from north-west corner and move to center of first cell
-        const lat = this.scanGrid.bounds[1][0] - (row + 0.5) * latStepSize; // North to South, center of cell
-        const lng = this.scanGrid.bounds[0][1] + (col + 0.5) * lngStepSize; // West to East, center of cell
-        
-        // Convert to screen coordinates
-        const screenPoint = this.map.latLngToContainerPoint([lat, lng]);
-        
-        // Move lens to new position with smooth transition
-        this.detectionLens.style.left = (screenPoint.x ) + 'px'; // Center the 40px lens
-        this.detectionLens.style.top = (screenPoint.y ) + 'px';
-        
-        // Enhanced visual feedback for row changes
-        const isNewRow = col === 0 && row > 0;
-        if (isNewRow) {
-            // Make lens more prominent when starting a new row
-            this.detectionLens.style.transform = 'scale(1.3)';
-            this.detectionLens.style.filter = 'drop-shadow(0 0 20px rgba(255, 255, 0, 1)) drop-shadow(0 0 8px rgba(255, 255, 255, 1))';
-            console.log(`🔄 NEW ROW ${row}! Moving south to start row ${row} of ${this.scanGrid.rows}`);
-            
-            setTimeout(() => {
-                if (this.detectionLens) {
-                    this.detectionLens.style.transform = 'scale(1)';
-                    this.detectionLens.style.filter = 'drop-shadow(0 0 12px rgba(0, 255, 136, 0.8)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.6))';
-                }
-            }, 600);
-        }
-        
-        // Add scanning pulse effect
-        this.detectionLens.style.animation = 'none'; // Reset animation
-        setTimeout(() => {
-            if (this.detectionLens) {
-                this.detectionLens.style.animation = 'pulse 1.5s ease-in-out';
-            }
-        }, 10);
-        
-        // Add scanning flash effect at position
-        const scanFlash = document.createElement('div');
-        scanFlash.style.cssText = `
-            position: absolute;
-            left: ${screenPoint.x - 15}px;
-            top: ${screenPoint.y - 15}px;
-            width: 30px;
-            height: 30px;
-            background: radial-gradient(circle, rgba(0, 255, 136, 0.6) 0%, transparent 70%);
-            border-radius: 50%;
-            pointer-events: none;
-            z-index: 1350;
-            animation: flash 0.8s ease-out forwards;
-        `;
-        
-        // Add flash animation if not exists
-        if (!document.getElementById('flash-animation-style')) {
-            const style = document.createElement('style');
-            style.id = 'flash-animation-style';
-            style.textContent = `
-                @keyframes flash {
-                    0% { 
-                        transform: scale(0.5);
-                        opacity: 0.8;
-                    }
-                    50% { 
-                        transform: scale(1.2);
-                        opacity: 0.4;
-                    }
-                    100% { 
-                        transform: scale(2);
-                        opacity: 0;
-                    }
-                }
-            `;
-            document.head.appendChild(style);
-        }
-        
-        this.detectionOverlay.appendChild(scanFlash);
-        
-        // Remove flash after animation
-        setTimeout(() => {
-            if (scanFlash && scanFlash.parentNode) {
-                scanFlash.remove();
-            }
-        }, 800);
-        
-        // Enhanced logging with more detail
-        const progressPercent = ((row * this.scanGrid.cols + col + 1) / this.scanGrid.totalSteps * 100).toFixed(1);
-        console.log(`🔍 Scan [${row}, ${col}] (${progressPercent}%) -> (${lat.toFixed(6)}, ${lng.toFixed(6)}) [ROW ${row}/${this.scanGrid.rows-1}]`);
-        
-        // Calculate next position (typewriter style: left-to-right, then down)
-        if (col < this.scanGrid.cols - 1) {
-            // Move right (same row)
-            this.currentScanPosition.col++;
-        } else {
-            // Move to next row, reset column (go down and restart from left)
-            this.currentScanPosition.row++;
-            this.currentScanPosition.col = 0;
-        }
-        
-        // Schedule next movement (slower for better visibility)
-        const nextInterval = isNewRow ? this.detectionStepInterval * 2 : this.detectionStepInterval; // Pause longer at row changes
-        this.scanAnimationId = setTimeout(() => {
-            this.moveToNextScanPosition();
-        }, nextInterval);
-    }
-    
-    // Complete the scanning animation
-    completeScanningAnimation() {
-        if (this.detectionLens) {
-            // Final animation - lens celebrates completion
-            this.detectionLens.style.animation = 'none';
-            this.detectionLens.style.transition = 'all 1s ease-out';
-            this.detectionLens.style.transform = 'scale(1.5) rotate(360deg)';
-            this.detectionLens.style.opacity = '1';
-            this.detectionLens.style.filter = 'drop-shadow(0 0 20px rgba(0, 255, 136, 1)) drop-shadow(0 0 8px rgba(255, 255, 255, 1))';
-            
-            // After celebration, fade out
-            setTimeout(() => {
-                if (this.detectionLens) {
-                    this.detectionLens.style.opacity = '0';
-                    this.detectionLens.style.transform = 'scale(0.5) rotate(360deg)';
-                }
-            }, 1000);
-            
-            // Remove after fade
-            setTimeout(() => {
-                if (this.detectionLens && this.detectionLens.parentNode) {
-                    this.detectionLens.remove();
-                    this.detectionLens = null;
-                }
-            }, 2000);
-        }
-        
-        // Reset scanning state but keep detection active for potential restart
-        this.currentScanPosition = { row: 0, col: 0 };
-        this.scanAnimationId = null;
-        
-        // Note: Removed completion text update to keep animation clean and minimal
-        
-        window.Logger?.app('info', 'Detection scanning animation completed with celebration');
-    }
     
     // Get detector emoji based on structure type
     getDetectorEmoji(structureType) {
@@ -1008,57 +1070,39 @@ class REArchaeologyApp {
         return emojis[structureType] || '🔍';
     }
 
-    // Configure step size (for future customization)
-    setDetectionStepSize(stepSizeMeters) {
-        this.detectionStepSize = stepSizeMeters;
-        window.Logger?.app('info', `Detection step size set to ${stepSizeMeters}m`);
+    // Complete the detection animation when backend scanning finishes
+    completeDetectionAnimation() {
+        if (!this.detectionLens) return;
         
-        // If currently scanning, reinitialize grid with new step size
-        if (this.detectionActive && this.scanGrid) {
-            this.initializeScanningGrid();
-        }
-    }
-    
-    // Configure step interval (for future customization)
-    setDetectionStepInterval(intervalMs) {
-        this.detectionStepInterval = intervalMs;
-        window.Logger?.app('info', `Detection step interval set to ${intervalMs}ms`);
-    }
-    
-    // Preset configurations for different scanning modes
-    setDetectionMode(mode) {
-        const modes = {
-            'precise': { stepSize: 1, interval: 5 },      // 1m steps, slow
-            'standard': { stepSize: 2, interval: 3 },     // 2m steps, medium
-            'rapid': { stepSize: 4, interval: 2 },        // 4m steps, fast
-            'coarse': { stepSize: 8, interval: 1 }        // 8m steps, very fast
-        };
+        // Final celebration animation
+        this.detectionLens.style.animation = 'none';
+        this.detectionLens.style.transition = 'all 1s ease-out';
+        this.detectionLens.style.transform = 'scale(1.5) rotate(360deg)';
+        this.detectionLens.style.opacity = '1';
+        this.detectionLens.style.filter = 'drop-shadow(0 0 20px rgba(0, 255, 136, 1)) drop-shadow(0 0 8px rgba(255, 255, 255, 1))';
         
-        if (modes[mode]) {
-            this.setDetectionStepSize(modes[mode].stepSize);
-            this.setDetectionStepInterval(modes[mode].interval);
-            window.Logger?.app('info', `Detection mode set to '${mode}'`);
-        } else {
-            window.Logger?.app('warn', `Unknown detection mode: ${mode}`);
-        }
+        // After celebration, fade out
+        setTimeout(() => {
+            if (this.detectionLens) {
+                this.detectionLens.style.opacity = '0';
+                this.detectionLens.style.transform = 'scale(0.5) rotate(360deg)';
+            }
+        }, 1000);
+        
+        // Remove after fade
+        setTimeout(() => {
+            if (this.detectionLens && this.detectionLens.parentNode) {
+                this.detectionLens.remove();
+                this.detectionLens = null;
+            }
+        }, 2000);
+        
+        window.Logger?.app('info', 'Detection animation completed - synchronized with backend');
     }
 
     // ========================================
-    // PURE UX ANIMATION - NO BACKEND INTEGRATION
+    // BACKEND INTEGRATION - SYNCHRONIZED DETECTION
     // ========================================
-    
-    // NOTE: The following methods are kept for future backend integration,
-    // but the current animation is purely frontend UX focused.
-    
-    // Future: handleBackendPatchDetectionResult(patchData) {
-    //     // Will integrate with backend detection results
-    // }
-    
-    // Future: sendPatchToDetectionKernel(patchCenterLat, patchCenterLng) {
-    //     // Will send coordinates to backend for actual analysis
-    // }
-    
-    // Current animation is self-contained and independent of backend
 
     // ========================================
     // RESOLUTION DETECTION & ANIMATION
@@ -1194,7 +1238,6 @@ class REArchaeologyApp {
             });
         }
         
-        this.clearSatelliteBeam();
         this.animationState = null;
     }
 
@@ -1216,8 +1259,7 @@ class REArchaeologyApp {
         
         if (tileCenterLat && tileCenterLon) {
             this.animationState.isProcessingTile = true;
-            this.drawSatelliteBeam(L.latLng(tileCenterLat, tileCenterLon));
-            
+            this.drawSatelliteBeam(L.latLng(tileCenterLat, tileCenterLon));          
             // Blink the icon when processing
             if (this.scanningIcon) {
                 this.scanningIcon.classList.add('processing');
@@ -1254,8 +1296,8 @@ class REArchaeologyApp {
         const iconLatLng = this.map.containerPointToLatLng([iconCenterX, iconCenterY]);
         
         this.satelliteBeam = L.polyline([iconLatLng, targetLatLng], {
-            color: '#00ff88',
-            weight: 4,
+            color: '#ffff88',
+            weight: 2,
             opacity: 0.9,
             dashArray: '10, 6',
             interactive: false,
@@ -1307,6 +1349,13 @@ class REArchaeologyApp {
 
     connectWebSocket() {
         try {
+            // Close existing connection if any
+            if (this.websocket) {
+                console.log('🔌 Closing existing WebSocket connection');
+                this.websocket.close();
+                this.websocket = null;
+            }
+            
             // Use wss:// for HTTPS, ws:// for HTTP (localhost/dev)
             const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
             const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/ws/discovery`;
@@ -1314,25 +1363,36 @@ class REArchaeologyApp {
             this.websocket = new WebSocket(wsUrl);
             
             this.websocket.onopen = () => {
-                console.log('✅ WebSocket connected');
+                console.log('✅ WebSocket connected successfully');
+                
+                // Send a ping to confirm connection
+                this.websocket.send(JSON.stringify({
+                    type: 'ping',
+                    timestamp: new Date().toISOString()
+                }));
             };
             
             this.websocket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    this.handleWebSocketMessage(data);
+                    if (data.type === 'pong') {
+                        console.log('🏓 WebSocket pong received - connection active');
+                    } else {
+                        this.handleWebSocketMessage(data);
+                    }
                 } catch (error) {
                     console.error('❌ Failed to parse WebSocket message:', error);
                 }
             };
             
-            this.websocket.onclose = () => {
-                console.log('🔌 WebSocket disconnected');
+            this.websocket.onclose = (event) => {
+                console.log('🔌 WebSocket disconnected:', event.code, event.reason);
                 this.websocket = null;
                 
                 // Reconnect if session active
                 if (this.currentLidarSession) {
-                    setTimeout(() => this.connectWebSocket(), 3000);
+                    console.log('🔄 Attempting to reconnect WebSocket in 2 seconds...');
+                    setTimeout(() => this.connectWebSocket(), 2000);
                 }
             };
             
@@ -1349,7 +1409,6 @@ class REArchaeologyApp {
         // Use logger for reduced console noise
         if (window.Logger) {
             window.Logger.websocket('debug', `Message received: ${data.type}`, { keys: Object.keys(data) });
-            
             if (data.type === 'lidar_tile') {
                 window.Logger.lidar('debug', 'Tile data', {
                     actual_resolution: data.actual_resolution,
@@ -1357,6 +1416,13 @@ class REArchaeologyApp {
                     source_dataset: data.source_dataset
                 });
             }
+        }
+        // Debug: Log all patch_result and detection_result messages
+        if (data.type === 'patch_result') {
+            console.log('[DEBUG] patch_result message:', data);
+        }
+        if (data.type === 'detection_result') {
+            console.log('[DEBUG] detection_result message:', data);
         }
         
         switch (data.type) {
@@ -1388,12 +1454,72 @@ class REArchaeologyApp {
                 this.handleSessionFailed(data);
                 break;
                 
+            case 'patch_result':
+                console.log('📨 WebSocket received patch_result message:', data);
+                console.log('📋 Patch data details:', JSON.stringify(data.patch, null, 2));
+                console.log('🔍 Detection active:', this.detectionActive);
+                console.log('🎯 Detection lens exists:', !!this.detectionLens);
+                console.log('🗺️ Map exists:', !!this.map);
+                if (data.patch) {
+                    console.log('🎯 About to call handlePatchResult with:', data.patch);
+                    this.handlePatchResult(data.patch);
+                } else {
+                    console.error('❌ No patch data in patch_result message');
+                    console.log('❌ Full message structure:', JSON.stringify(data, null, 2));
+                }
+                break;
+                
+            case 'detection_result':
+                this.handleDetectionResult(data);
+                break;
+                
+            case 'detection_starting':
+                console.log('🎯 Backend starting coordinated detection');
+                this.ensureDetectionLensReady();
+                break;
+                
+            case 'detection_completed':
+                console.log('✅ Backend completed detection');
+                this.stopDetectionAnimation();
+                break;
+                
+            case 'connection_established':
+                console.log('🔗 WebSocket connection confirmed by server');
+                break;
+                
             case 'error':
                 console.error('❌ WebSocket error:', data.message);
                 break;
                 
             default:
                 console.log('📨 Unknown message type:', data.type);
+        }
+    }
+
+    handleDetectionResult(data) {
+        // Debug: Log every detection result received
+        console.log('[DEBUG] handleDetectionResult called with:', data);
+        // Only mark high-confidence windmills
+        if (data.structure_type === 'windmill' && data.confidence > 0.7) {
+            // Prevent duplicate markers
+            if (!this.detections.some(d => d.lat === data.lat && d.lon === data.lon)) {
+                this.detections.push({ lat: data.lat, lon: data.lon, confidence: data.confidence });
+                // Add a star marker to the map
+                const marker = L.marker([data.lat, data.lon], {
+                    icon: L.divIcon({
+                        className: 'windmill-star-marker',
+                        html: '⭐',
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    })
+                });
+                marker.addTo(this.layers.detections);
+                console.log(`[DEBUG] Windmill marker added at (${data.lat}, ${data.lon}) with confidence ${data.confidence}`);
+            } else {
+                console.log(`[DEBUG] Duplicate windmill detection at (${data.lat}, ${data.lon}) ignored.`);
+            }
+        } else {
+            console.log(`[DEBUG] Detection result ignored. structure_type: ${data.structure_type}, confidence: ${data.confidence}`);
         }
     }
 
@@ -1416,6 +1542,8 @@ class REArchaeologyApp {
         } else if (!data.actual_resolution) {
             window.Logger?.lidar('warn', 'No actual_resolution in tile data');
         }
+        
+        // Note: Detection lens follows patch_result messages, not LiDAR tiles
         
         this.updateAnimationProgress(data);
         
@@ -1469,13 +1597,15 @@ class REArchaeologyApp {
             this.currentLidarSession = null;
             this.stopScanningAnimation();
             
-            // DON'T stop detection animation - it's independent UX that should complete naturally
-            // this.stopDetectionAnimation(); // REMOVED - detection continues until it finishes
+            // Complete the detection animation since backend scanning is done
+            if (this.detectionActive) {
+                this.completeDetectionAnimation();
+            }
             
             // Reset button states - change "Stop" back to "Scan"
             this.updateButtonStates();
             
-            window.Logger?.app('info', 'LiDAR session completed - UI reset to scan mode (detection continues)');
+            window.Logger?.app('info', 'LiDAR session completed - detection animation completing');
         }
     }
 
@@ -1486,13 +1616,13 @@ class REArchaeologyApp {
             this.currentLidarSession = null;
             this.stopScanningAnimation();
             
-            // DON'T stop detection animation - it's independent UX that should complete naturally
-            // this.stopDetectionAnimation(); // REMOVED - detection continues until it finishes
+            // Stop detection animation since scanning was manually stopped
+            this.stopDetectionAnimation();
             
             // Reset button states - change "Stop" back to "Scan"
             this.updateButtonStates();
             
-            window.Logger?.app('info', 'LiDAR session stopped - UI reset to scan mode (detection continues)');
+            window.Logger?.app('info', 'LiDAR session stopped - detection animation stopped');
         }
     }
 
@@ -1503,8 +1633,8 @@ class REArchaeologyApp {
             this.currentLidarSession = null;
             this.stopScanningAnimation();
             
-            // DON'T stop detection animation - it's independent UX that should complete naturally
-            // this.stopDetectionAnimation(); // REMOVED - detection continues until it finishes
+            // Stop detection animation since scanning failed
+            this.stopDetectionAnimation();
             
             // Reset button states - change "Stop" back to "Scan"
             this.updateButtonStates();
@@ -1513,7 +1643,7 @@ class REArchaeologyApp {
             const errorMessage = data.error || data.message || 'Unknown error occurred';
             alert(`LiDAR scan failed: ${errorMessage}`);
             
-            window.Logger?.app('error', 'LiDAR session failed - UI reset to scan mode (detection continues)', { error: errorMessage });
+            window.Logger?.app('error', 'LiDAR session failed - detection animation stopped', { error: errorMessage });
         }
     }
 
@@ -1875,6 +2005,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         window.reApp = new REArchaeologyApp();
         await window.reApp.init();
+        
+        // Make test functions globally available for debugging
+        window.testLensMovement = () => window.reApp.testLensMovement();
+        window.testDetectionSystem = () => window.reApp.testDetectionSystem();
         
         console.log('🎉 Application started successfully!');
         
