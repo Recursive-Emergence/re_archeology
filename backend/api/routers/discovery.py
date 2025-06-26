@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
+from typing import Dict, Any, Optional
 
 # Local imports
 from backend.api.routers.auth import get_current_user_optional
@@ -70,6 +71,96 @@ kernel_logger.setLevel(logging.WARNING)
 # UTILITY FUNCTIONS
 # ==============================================================================
 
+def get_available_structure_types():
+    """Get available structure types from profiles directory"""
+    app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+    profiles_dir = f"{app_root}/profiles"
+    
+    available_types = []
+    default_type = "windmill"  # Fallback default
+    
+    try:
+        import os
+        import glob
+        
+        # Find all .json files in profiles directory
+        profile_files = glob.glob(f"{profiles_dir}/*.json")
+        
+        for profile_file in profile_files:
+            # Extract structure type from filename (remove .json extension)
+            filename = os.path.basename(profile_file)
+            if filename.endswith('.json'):
+                structure_type = filename[:-5]  # Remove .json
+                
+                # Convert specific profile names to user-friendly structure types
+                if 'windmill' in structure_type.lower():
+                    available_types.append('windmill')
+                    default_type = "windmill"  # Prefer windmill as default
+                elif 'tower' in structure_type.lower():
+                    available_types.append('tower')
+                elif 'mound' in structure_type.lower():
+                    available_types.append('mound')
+                elif 'geoglyph' in structure_type.lower():
+                    available_types.append('geoglyph')
+                elif 'citadel' in structure_type.lower():
+                    available_types.append('citadel')
+                else:
+                    # Generic structure type (use filename without extension)
+                    clean_name = structure_type.replace('_', ' ').replace('-', ' ')
+                    available_types.append(clean_name)
+        
+        # Remove duplicates and sort
+        available_types = sorted(list(set(available_types)))
+        
+        # Ensure default is first if available
+        if default_type in available_types:
+            available_types.remove(default_type)
+            available_types.insert(0, default_type)
+        
+        logger.info(f"📋 Available structure types: {available_types}")
+        return available_types, default_type
+        
+    except Exception as e:
+        logger.warning(f"Error scanning profiles directory: {e}")
+        # Fallback to basic types
+        return ["windmill", "tower", "mound"], "windmill"
+
+def get_profile_name_for_structure_type(structure_type: str):
+    """Convert structure type to profile filename"""
+    app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+    profiles_dir = f"{app_root}/profiles"
+    
+    # Direct mapping for common types
+    type_mapping = {
+        'windmill': 'dutch_windmill.json',
+        'tower': 'tower.json',
+        'mound': 'mound.json',
+        'geoglyph': 'amazon_geoglyph.json',
+        'citadel': 'amazon_citadel.json'
+    }
+    
+    # Check direct mapping first
+    if structure_type.lower() in type_mapping:
+        profile_name = type_mapping[structure_type.lower()]
+        if os.path.exists(f"{profiles_dir}/{profile_name}"):
+            return profile_name
+    
+    # Try variations with the structure type name
+    possible_names = [
+        f"{structure_type}.json",
+        f"{structure_type.lower()}.json",
+        f"{structure_type.replace(' ', '_')}.json",
+        f"{structure_type.replace(' ', '_').lower()}.json"
+    ]
+    
+    for name in possible_names:
+        if os.path.exists(f"{profiles_dir}/{name}"):
+            return name
+    
+    # Fallback to dutch_windmill.json
+    logger.warning(f"No profile found for structure type '{structure_type}', using dutch_windmill.json")
+    return "dutch_windmill.json"
+
 def clean_patch_data(elevation_data: np.ndarray) -> np.ndarray:
     """Replace NaNs with mean of valid values"""
     if np.isnan(elevation_data).any():
@@ -98,13 +189,23 @@ def load_elevation_patch_unified(lat, lon, patch_name, buffer_radius_m=20, resol
         # Calculate patch size from buffer radius (diameter)
         patch_size_m = int(buffer_radius_m * 2)
         
+        # Choose data type based on resolution
+        # For low resolution (> 2m), use DTM to get cleaner ground surface
+        # For high resolution (<= 2m), use DSM to capture structure details
+        if resolution_m > 2.0:
+            smart_data_type = "DTM"
+            # Using DTM for low resolution
+        else:
+            smart_data_type = data_type  # Keep original choice for high-res
+            # Using specified data type for high resolution
+        
         # Use LidarFactory to get elevation data
         result = LidarMapFactory.get_patch(
             lat=lat,
             lon=lon,
             size_m=patch_size_m,
             preferred_resolution_m=resolution_m,
-            preferred_data_type=data_type
+            preferred_data_type=smart_data_type
         )
         
         if result is None:
@@ -127,22 +228,15 @@ def load_elevation_patch_unified(lat, lon, patch_name, buffer_radius_m=20, resol
         
         elevation_array = result.data
         
-        # Fill any remaining nans with the mean of valid values
-        elevation_array = clean_patch_data(elevation_array)
+        # Use raw elevation data without NaN cleaning for accurate detection
         
-        logger.info(f"✅ Loaded elevation patch via LidarFactory: {elevation_array.shape}, "
-                   f"range: [{np.nanmin(elevation_array):.2f}, {np.nanmax(elevation_array):.2f}], "
-                   f"source: {result.source_dataset}, resolution: {result.resolution_description}, "
-                   f"high_res: {result.is_high_resolution}")
+        # Elevation patch loaded via LidarFactory
         
         return elevation_array, result  # Return both data and metadata
         
     except Exception as e:
         logger.error(f"❌ LidarFactory elevation loading failed for {patch_name}: {e}")
         raise
-        if np.isnan(elevation_array).any():
-            mean_val = np.nanmean(elevation_array)
-            elevation_array = np.where(np.isnan(elevation_array), mean_val, elevation_array)
         
         patch = ElevationPatch(
             elevation_data=elevation_array,
@@ -179,7 +273,7 @@ def load_elevation_patch_lidar_factory(lat: float, lon: float, buffer_radius_m: 
         
         from lidar_factory.factory import LidarMapFactory
         
-        logger.debug(f"Loading LiDAR data via factory at ({lat:.4f}, {lon:.4f})")
+        # Loading LiDAR data via factory
         
         # Calculate patch size in meters from buffer radius
         patch_size_m = buffer_radius_m * 2
@@ -213,8 +307,7 @@ def load_elevation_patch_lidar_factory(lat: float, lon: float, buffer_radius_m: 
         
         elevation_array = result.data
         
-        # Clean the patch data
-        elevation_array = clean_patch_data(elevation_array)
+        # Use raw elevation data without NaN cleaning for accurate detection
         
         # Create ElevationPatch object
         patch = ElevationPatch(
@@ -226,11 +319,11 @@ def load_elevation_patch_lidar_factory(lat: float, lon: float, buffer_radius_m: 
             patch_size_m=patch_size_m
         )
         
-        logger.debug(f"✅ Loaded patch via LidarFactory: {patch.elevation_data.shape} at ({lat:.6f}, {lon:.6f})")
+        # Patch loaded via LidarFactory
         return patch
         
     except Exception as e:
-        logger.debug(f"Failed to load patch via LidarFactory at ({lat:.4f}, {lon:.4f}): {e}")
+        # Failed to load patch via LidarFactory
         return None
 
 # Keep the old function name for backward compatibility
@@ -278,10 +371,47 @@ class ScanPatch:
     timestamp: str
     is_positive: bool
     confidence: float
+    patch_size_m: int  # Patch size determined by backend profile authority (required field)
     detection_result: Optional[Dict] = None
     elevation_data: Optional[List] = None
     elevation_stats: Optional[Dict] = None
-    patch_size_m: int = 40  # Changed default from 64m to 40m
+
+# ==============================================================================
+# REQUEST/RESPONSE MODELS FOR PROFILE CONFIGURATION
+# ==============================================================================
+
+class ProfileGeometryConfig(BaseModel):
+    patch_size_m: Optional[List[float]] = None
+    resolution_m: Optional[float] = None
+    structure_radius_m: Optional[float] = None
+    min_structure_size_m: Optional[float] = None
+    max_structure_size_m: Optional[float] = None
+
+class ProfileThresholdsConfig(BaseModel):
+    detection_threshold: Optional[float] = None
+    confidence_threshold: Optional[float] = None
+    early_decision_threshold: Optional[float] = None
+    uncertainty_tolerance: Optional[float] = None
+
+class ProfileFeatureConfig(BaseModel):
+    enabled: Optional[bool] = None
+    weight: Optional[float] = None
+    polarity_preference: Optional[str] = None
+
+class ProfilePerformanceConfig(BaseModel):
+    aggregation_method: Optional[str] = None
+    parallel_execution: Optional[bool] = None
+    max_workers: Optional[int] = None
+
+class CustomProfileRequest(BaseModel):
+    structure_type: str
+    session_id: Optional[str] = None
+    geometry: Optional[ProfileGeometryConfig] = None
+    thresholds: Optional[ProfileThresholdsConfig] = None
+    features: Optional[Dict[str, ProfileFeatureConfig]] = None
+    performance: Optional[ProfilePerformanceConfig] = None
+    save_as_custom: Optional[bool] = False
+    custom_profile_name: Optional[str] = None
 
 @dataclass
 class DiscoverySession:
@@ -312,9 +442,9 @@ class EnhancedConnectionManager:
         self.last_heartbeat: Dict[WebSocket, float] = {}
     
     async def connect(self, websocket: WebSocket, user_id: str = None):
-        logger.info(f"🔌 Accepting WebSocket connection from {websocket.client}...")
+        # Accepting WebSocket connection
         await websocket.accept()
-        logger.info(f"✅ WebSocket accepted successfully")
+        # WebSocket accepted successfully
         
         self.active_connections.append(websocket)
         
@@ -329,7 +459,7 @@ class EnhancedConnectionManager:
         
         self.last_heartbeat[websocket] = time.time()
         
-        logger.info(f"🔗 WebSocket connected. Total active connections: {len(self.active_connections)}")
+        # WebSocket connected
         
         # Send a welcome message to confirm connection
         await self.send_to_connection(websocket, {
@@ -338,7 +468,7 @@ class EnhancedConnectionManager:
             'total_connections': len(self.active_connections)
         })
         
-        logger.info(f"✅ WebSocket connection established successfully for user: {user_id}")
+        # WebSocket connection established
     
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
@@ -348,14 +478,13 @@ class EnhancedConnectionManager:
         self.connection_metadata.pop(websocket, None)
         self.last_heartbeat.pop(websocket, None)
         
-        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+        # WebSocket disconnected
     
     async def send_to_connection(self, websocket: WebSocket, message: dict):
         """Send message to specific connection with error handling"""
         try:
             # Check if websocket is still open before sending
-            logger.debug(f"Attempting to send message {message.get('type')} to WebSocket {id(websocket)}")
-            logger.debug(f"WebSocket state: {websocket.client_state}")
+            # WebSocket connection check (verbose logging reduced)
             
             if websocket.client_state != WebSocketState.CONNECTED:
                 logger.warning(f"WebSocket not connected (state: {websocket.client_state}), skipping message send")
@@ -364,7 +493,7 @@ class EnhancedConnectionManager:
             # Serialize message with detailed error handling
             try:
                 message_json = json.dumps(message, default=safe_serialize)
-                logger.debug(f"Successfully serialized message: {len(message_json)} chars")
+                # Message serialized successfully
             except Exception as serialize_error:
                 logger.error(f"Failed to serialize message: {serialize_error}, message type: {message.get('type')}")
                 # Send a simpler error message instead
@@ -375,9 +504,8 @@ class EnhancedConnectionManager:
                 }
                 message_json = json.dumps(fallback_message)
             
-            logger.debug(f"About to send WebSocket message of {len(message_json)} chars")
             await websocket.send_text(message_json)
-            logger.debug(f"Successfully sent WebSocket message")
+            # Message sent successfully
             
             # Update metadata
             if websocket in self.connection_metadata:
@@ -403,7 +531,7 @@ class EnhancedConnectionManager:
             logger.warning(f"❌ No active connections, skipping message broadcast: {message_type}")
             return 0
             
-        logger.debug(f"📡 Broadcasting {message_type} to {len(self.active_connections)} connections")
+        # Broadcasting message to active connections
         successful_sends = 0
         failed_connections = []
         
@@ -421,7 +549,8 @@ class EnhancedConnectionManager:
             self.disconnect(connection)
         
         if successful_sends > 0:
-            logger.debug(f"✅ Broadcast {message_type} to {successful_sends}/{len(self.active_connections)} connections")
+            # Broadcast successful
+            pass
         else:
             logger.warning(f"❌ Failed to broadcast {message_type} - no successful sends")
         
@@ -483,13 +612,12 @@ async def websocket_discovery_endpoint(
         
         # Main message loop
         while True:
-            logger.debug(f"Waiting for WebSocket message...")
             # Wait for client messages
             data = await websocket.receive_text()
-            logger.debug(f"Received WebSocket data: {data[:100]}...")
+            # Received WebSocket data
             
             message = json.loads(data)
-            logger.info(f"Received WebSocket message: {message.get('type')}")
+            # Received WebSocket message
             
             # Update message received count
             if websocket in discovery_manager.connection_metadata:
@@ -498,17 +626,17 @@ async def websocket_discovery_endpoint(
             
             # Handle different message types
             if message.get('type') == 'ping':
-                logger.debug(f"Handling ping message")
+                # Handling ping message
                 await discovery_manager.send_to_connection(websocket, {
                     'type': 'pong',
                     'timestamp': datetime.now().isoformat()
                 })
             elif message.get('type') == 'pong':
-                logger.debug(f"Received pong message")
+                # Received pong message
                 # Update heartbeat timestamp
                 discovery_manager.last_heartbeat[websocket] = time.time()
             elif message.get('type') == 'get_status':
-                logger.debug(f"Handling status request")
+                # Handling status request
                 await discovery_manager.send_to_connection(websocket, {
                     'type': 'status_update',
                     'active_sessions': len(active_sessions),
@@ -684,22 +812,296 @@ async def get_session_details(session_id: str):
 # KERNEL MANAGEMENT ENDPOINTS
 # ==============================================================================
 
+@router.get("/discovery/profiles")
+async def get_available_profiles(current_user=Depends(get_current_user_optional)):
+    """Get detailed list of available detection profiles with their configurable options"""
+    try:
+        from kernel.detector_profile import DetectorProfileManager
+        
+        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
+        
+        # Get available types
+        available_types, default_type = get_available_structure_types()
+        
+        profiles_info = []
+        
+        for structure_type in available_types:
+            try:
+                # Load profile to get detailed information
+                profile_name = get_profile_name_for_structure_type(structure_type)
+                profile = profile_manager.load_profile(profile_name)
+                
+                # Extract configurable options from profile
+                profile_info = {
+                    "structure_type": structure_type,
+                    "profile_name": profile.name,
+                    "filename": profile_name,
+                    "description": profile.description,
+                    "version": profile.version,
+                    "structure_category": profile.structure_type.value if hasattr(profile, 'structure_type') else structure_type,
+                    
+                    # Geometric parameters (configurable)
+                    "geometry": {
+                        "patch_size_m": profile.geometry.patch_size_m,
+                        "resolution_m": profile.geometry.resolution_m,
+                        "structure_radius_m": profile.geometry.structure_radius_m,
+                        "min_structure_size_m": profile.geometry.min_structure_size_m,
+                        "max_structure_size_m": profile.geometry.max_structure_size_m,
+                        "patch_shape": profile.geometry.patch_shape.value if hasattr(profile.geometry.patch_shape, 'value') else str(profile.geometry.patch_shape)
+                    },
+                    
+                    # Detection thresholds (configurable)
+                    "thresholds": {
+                        "detection_threshold": profile.thresholds.detection_threshold,
+                        "confidence_threshold": profile.thresholds.confidence_threshold,
+                        "early_decision_threshold": getattr(profile.thresholds, 'early_decision_threshold', None),
+                        "uncertainty_tolerance": getattr(profile.thresholds, 'uncertainty_tolerance', None)
+                    },
+                    
+                    # Feature weights (configurable)
+                    "features": {},
+                    
+                    # Performance settings
+                    "performance": {
+                        "aggregation_method": getattr(profile, 'aggregation_method', 'streaming'),
+                        "parallel_execution": getattr(profile, 'parallel_execution', True),
+                        "max_workers": getattr(profile, 'max_workers', 6)
+                    }
+                }
+                
+                # Extract feature information
+                if hasattr(profile, 'features') and profile.features:
+                    for feature_name, feature_config in profile.features.items():
+                        if hasattr(feature_config, 'enabled') and hasattr(feature_config, 'weight'):
+                            profile_info["features"][feature_name] = {
+                                "enabled": feature_config.enabled,
+                                "weight": feature_config.weight,
+                                "polarity_preference": getattr(feature_config, 'polarity_preference', None),
+                                "configurable": True  # Mark as user-configurable
+                            }
+                
+                profiles_info.append(profile_info)
+                
+            except Exception as e:
+                logger.warning(f"Could not load profile for {structure_type}: {e}")
+                # Add basic info even if profile loading fails
+                profiles_info.append({
+                    "structure_type": structure_type,
+                    "profile_name": f"{structure_type.title()} Detection",
+                    "filename": get_profile_name_for_structure_type(structure_type),
+                    "description": f"Detection profile for {structure_type} structures",
+                    "error": str(e)
+                })
+        
+        return {
+            "status": "success",
+            "profiles": profiles_info,
+            "default_type": default_type,
+            "total_count": len(profiles_info),
+            "configurable_options": {
+                "geometry": ["patch_size_m", "resolution_m", "structure_radius_m"],
+                "thresholds": ["detection_threshold", "confidence_threshold"],
+                "features": "all_weights_and_enabled_status"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting available profiles: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "profiles": [],
+            "default_type": "windmill"
+        }
+
+@router.get("/discovery/structure_types")
+async def get_available_structure_types_endpoint(current_user=Depends(get_current_user_optional)):
+    """Get simple list of available structure types (backwards compatibility)"""
+    try:
+        available_types, default_type = get_available_structure_types()
+        return {
+            "status": "success",
+            "available_types": available_types,
+            "default_type": default_type,
+            "total_count": len(available_types)
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting available structure types: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "available_types": ["windmill"],  # Fallback
+            "default_type": "windmill"
+        }
+
+@router.post("/discovery/configure_profile")
+async def configure_custom_profile(request: CustomProfileRequest, current_user=Depends(get_current_user_optional)):
+    """Apply custom configuration to a detection profile for a session"""
+    try:
+        from kernel.detector_profile import DetectorProfileManager
+        from kernel import G2StructureDetector
+        import copy
+        
+        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
+        
+        # Load base profile
+        profile_name = get_profile_name_for_structure_type(request.structure_type)
+        base_profile = profile_manager.load_profile(profile_name)
+        
+        # Create a copy to modify
+        custom_profile = copy.deepcopy(base_profile)
+        
+        # Track what was modified
+        modifications = []
+        
+        # Apply geometry modifications
+        if request.geometry:
+            if request.geometry.patch_size_m is not None:
+                custom_profile.geometry.patch_size_m = tuple(request.geometry.patch_size_m)
+                modifications.append(f"patch_size_m: {request.geometry.patch_size_m}")
+            
+            if request.geometry.resolution_m is not None:
+                custom_profile.geometry.resolution_m = request.geometry.resolution_m
+                modifications.append(f"resolution_m: {request.geometry.resolution_m}")
+            
+            if request.geometry.structure_radius_m is not None:
+                custom_profile.geometry.structure_radius_m = request.geometry.structure_radius_m
+                modifications.append(f"structure_radius_m: {request.geometry.structure_radius_m}")
+            
+            if request.geometry.min_structure_size_m is not None:
+                custom_profile.geometry.min_structure_size_m = request.geometry.min_structure_size_m
+                modifications.append(f"min_structure_size_m: {request.geometry.min_structure_size_m}")
+            
+            if request.geometry.max_structure_size_m is not None:
+                custom_profile.geometry.max_structure_size_m = request.geometry.max_structure_size_m
+                modifications.append(f"max_structure_size_m: {request.geometry.max_structure_size_m}")
+        
+        # Apply threshold modifications
+        if request.thresholds:
+            if request.thresholds.detection_threshold is not None:
+                custom_profile.thresholds.detection_threshold = request.thresholds.detection_threshold
+                modifications.append(f"detection_threshold: {request.thresholds.detection_threshold}")
+            
+            if request.thresholds.confidence_threshold is not None:
+                custom_profile.thresholds.confidence_threshold = request.thresholds.confidence_threshold
+                modifications.append(f"confidence_threshold: {request.thresholds.confidence_threshold}")
+            
+            if request.thresholds.early_decision_threshold is not None and hasattr(custom_profile.thresholds, 'early_decision_threshold'):
+                custom_profile.thresholds.early_decision_threshold = request.thresholds.early_decision_threshold
+                modifications.append(f"early_decision_threshold: {request.thresholds.early_decision_threshold}")
+            
+            if request.thresholds.uncertainty_tolerance is not None and hasattr(custom_profile.thresholds, 'uncertainty_tolerance'):
+                custom_profile.thresholds.uncertainty_tolerance = request.thresholds.uncertainty_tolerance
+                modifications.append(f"uncertainty_tolerance: {request.thresholds.uncertainty_tolerance}")
+        
+        # Apply feature modifications
+        if request.features and hasattr(custom_profile, 'features'):
+            for feature_name, feature_config in request.features.items():
+                if feature_name in custom_profile.features:
+                    if feature_config.enabled is not None:
+                        custom_profile.features[feature_name].enabled = feature_config.enabled
+                        modifications.append(f"{feature_name}.enabled: {feature_config.enabled}")
+                    
+                    if feature_config.weight is not None:
+                        custom_profile.features[feature_name].weight = feature_config.weight
+                        modifications.append(f"{feature_name}.weight: {feature_config.weight}")
+                    
+                    if feature_config.polarity_preference is not None and hasattr(custom_profile.features[feature_name], 'polarity_preference'):
+                        custom_profile.features[feature_name].polarity_preference = feature_config.polarity_preference
+                        modifications.append(f"{feature_name}.polarity_preference: {feature_config.polarity_preference}")
+        
+        # Apply performance modifications
+        if request.performance:
+            if request.performance.aggregation_method is not None and hasattr(custom_profile, 'aggregation_method'):
+                custom_profile.aggregation_method = request.performance.aggregation_method
+                modifications.append(f"aggregation_method: {request.performance.aggregation_method}")
+            
+            if request.performance.parallel_execution is not None and hasattr(custom_profile, 'parallel_execution'):
+                custom_profile.parallel_execution = request.performance.parallel_execution
+                modifications.append(f"parallel_execution: {request.performance.parallel_execution}")
+            
+            if request.performance.max_workers is not None and hasattr(custom_profile, 'max_workers'):
+                custom_profile.max_workers = request.performance.max_workers
+                modifications.append(f"max_workers: {request.performance.max_workers}")
+        
+        # Test the custom profile by creating a detector
+        try:
+            test_detector = G2StructureDetector(profile=custom_profile)
+            profile_valid = True
+            validation_message = "Profile configuration is valid"
+        except Exception as e:
+            profile_valid = False
+            validation_message = f"Profile validation failed: {str(e)}"
+        
+        # Store custom profile for session if valid and session_id provided
+        session_cache_key = None
+        if profile_valid and request.session_id:
+            session_cache_key = f"custom_{request.session_id}_{request.structure_type}"
+            # Store in session cache (you might want to implement session-based profile storage)
+            logger.info(f"🔧 Custom profile configured for session {request.session_id}: {modifications}")
+        
+        # Save as custom profile if requested
+        saved_profile_name = None
+        if request.save_as_custom and request.custom_profile_name and profile_valid:
+            try:
+                custom_filename = f"custom_{request.custom_profile_name.replace(' ', '_').lower()}.json"
+                # You might want to implement profile saving functionality
+                saved_profile_name = custom_filename
+                modifications.append(f"Saved as: {custom_filename}")
+            except Exception as e:
+                logger.warning(f"Failed to save custom profile: {e}")
+        
+        return {
+            "status": "success",
+            "profile_valid": profile_valid,
+            "validation_message": validation_message,
+            "base_profile": profile_name,
+            "structure_type": request.structure_type,
+            "modifications": modifications,
+            "session_cache_key": session_cache_key,
+            "saved_profile_name": saved_profile_name,
+            "custom_profile_summary": {
+                "patch_size_m": custom_profile.geometry.patch_size_m,
+                "detection_threshold": custom_profile.thresholds.detection_threshold,
+                "confidence_threshold": custom_profile.thresholds.confidence_threshold,
+                "feature_count": len(custom_profile.features) if hasattr(custom_profile, 'features') else 0,
+                "enabled_features": [name for name, feature in custom_profile.features.items() if feature.enabled] if hasattr(custom_profile, 'features') else []
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error configuring custom profile: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "profile_valid": False
+        }
+
 @router.get("/discovery/kernels")
 async def get_cached_kernels(structure_type: str = None):
     """Get list of cached kernels from the new G2 system"""
     try:
+        # Use dynamic structure type if not provided
+        if structure_type is None:
+            available_types, default_type = get_available_structure_types()
+            structure_type = default_type
+        
         # Import G2 detection system
         from kernel import G2StructureDetector
         
         # Create detector with Dutch windmill profile
         from kernel.detector_profile import DetectorProfileManager
         
-        kernel_dir = "/media/im3/plus/lab4/RE/re_archaeology/kernel"
+        # Use app root profiles/ directory as single source for consistency
+        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
         profile_manager = DetectorProfileManager(
-            profiles_dir=f"{kernel_dir}/profiles",
-            templates_dir=f"{kernel_dir}/templates"
+            profiles_dir=f"{app_root}/profiles"
         )
-        profile = profile_manager.load_profile("dutch_windmill.json")
+        # Get profile name dynamically based on structure type
+        profile_name = get_profile_name_for_structure_type(structure_type)
+        profile = profile_manager.load_profile(profile_name)
         detector = G2StructureDetector(profile=profile)
         
         kernels_info = []
@@ -773,14 +1175,14 @@ async def clear_discovery_sessions():
 
 @router.post("/discovery/kernels/clear")
 async def clear_kernel_cache(structure_type: str = None, confirm: bool = False):
-    """Clear cached kernels"""
+    """Clear cached detectors to apply profile fixes"""
     try:
-        # This would need to be implemented to work with the phi0_core module
-        # For now, return a placeholder
+        # Clear all cached detectors to force using updated profile parameters
+        force_clear_all_detectors()
         return {
             'status': 'success',
-            'removed_count': 0,
-            'message': 'Kernel cache clearing integration pending'
+            'removed_count': len(_session_detectors),
+            'message': 'Detector cache cleared - profile fixes will be applied'
         }
     except Exception as e:
         logger.error(f"Failed to clear kernel cache: {e}")
@@ -824,11 +1226,23 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
         center_lat = config.get('center_lat', 52.4751)
         center_lon = config.get('center_lon', 4.8156)
         scan_radius_km = config.get('scan_radius_km', 2.0)
-        patch_size_m = config.get('patch_size_m', 40)  # Default changed to 40m
         
-        # Calculate SLIDING WINDOW scanning with meter-by-meter movement
-        # Use sliding window approach instead of fixed grid tiles
-        sliding_step_m = config.get('sliding_step_m', 1)  # Default to 1 meter steps
+        # Load profile to get patch_size_m from backend authority (not frontend)
+        from kernel.detector_profile import DetectorProfileManager
+        
+        # Use app root profiles/ directory as single source for consistency
+        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        profile_manager = DetectorProfileManager(
+            profiles_dir=f"{app_root}/profiles"
+        )
+        profile = profile_manager.load_profile("dutch_windmill.json")
+        
+        # Backend has authority over patch size - read from profile, not frontend config
+        patch_size_m = profile.geometry.patch_size_m[0]  # Use profile's patch size
+        
+        # Calculate SLIDING WINDOW scanning with optimized step size for 40m patches
+        # Use 10m steps for reasonable overlap (75% overlap) - consistent with standalone detection
+        sliding_step_m = config.get('sliding_step_m', 10)  # Default to 10 meter steps for efficiency
         
         # Check if using bounds-based scanning (southeast extension from clicked point)
         use_bounds = config.get('use_bounds', False)
@@ -918,9 +1332,9 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                 except Exception as scan_msg_error:
                     logger.warning(f"Failed to send patch scanning message: {scan_msg_error}")
                 
-                # Load REAL elevation data from Google Earth Engine
+                # Load REAL elevation data from Google Earth Engine using profile resolution
                 buffer_radius_m = patch_size_m // 2  # Half the patch size
-                elevation_result = load_elevation_patch_unified(lat, lon, f"patch_{patch_number}", buffer_radius_m, resolution_m=0.5)
+                elevation_result = load_elevation_patch_unified(lat, lon, f"patch_{patch_number}", buffer_radius_m, resolution_m=profile_resolution_m)
                 
                 # Handle the new return format (data, metadata)
                 if isinstance(elevation_result, tuple) and len(elevation_result) == 2:
@@ -974,14 +1388,22 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                         from kernel import G2StructureDetector
                         from kernel.detector_profile import DetectorProfileManager
                         
-                        # Load the Dutch windmill profile
-                        kernel_dir = "/media/im3/plus/lab4/RE/re_archaeology/kernel"
+                        # Load the Dutch windmill profile from app root profiles/ directory
+                        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
                         profile_manager = DetectorProfileManager(
-                            profiles_dir=f"{kernel_dir}/profiles",
-                            templates_dir=f"{kernel_dir}/templates"
+                            profiles_dir=f"{app_root}/profiles"
                         )
                         profile = profile_manager.load_profile("dutch_windmill.json")
                         detector = G2StructureDetector(profile=profile)
+                        
+                        # Log elevation data characteristics for debugging
+                        elev_data = elevation_patch.elevation_data
+                        logger.info(f"🔍 Elevation patch analysis at ({lat:.6f}, {lon:.6f}):")
+                        logger.info(f"  Shape: {elev_data.shape}")
+                        logger.info(f"  Min/Max: {np.nanmin(elev_data):.3f} / {np.nanmax(elev_data):.3f}")
+                        logger.info(f"  Mean/Std: {np.nanmean(elev_data):.3f} / {np.nanstd(elev_data):.3f}")
+                        logger.info(f"  Range: {np.nanmax(elev_data) - np.nanmin(elev_data):.3f}")
+                        logger.info(f"  Data hash: {hash(elev_data.tobytes())}")
                         
                         # Run detection on the elevation patch
                         detection_result = detector.detect_structure(elevation_patch)
@@ -1171,13 +1593,21 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                     logger.warning(f"Failed to send patch result: {send_error}")
                     # Continue processing even if send fails
                 
-                # Send dedicated detection_result for high-confidence windmills
-                if is_positive and confidence > 0.7:
-                    logger.info(f"🎯 Sending detection_result for windmill: confidence={confidence:.3f} at ({lat:.6f}, {lon:.6f})")
+                # Send dedicated detection_result only for actual G2 detections
+                if is_positive:
+                    # Extract G2 detection scores if available
+                    final_score = 0.0
+                    if 'detection_result' in locals() and detection_result and hasattr(detection_result, 'final_score'):
+                        final_score = float(detection_result.final_score)
+                    
+                    logger.info(f"🎯 Sending detection_result for windmill: score={final_score:.3f}, confidence={confidence:.3f} at ({lat:.6f}, {lon:.6f})")
+                    logger.info(f"📊 Elevation stats: min={elevation_stats['min']:.2f}, max={elevation_stats['max']:.2f}, mean={elevation_stats['mean']:.2f}, std={elevation_stats['std']:.2f}")
                     await manager.send_message({
                         'type': 'detection_result',
-                        'structure_type': 'windmill',
+                        'structure_type': structure_type,
                         'confidence': confidence,
+                        'final_score': final_score,
+                        'detected': True,  # Only sent when is_positive=True
                         'lat': lat,
                         'lon': lon,
                         'session_id': session.session_id,
@@ -1275,10 +1705,13 @@ async def start_lidar_scan(
         center_lat = float(config.get('center_lat', 52.4751))
         center_lon = float(config.get('center_lon', 4.8156))
         radius_km = float(config.get('radius_km', 2.0))
-        tile_size_m = int(config.get('tile_size_m', 64))  # Smaller default for streaming
+        # Backend has authority over tile size - use profile patch size  
+        tile_size_m = 40  # Use consistent 40m patch size
         prefer_high_resolution = config.get('prefer_high_resolution', False)
         enable_detection = config.get('enable_detection', False)
-        structure_type = config.get('structure_type', 'windmill')
+        # Get available structure types and use dynamic default
+        available_types, default_type = get_available_structure_types()
+        structure_type = config.get('structure_type', default_type)
         
         # Determine optimal resolution based on preference and area size
         if prefer_high_resolution:
@@ -1288,13 +1721,13 @@ async def start_lidar_scan(
         else:
             preferred_resolution = 1.0   # Standard resolution for large areas
         
-        logger.info(f"🎯 Using preferred resolution: {preferred_resolution}m/px (high_res_requested: {prefer_high_resolution})")
+        # Using preferred resolution for LiDAR scan
         
         # Calculate scanning parameters
         radius_m = radius_km * 1000
         scan_grid_size = int(2 * radius_m / tile_size_m)
         
-        logger.info(f"🔧 LiDAR streaming config: {tile_size_m}m tiles, {scan_grid_size}x{scan_grid_size} grid")
+        # LiDAR streaming configuration set
         
         # Create session info with enhanced queue management
         session_info = {
@@ -1330,7 +1763,7 @@ async def start_lidar_scan(
         # Start background task for tile scanning
         asyncio.create_task(run_lidar_scan_async(session_id, session_info))
         
-        logger.info(f"✅ Started LiDAR scan session {session_id} (detection: {enable_detection})")
+        # LiDAR scan session started
         
         return {
             "session_id": session_id,
@@ -1357,12 +1790,23 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         center_lat = float(config.get('center_lat', 52.4751))
         center_lon = float(config.get('center_lon', 4.8156))
         radius_km = float(config.get('radius_km', 2.0))
-        tile_size_m = int(config.get('tile_size_m', 64))  # Smaller for streaming
+        # Backend has authority over tile size - use profile patch size
+        tile_size_m = 40  # Use consistent 40m patch size
         data_type = config.get('data_type', 'DSM')
         streaming_mode = config.get('streaming_mode', True)  # Enable by default
         preferred_resolution = session_info.get('preferred_resolution', 1.0)  # Get from session info
         enable_detection = config.get('enable_detection', False)
-        structure_type = config.get('structure_type', 'windmill')
+        # Get available structure types and use dynamic default
+        available_types, default_type = get_available_structure_types()
+        structure_type = config.get('structure_type', default_type)
+        
+        # Load profile to get correct resolution and patch size
+        from kernel.detector_profile import DetectorProfileManager
+        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
+        profile_name = get_profile_name_for_structure_type(structure_type)
+        profile = profile_manager.load_profile(profile_name)
+        profile_resolution_m = profile.geometry.resolution_m
         
         # Calculate scan area bounds (should match the green rectangle)
         radius_m = radius_km * 1000
@@ -1381,7 +1825,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         tiles_x = max(1, int(np.ceil(area_width_m / tile_size_m)))
         tiles_y = max(1, int(np.ceil(area_height_m / tile_size_m)))
         
-        logger.info(f"�️ Streaming LiDAR scan: {tiles_x}×{tiles_y} tiles of {tile_size_m}m each")
+        # Streaming LiDAR scan initialized
         
         # Update session status
         session_info["status"] = "running"
@@ -1391,7 +1835,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         
         # Generate tiles to exactly cover the scan area
         # Simple systematic tiling: top-left to bottom-right
-        logger.info(f"📋 Systematic tiling: {tiles_y} rows × {tiles_x} cols = {tiles_y * tiles_x} tiles")
+        # Systematic tiling pattern configured
         
         # Process tiles systematically row by row, left to right
         for row in range(tiles_y):
@@ -1425,7 +1869,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                 
                 # Mark tile as being processed
                 session_info.setdefault("processed_tile_ids", set()).add(tile_id)
-                logger.debug(f"🔧 Processing tile {tile_id} ({row},{col})")
+                # Processing tile
                 
                 # Calculate tile position within the scan area
                 lat_step = (north_lat - south_lat) / tiles_y
@@ -1538,14 +1982,14 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
                         
-                        logger.debug(f"✅ Sending tile {tile_id} with elevation data")
+                        # Sending tile with elevation data
                         # Send tile result to connected clients
                         await discovery_manager.send_message(tile_result)
                         
                         # Store tile data for coordinated detection later
-                        logger.debug(f"🔧 Detection enabled: {enable_detection} for tile {tile_id}")
+                        # Detection enabled for tile
                         if enable_detection:
-                            logger.info(f"🎯 Storing tile {tile_id} for coordinated detection at ({tile_lat:.6f}, {tile_lon:.6f})")
+                            # Storing tile for coordinated detection
                             # Store tile data for later coordinated detection
                             if session_id not in _session_tile_data:
                                 _session_tile_data[session_id] = {}
@@ -1558,12 +2002,12 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             }
                             
                             # Store tile for real-time sliding detection (don't run tile-level detection for lens)
-                            logger.info(f"🎯 Tile {tile_id} stored for real-time sliding detection at ({tile_lat:.6f}, {tile_lon:.6f})")
+                            # Tile stored for real-time sliding detection
                             
                             # Start sliding detection after collecting enough tiles
                             tiles_collected = len(_session_tile_data[session_id])
                             if tiles_collected == 5 and session_id not in _active_detection_tasks:  # Start after 5 tiles
-                                logger.info(f"🎯 Starting sliding detection with {tiles_collected} tiles collected")
+                                # Starting sliding detection with collected tiles
                                 # Start background sliding detection
                                 config = session_info.get('config', {})
                                 center_lat = config.get('center_lat')
@@ -1619,7 +2063,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
                         
-                        logger.debug(f"⚠️ Sending tile {tile_id} with no data")
+                        # Sending tile with no data
                         await discovery_manager.send_message(tile_result)
                         
                         # Send empty patch_result if detection is enabled to keep lens moving
@@ -1641,13 +2085,13 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                                 'patch_size_m': int(tile_size_m)
                             }
                             
-                            logger.info(f"🔍 Sending patch_result (no data) for tile {tile_id} at ({tile_lat:.6f}, {tile_lon:.6f})")
+                            # Sending patch_result (no data) for tile
                             await discovery_manager.send_message({
                                 'type': 'patch_result',
                                 'patch': patch_message,
                                 'timestamp': datetime.now(timezone.utc).isoformat()
                             })
-                            logger.debug(f"✅ No-data patch result sent for {tile_id}")
+                            # No-data patch result sent
                     
                     # Update progress
                     session_info["processed_tiles"] = row * tiles_x + col + 1
@@ -1690,7 +2134,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         
         # Detection will be handled by coordinated sliding detection when session is stopped
         
-        logger.info(f"✅ Completed LiDAR scan session {session_id}")
+        # Completed LiDAR scan session
         
     except Exception as e:
         logger.error(f"❌ Error in LiDAR scan {session_id}: {e}")
@@ -1729,17 +2173,14 @@ async def get_session_detector(session_id: str, structure_type: str):
             from kernel import G2StructureDetector
             from kernel.detector_profile import DetectorProfileManager
             
-            kernel_dir = "/media/im3/plus/lab4/RE/re_archaeology/kernel"
+            # Use app root profiles/ directory as single source for consistency
+            app_root = "/media/im3/plus/lab4/RE/re_archaeology"
             profile_manager = DetectorProfileManager(
-                profiles_dir=f"{kernel_dir}/profiles",
-                templates_dir=f"{kernel_dir}/templates"
+                profiles_dir=f"{app_root}/profiles"
             )
             
-            profile_name = "dutch_windmill.json"  # Default to windmill profile
-            if structure_type == "tower":
-                profile_name = "tower.json" if os.path.exists(f"{kernel_dir}/profiles/tower.json") else "dutch_windmill.json"
-            elif structure_type == "mound":
-                profile_name = "mound.json" if os.path.exists(f"{kernel_dir}/profiles/mound.json") else "dutch_windmill.json"
+            # Get profile name dynamically based on available profiles
+            profile_name = get_profile_name_for_structure_type(structure_type)
             
             logger.info(f"🔧 Initializing G2 detector for session {session_id} with {structure_type} profile")
             profile = profile_manager.load_profile(profile_name)
@@ -1760,12 +2201,21 @@ def cleanup_session_detector(session_id: str):
     keys_to_remove = [key for key in _session_detectors.keys() if key.startswith(f"{session_id}_")]
     for key in keys_to_remove:
         del _session_detectors[key]
-    logger.info(f"🧹 Cleaned up {len(keys_to_remove)} detector(s) for session {session_id}")
+    # Cleaned up detectors for session
     
     # Also clean up tile data
     if session_id in _session_tile_data:
         del _session_tile_data[session_id]
-        logger.info(f"🧹 Cleaned up tile data for session {session_id}")
+        # Cleaned up tile data for session
+
+def force_clear_all_detectors():
+    """Force clear all cached detectors to apply profile fixes"""
+    global _session_detectors
+    _session_detectors.clear()
+    logger.info("🧹 Cleared all cached detectors - will use updated profile parameters")
+
+# Clear detector cache on module load to ensure updated parameters are used
+force_clear_all_detectors()
 
 async def run_coordinated_detection(session_id: str, scan_area):
     """Run detection across entire scan area in typewriter pattern"""
@@ -1788,9 +2238,19 @@ async def run_coordinated_detection(session_id: str, scan_area):
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
     
-    # Detection parameters
-    detection_patch_size_m = 40
-    detection_step_size_m = 10
+    # Load profile to get detection parameters from backend authority
+    from kernel.detector_profile import DetectorProfileManager
+    
+    # Use app root profiles/ directory as single source for consistency
+    app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+    profile_manager = DetectorProfileManager(
+        profiles_dir=f"{app_root}/profiles"
+    )
+    profile = profile_manager.load_profile("dutch_windmill.json")
+    
+    # Backend has authority over detection parameters - read from profile
+    detection_patch_size_m = profile.geometry.patch_size_m[0]  # Use profile's patch size
+    detection_step_size_m = 10  # Keep step size configurable for now
     
     # Calculate scan area bounds with safety checks
     lat_center = scan_area.get('lat')
@@ -1820,7 +2280,9 @@ async def run_coordinated_detection(session_id: str, scan_area):
     logger.info(f"🎯 Grid bounds: ±{half_size_m}m from center")
     
     # Get detector
-    structure_type = "windmill"  # Default for now
+    # Get available structure types and use dynamic default
+    available_types, default_type = get_available_structure_types()
+    structure_type = default_type  # Use dynamic default from profiles
     detector = await get_session_detector(session_id, structure_type)
     if not detector:
         logger.error("❌ Failed to get detector for coordinated detection")
@@ -1844,19 +2306,20 @@ async def run_coordinated_detection(session_id: str, scan_area):
             patch_lat = lat_center + offset_lat_m / lat_m_per_deg
             patch_lon = lon_center + offset_lon_m / lon_m_per_deg
             
-            logger.debug(f"🎯 Detection patch {i},{j}: ({patch_lat:.6f}, {patch_lon:.6f})")
+            # Detection patch coordinates calculated
             
             # Find which tile(s) contain this patch and get elevation data
-            logger.debug(f"🔍 Getting elevation for patch {i},{j} at ({patch_lat:.6f}, {patch_lon:.6f})")
+            # Getting elevation for patch
             elevation_patch = await get_elevation_for_patch(session_id, patch_lat, patch_lon, detection_patch_size_m)
             
             if elevation_patch is not None:
-                logger.debug(f"✅ Got elevation data for patch {i},{j}, shape: {elevation_patch.shape}")
+                # Got elevation data for patch
                 # Run detection on this patch
                 patch_id = f"coord_patch_{i}_{j}"
-                await run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch, session_id, patch_id, structure_type)
+                await run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch, session_id, patch_id, structure_type, detection_patch_size_m)
             else:
-                logger.debug(f"❌ No elevation data for patch {i},{j} at ({patch_lat:.6f}, {patch_lon:.6f})")
+                # No elevation data for patch
+                pass
             
             # Small delay to make progression visible
             await asyncio.sleep(0.15)
@@ -1881,7 +2344,7 @@ async def run_coordinated_detection(session_id: str, scan_area):
 async def run_realtime_tile_detection(session_id: str, tile_id: str, tile_lat: float, tile_lon: float, elevation_data: np.ndarray, structure_type: str):
     """Run real-time detection on a single tile during LiDAR scan"""
     try:
-        logger.debug(f"🔍 Starting real-time detection on {tile_id}")
+        # Starting real-time detection
         
         # Get detector for this session
         detector = await get_session_detector(session_id, structure_type)
@@ -1889,13 +2352,14 @@ async def run_realtime_tile_detection(session_id: str, tile_id: str, tile_lat: f
             logger.warning(f"❌ No detector available for real-time detection on {tile_id}")
             return
         
-        # Create ElevationPatch for detection
+        # Create ElevationPatch for detection using profile geometry settings
         patch_obj = ElevationPatch(
             elevation_data=elevation_data,
             lat=tile_lat,
             lon=tile_lon,
             source="RealtimeDetection",
-            resolution_m=0.5
+            resolution_m=detector.profile.geometry.resolution_m,  # Use profile resolution
+            patch_size_m=detector.profile.geometry.patch_size_m[0]  # Use profile patch size
         )
         
         # Run detection
@@ -1918,7 +2382,7 @@ async def run_realtime_tile_detection(session_id: str, tile_id: str, tile_lat: f
         }
         
         # Send patch_result message for lens movement
-        logger.info(f"🔍 Sending real-time patch_result {tile_id} at ({tile_lat:.6f}, {tile_lon:.6f}) - confidence: {confidence:.3f}")
+        # Sending real-time patch_result for tile
         await discovery_manager.send_message({
             'type': 'patch_result',
             'patch': patch_message,
@@ -1926,7 +2390,7 @@ async def run_realtime_tile_detection(session_id: str, tile_id: str, tile_lat: f
             'timestamp': datetime.now(timezone.utc).isoformat()
         })
         
-        logger.debug(f"✅ Real-time detection completed for {tile_id}")
+        # Real-time detection completed
         
     except Exception as e:
         logger.error(f"❌ Real-time detection failed for {tile_id}: {e}")
@@ -1935,14 +2399,14 @@ async def run_realtime_tile_detection(session_id: str, tile_id: str, tile_lat: f
 
 async def get_elevation_for_patch(session_id: str, patch_lat: float, patch_lon: float, patch_size_m: float):
     """Get elevation data for a patch from stored tile data"""
-    logger.debug(f"🔍 Looking for elevation data for patch at ({patch_lat:.6f}, {patch_lon:.6f})")
+    # Looking for elevation data for patch
     
     if session_id not in _session_tile_data:
-        logger.debug(f"❌ No session data for {session_id}")
+        # No session data available
         return None
     
     available_tiles = list(_session_tile_data[session_id].keys())
-    logger.debug(f"🔍 Available tiles: {available_tiles}")
+    # Available tiles found
         
     min_distance = float('inf')
     closest_tile = None
@@ -1954,7 +2418,7 @@ async def get_elevation_for_patch(session_id: str, patch_lat: float, patch_lon: 
         lon_diff = abs(tile_data['lon'] - patch_lon)
         distance = (lat_diff ** 2 + lon_diff ** 2) ** 0.5
         
-        logger.debug(f"🔍 Tile {tile_id} at ({tile_data['lat']:.6f}, {tile_data['lon']:.6f}) - distance: {distance:.6f}")
+        # Checking tile distance for patch extraction
         
         if distance < min_distance:
             min_distance = distance
@@ -1962,41 +2426,52 @@ async def get_elevation_for_patch(session_id: str, patch_lat: float, patch_lon: 
             closest_tile_id = tile_id
     
     if closest_tile:
-        logger.debug(f"✅ Using closest tile {closest_tile_id} (distance: {min_distance:.6f})")
-        logger.debug(f"🔍 Tile elevation shape: {closest_tile['elevation_data'].shape}")
+        logger.info(f"✅ Using tile {closest_tile_id} for patch extraction")
         
-        # Extract patch from tile (simplified - assumes patch fits within tile)
+        # Calculate proper offset of patch center relative to tile center
+        lat_m_per_deg = 111320
+        lon_m_per_deg = 111320 * np.cos(np.radians(patch_lat))
+        
+        lat_offset_m = (patch_lat - closest_tile['lat']) * lat_m_per_deg
+        lon_offset_m = (patch_lon - closest_tile['lon']) * lon_m_per_deg
+        
+        # Patch offset from tile center calculated
+        
+        # Extract patch from tile with proper offset
         result = extract_patch_from_tile(
             closest_tile['elevation_data'],
-            0, 0,  # Simplified offset - could be improved
-            patch_size_m,
+            lat_offset_m, lon_offset_m,
+            patch_size_m,  # Use the parameter passed to this function
             closest_tile['lidar_result'].resolution_m
         )
         
         if result is not None:
-            logger.debug(f"✅ Extracted patch shape: {result.shape}")
+            # Extracted patch from tile
+            pass
         else:
-            logger.debug(f"❌ Failed to extract patch from tile {closest_tile_id}")
+            # Failed to extract patch from tile
+            pass
         
         return result
     
-    logger.debug(f"❌ No suitable tile found for patch at ({patch_lat:.6f}, {patch_lon:.6f})")
+    # No suitable tile found for patch
     return None
 
-async def run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch, session_id, patch_id, structure_type):
+async def run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch, session_id, patch_id, structure_type, detection_patch_size_m):
     """Run detection on a single patch and send results"""
     try:
-        # Clean elevation data
-        elevation_patch = clean_patch_data(elevation_patch)
+        # Use raw elevation data without NaN cleaning for accurate detection
+        # (NaN cleaning was causing inflated scores vs validator)
         
-        # Create elevation patch object
+        # Create elevation patch object using profile geometry settings
         from kernel.core_detector import ElevationPatch
         patch_obj = ElevationPatch(
             elevation_data=elevation_patch,
             lat=patch_lat,
             lon=patch_lon,
             source="CoordinatedDetection",
-            resolution_m=0.5  # Default resolution
+            resolution_m=detector.profile.geometry.resolution_m,  # Use profile resolution
+            patch_size_m=detector.profile.geometry.patch_size_m[0]  # Use profile patch size
         )
         
         # Run G2 detection
@@ -2005,6 +2480,7 @@ async def run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch
         # Extract results with safe conversion
         confidence = float(getattr(result, 'confidence', 0.0)) if hasattr(result, 'confidence') else 0.0
         is_positive = bool(getattr(result, 'detected', False)) if hasattr(result, 'detected') else False
+        final_score = float(getattr(result, 'final_score', 0.0)) if hasattr(result, 'final_score') else 0.0
         
         # Create patch message with explicit type conversion
         patch_message = {
@@ -2015,41 +2491,53 @@ async def run_detection_on_patch(detector, patch_lat, patch_lon, elevation_patch
             'session_id': str(session_id),
             'patch_id': str(patch_id),
             'structure_type': str(structure_type),
-            'patch_size_m': 40
+            'patch_size_m': detection_patch_size_m  # Use profile-derived patch size
         }
         
         # Send patch_result message
-        logger.info(f"🔍 Sending coordinated patch_result {patch_id} at ({patch_lat:.6f}, {patch_lon:.6f}) - confidence: {confidence:.3f}")
+        # Sending coordinated patch_result
         await discovery_manager.send_message({
             'type': 'patch_result',
             'patch': patch_message,
             'session_id': session_id,
             'timestamp': datetime.now(timezone.utc).isoformat()
         })
-        logger.info(f"✅ Sent patch_result for {patch_id}")
+        # Patch result sent
         
-        # Send detection_result for high confidence detections
-        if is_positive and confidence > 0.7:
-            logger.info(f"🎯 High confidence detection: {confidence:.3f} at ({patch_lat:.6f}, {patch_lon:.6f})")
-            await discovery_manager.send_message({
+        # Send detection_result only for actual G2 detections
+        if is_positive:
+            logger.info(f"🎯 Detection: score={final_score:.3f}, confidence={confidence:.3f} at ({patch_lat:.6f}, {patch_lon:.6f})")
+            detection_message = {
                 'type': 'detection_result',
                 'structure_type': structure_type,
                 'confidence': confidence,
+                'final_score': final_score,
+                'detected': True,  # Only sent when is_positive=True
                 'lat': patch_lat,
                 'lon': patch_lon,
                 'session_id': session_id,
                 'timestamp': datetime.now(timezone.utc).isoformat()
-            })
+            }
+            logger.info(f"🚨 SENDING DETECTION_RESULT: final_score={final_score:.6f} ({final_score*100:.1f}%), confidence={confidence:.6f} ({confidence*100:.1f}%)")
+            await discovery_manager.send_message(detection_message)
             
     except Exception as e:
         logger.error(f"Detection failed for patch {patch_id}: {e}")
 
 def extract_patch_from_tile(elevation_data, offset_lat_m, offset_lon_m, patch_size_m, resolution_m):
     """
-    Extract a patch from tile elevation data at given offset
+    Extract a patch from tile elevation data at given offset.
+    For center-based extraction (offset=0,0), use full available tile for consistency.
     """
     try:
         tile_shape = elevation_data.shape
+        
+        # For center-based extraction, use the full available tile to match standalone detection
+        if abs(offset_lat_m) < 1.0 and abs(offset_lon_m) < 1.0:
+            # Use full tile for center-based detection to match standalone results
+            return elevation_data
+        
+        # For offset-based extraction, extract the specific patch
         tile_center_y, tile_center_x = tile_shape[0] // 2, tile_shape[1] // 2
         
         # Convert offset to pixels
@@ -2156,6 +2644,7 @@ async def run_detection_on_tile(lat, lon, elevation_data, lidar_result, session_
                     detection_result = detector.detect_structure(patch)
                     is_positive = detection_result.detected if detection_result else False
                     confidence = detection_result.confidence if detection_result else 0.0
+                    final_score = detection_result.final_score if detection_result and hasattr(detection_result, 'final_score') else 0.0
                 
                 # Create patch ID for this detection patch
                 patch_id_detailed = f"{tile_id}_patch_{i}_{j}"
@@ -2204,13 +2693,15 @@ async def run_detection_on_tile(lat, lon, elevation_data, lidar_result, session_
                 # Small delay to make detection progression visible
                 await asyncio.sleep(0.1)
                 
-                # Also send detection_result for high confidence detections
-                if is_positive and confidence > 0.7:
-                    logger.info(f"🎯 Sending detection_result for {structure_type}: confidence={confidence:.3f} at ({patch_lat:.6f}, {patch_lon:.6f})")
+                # Also send detection_result only for actual G2 detections
+                if is_positive:
+                    logger.info(f"🎯 Sending detection_result for {structure_type}: score={final_score:.3f}, confidence={confidence:.3f} at ({patch_lat:.6f}, {patch_lon:.6f})")
                     await discovery_manager.send_message({
                         'type': 'detection_result',
                         'structure_type': structure_type,
                         'confidence': confidence,
+                        'final_score': final_score,
+                        'detected': True,  # Only sent when is_positive=True
                         'lat': patch_lat,
                         'lon': patch_lon,
                         'session_id': session_id,

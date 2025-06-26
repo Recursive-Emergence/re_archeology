@@ -400,6 +400,12 @@ ARCHAEOLOGICAL_SITES = [
     (-14.9898697, -64.5968503, "Cotoca"),           # Bolivia
     (-15.2012842, -64.4677797, "Landívar"),         # Bolivia  
     (-12.558333, -53.111111, "Kuhikugu"),           # Brazil
+    (18.61136604220061, -89.55191178650831, "Calakmul") , # Mexico
+    (17.248280164331604, -89.14352060761487, "El Pilar"), #Mexico
+    (19.692181814056454, -98.84543537868696, "Teotihuacan"),  # Mexico
+    (-2.3099356769569743, -78.10998659241247, "Upano Valley"), # Ecuador
+    (39.703242, 68.265728, "Tugunbulak"),         # Uzbekistan
+    (39.696297, 68.320786, "Tashbulak"),         # Uzbekistan
     # Netherlands windmill sites (using AHN4 LiDAR data)
     (52.47505310183309, 4.8177388422949585, "De Kat Windmill"),     # Netherlands
     (52.47590104112108, 4.817647238879872, "De Zoeker Windmill"),   # Netherlands

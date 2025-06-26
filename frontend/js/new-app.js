@@ -111,6 +111,62 @@ class REArchaeologyApp {
         window.history.pushState({}, '', url);
     }
 
+    // Navigate to coordinates without page refresh
+    navigateToCoordinates(lat, lon, updateHistory = true) {
+        // Validate coordinates
+        const latNum = parseFloat(lat);
+        const lonNum = parseFloat(lon);
+        
+        if (isNaN(latNum) || isNaN(lonNum)) {
+            console.warn('Invalid coordinates provided:', lat, lon);
+            return false;
+        }
+
+        // Update map view and scan area
+        this.selectScanArea(latNum, lonNum, 1.0);
+        this.map.setView([latNum, lonNum], 13, { animate: true });
+        
+        // Update URL without reload if requested
+        if (updateHistory) {
+            this.updateUrlWithCoordinates(latNum, lonNum);
+        }
+        
+        return true;
+    }
+
+    // Setup coordinate link handling for SPA navigation
+    setupCoordinateLinkHandling() {
+        // Handle clicks on internal links with lat/lon parameters
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('a');
+            if (!link) return;
+            
+            const href = link.getAttribute('href');
+            if (!href) return;
+            
+            // Check if it's an internal link with coordinates
+            const isInternal = href.startsWith('/') || href.startsWith('./') || href.startsWith('?') || 
+                              (!href.includes('://') && !href.startsWith('mailto:') && !href.startsWith('tel:'));
+            
+            if (!isInternal) return;
+            
+            // Parse URL for coordinates
+            const url = new URL(href, window.location.origin);
+            const lat = url.searchParams.get('lat');
+            const lon = url.searchParams.get('lon');
+            
+            if (lat && lon) {
+                // Prevent default browser navigation
+                e.preventDefault();
+                
+                // Navigate to coordinates without page refresh
+                if (this.navigateToCoordinates(lat, lon, true)) {
+                    window.Logger?.app('info', `Navigated to coordinates: ${lat}, ${lon}`);
+                }
+            }
+        });
+    }
+
     async waitForDOM() {
         if (document.readyState !== 'complete') {
             await new Promise(resolve => {
@@ -224,7 +280,13 @@ class REArchaeologyApp {
     }
 
     setupDefaultScanArea() {
-        this.selectScanArea(52.4751, 4.8156, 1.0);
+        // Only set default coordinates if no URL parameters were provided
+        const params = new URLSearchParams(window.location.search);
+        const hasUrlCoords = params.has('lat') && params.has('lon');
+        
+        if (!hasUrlCoords) {
+            this.selectScanArea(52.4751, 4.8156, 1.0);
+        }
     }
 
     setupEventListeners() {
@@ -241,6 +303,9 @@ class REArchaeologyApp {
             e.preventDefault();
             this.handleChatSubmit();
         });
+
+        // Handle coordinate links without page refresh
+        this.setupCoordinateLinkHandling();
     }
 
     // ========================================
@@ -1499,22 +1564,54 @@ class REArchaeologyApp {
     handleDetectionResult(data) {
         // Debug: Log every detection result received
         console.log('[DEBUG] handleDetectionResult called with:', data);
-        // Only mark high-confidence windmills
-        if (data.structure_type === 'windmill' && data.confidence > 0.7) {
+        
+        // Show detections with confidence > 0.3 (lowered from 0.7)
+        if (data.structure_type === 'windmill' && data.confidence > 0.3) {
             // Prevent duplicate markers
             if (!this.detections.some(d => d.lat === data.lat && d.lon === data.lon)) {
                 this.detections.push({ lat: data.lat, lon: data.lon, confidence: data.confidence });
-                // Add a star marker to the map
+                
+                // Choose marker based on confidence level
+                let markerHtml, markerClass, markerSize;
+                if (data.confidence > 0.7) {
+                    // High confidence - bright gold star
+                    markerHtml = '⭐';
+                    markerClass = 'windmill-star-marker-high';
+                    markerSize = [28, 28];
+                } else if (data.confidence > 0.5) {
+                    // Medium confidence - yellow star
+                    markerHtml = '🌟';
+                    markerClass = 'windmill-star-marker-medium';
+                    markerSize = [24, 24];
+                } else {
+                    // Low confidence - dim star
+                    markerHtml = '✩';
+                    markerClass = 'windmill-star-marker-low';
+                    markerSize = [20, 20];
+                }
+                
                 const marker = L.marker([data.lat, data.lon], {
                     icon: L.divIcon({
-                        className: 'windmill-star-marker',
-                        html: '⭐',
-                        iconSize: [24, 24],
-                        iconAnchor: [12, 12]
+                        className: markerClass,
+                        html: markerHtml,
+                        iconSize: markerSize,
+                        iconAnchor: [markerSize[0]/2, markerSize[1]/2]
                     })
                 });
+                
+                // Add popup with detection scores
+                const finalScore = data.final_score || 0.0;
+                const detected = data.detected !== undefined ? data.detected : 'unknown';
+                marker.bindPopup(`
+                    <strong>Windmill Detection</strong><br>
+                    G2 Detected: ${detected}<br>
+                    Detection Score: ${(finalScore * 100).toFixed(1)}%<br>
+                    Confidence: ${(data.confidence * 100).toFixed(1)}%<br>
+                    Location: ${data.lat.toFixed(6)}, ${data.lon.toFixed(6)}
+                `);
+                
                 marker.addTo(this.layers.detections);
-                console.log(`[DEBUG] Windmill marker added at (${data.lat}, ${data.lon}) with confidence ${data.confidence}`);
+                console.log(`[DEBUG] Windmill marker added at (${data.lat}, ${data.lon}) with score ${finalScore.toFixed(3)}, confidence ${data.confidence.toFixed(3)}`);
             } else {
                 console.log(`[DEBUG] Duplicate windmill detection at (${data.lat}, ${data.lon}) ignored.`);
             }
