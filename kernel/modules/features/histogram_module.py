@@ -33,7 +33,9 @@ class ElevationHistogramModule(BaseFeatureModule):
             "noise_reduction": True,
             "min_variation": 0.3,
             "normalize_histograms": True,
-            "outlier_removal": True
+            "outlier_removal": True,
+            "min_similarity_threshold": 0.0,  # Minimum histogram similarity threshold for acceptance
+            "enable_threshold_rejection": False  # Whether to enable threshold-based rejection
         }
     
     def __init__(self, weight: float = 1.5):  # Higher weight as it's fundamental
@@ -56,7 +58,9 @@ class ElevationHistogramModule(BaseFeatureModule):
             "noise_reduction": "Whether to apply smoothing to reduce noise impact on histograms",
             "min_variation": "Minimum elevation variation required for meaningful histogram analysis",
             "normalize_histograms": "Whether to normalize histograms to unit sum for scale invariance",
-            "outlier_removal": "Whether to remove extreme elevation outliers before histogram calculation"
+            "outlier_removal": "Whether to remove extreme elevation outliers before histogram calculation",
+            "min_similarity_threshold": "Minimum histogram similarity threshold (0.0-1.0) - scores below this are rejected for better discrimination",
+            "enable_threshold_rejection": "Whether to enable threshold-based rejection (True/False) - when enabled, low similarity scores are penalized"
         }
     
     @property
@@ -75,7 +79,10 @@ class ElevationHistogramModule(BaseFeatureModule):
             "outlier_count": "Number of elevation outliers detected and potentially removed",
             "adaptive_bins_used": "Actual bin configuration used if adaptive binning was enabled",
             "edge_enhancement_applied": "Whether edge enhancement preprocessing was applied",
-            "similarity_confidence": "Confidence measure for the similarity score based on data quality"
+            "similarity_confidence": "Confidence measure for the similarity score based on data quality",
+            "threshold_applied": "Whether minimum similarity threshold was applied",
+            "threshold_rejection": "Whether the score was below the minimum threshold and rejected/penalized",
+            "raw_similarity": "Original similarity score before threshold application"
         }
     
     @property
@@ -90,7 +97,9 @@ class ElevationHistogramModule(BaseFeatureModule):
             "High Variation": "Complex elevation structure with diverse heights",
             "Low Variation": "Relatively flat or uniform elevation structure",
             "Peak Alignment": "How well the most prominent elevations match between patch and reference",
-            "Noise Impact": "High noise levels reduce histogram reliability and similarity confidence"
+            "Noise Impact": "High noise levels reduce histogram reliability and similarity confidence",
+            "Threshold Rejection": "Score was below minimum similarity threshold - indicates poor pattern match",
+            "Discriminative Mode": "Enhanced discrimination enabled - only high-quality matches accepted"
         }
     
     @property
@@ -161,6 +170,35 @@ class ElevationHistogramModule(BaseFeatureModule):
                 )
                 reason_suffix = "with pattern analysis"
             
+            # Apply threshold-based rejection for more discriminative detection
+            raw_similarity = similarity_score
+            threshold_applied = False
+            threshold_rejection = False
+            
+            if getattr(self, 'enable_threshold_rejection', False):
+                min_threshold = getattr(self, 'min_similarity_threshold', 0.0)
+                
+                # Debug logging for threshold checking
+                logger.info(f"🔍 ElevationHistogram threshold check: similarity={similarity_score:.3f}, threshold={min_threshold:.3f}, enabled={getattr(self, 'enable_threshold_rejection', False)}")
+                
+                if similarity_score < min_threshold:
+                    # Apply threshold rejection - significantly penalize low similarity scores
+                    threshold_rejection = True
+                    threshold_applied = True
+                    
+                    # Scale down the final score more aggressively for discriminative behavior
+                    penalty_factor = similarity_score / max(min_threshold, 0.1)  # Ratio of actual to required
+                    final_score = final_score * penalty_factor * 0.1  # Strong penalty (reduce to 10% with scaling)
+                    
+                    reason_suffix += f" (REJECTED: similarity {similarity_score:.3f} < threshold {min_threshold:.3f})"
+                    
+                    logger.debug(f"Threshold rejection applied: raw_similarity={raw_similarity:.3f}, "
+                               f"threshold={min_threshold:.3f}, penalty_factor={penalty_factor:.3f}, "
+                               f"final_score={final_score:.3f}")
+                else:
+                    threshold_applied = True
+                    reason_suffix += f" (ACCEPTED: similarity {similarity_score:.3f} >= threshold {min_threshold:.3f})"
+            
             return FeatureResult(
                 score=max(0.0, min(1.0, final_score)),
                 polarity="neutral",  # Dynamic polarity interpretation by aggregator
@@ -173,10 +211,16 @@ class ElevationHistogramModule(BaseFeatureModule):
                     "using_trained_fingerprint": hasattr(self, 'trained_histogram_fingerprint') and self.trained_histogram_fingerprint is not None,
                     "computation_method": reason_suffix,
                     "elevation_range": np.max(elevation_patch) - np.min(elevation_patch),
-                    "patch_shape": elevation_patch.shape
+                    "patch_shape": elevation_patch.shape,
+                    # Threshold-related metadata
+                    "threshold_applied": threshold_applied,
+                    "threshold_rejection": threshold_rejection,
+                    "raw_similarity": raw_similarity,
+                    "min_similarity_threshold": getattr(self, 'min_similarity_threshold', 0.0),
+                    "enable_threshold_rejection": getattr(self, 'enable_threshold_rejection', False)
                 },
                 valid=True,
-                reason=f"Histogram similarity: {similarity_score:.3f}, Pattern strength: {pattern_strength:.3f}"
+                reason=f"Histogram similarity: {similarity_score:.3f}, Pattern strength: {pattern_strength:.3f}, {reason_suffix}"
             )
             
         except Exception as e:

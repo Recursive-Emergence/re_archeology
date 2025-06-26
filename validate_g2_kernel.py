@@ -38,21 +38,22 @@ class ValidationSite:
 # Each entry: (name, lat, lon, expected_structures, site_type)
 _DUTCH_WINDMILL_LOCATIONS_DATA = [
     # Training Sites (first 6) - Real locations from ahn4_data_fetcher
-    # ("De Kat", 52.47505310183309, 4.8177388422949585, 1, "positive"),
-    # ("De Zoeker", 52.47590104112108, 4.817647238879872, 1, "positive"),
-    # ("Het Jonge Schaap", 52.47621811347626, 4.816644787814995, 1, "positive"),
-    # ("De Bonte Hen", 52.47793734015221, 4.813402499137949, 1, "positive"),
+    ("De Kat", 52.47505310183309, 4.8177388422949585, 1, "positive"),
+    ("De Zoeker", 52.47590104112108, 4.817647238879872, 1, "positive"),
+    ("Het Jonge Schaap", 52.47621811347626, 4.816644787814995, 1, "positive"),
+    ("De Bonte Hen", 52.47793734015221, 4.813402499137949, 1, "positive"),
     # ("De Gekroonde Poelenburg", 52.474166977199445, 4.817628676751737, 1, "positive"),
-    # ("De Huisman", 52.47323132365517, 4.816668420518732, 1, "positive"),
+    ("De Huisman", 52.47323132365517, 4.816668420518732, 1, "positive"),
     
     # # Validation Sites (remaining) - Mix of positive and negative
-    # ("Kinderdijk Windmill Complex", 51.8820, 4.6300, 2, "positive"),
-    # ("De Gooyer Windmill Amsterdam", 52.3667, 4.9270, 1, "positive"),
-    # ("Molen de Adriaan Haarlem", 52.3823, 4.6308, 1, "positive"),
-    # ("Historic Windmill Leiden", 52.1589, 4.4937, 1, "positive"),
+    ("Kinderdijk Windmill Complex", 51.8820, 4.6300, 2, "positive"),
+    ("De Gooyer Windmill Amsterdam", 52.3667, 4.9270, 1, "positive"),
+    ("Molen de Adriaan Haarlem", 52.3823, 4.6308, 1, "positive"),
+    ("Historic Windmill Leiden", 52.1589, 4.4937, 1, "positive"),
     
     # Negative control sites - areas without windmillshe   G2 Detected: true
     ("Urban Area Amsterdam 1",   52.483814, 4.804392, 0, "negative"),    
+    ("Urban Area Amsterdam 2",   52.483185, 4.810733, 0, "negative"),
     ("Urban Area Amsterdam 3",  52.483814, 4.803359, 0, "negative"),
     ("Urban Area Amsterdam 4",  52.483903, 4.806456, 0, "negative"),
     ("Some Trees Area", 52.628085, 4.762604, 0, "negative"),
@@ -73,7 +74,10 @@ class G2ValidationSystem:
         """Initialize validation system with LidarMapFactory and Dutch windmill profile"""
         # Load the Dutch windmill profile from profiles directory
         from kernel.detector_profile import DetectorProfileManager
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        # Dynamic app root detection for cross-environment compatibility
+        import os
+        current_file = os.path.abspath(__file__)
+        app_root = os.path.dirname(current_file)  # validate_g2_kernel.py is in project root
         self.profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
         self.dutch_profile = self.profile_manager.load_profile("dutch_windmill.json")
         

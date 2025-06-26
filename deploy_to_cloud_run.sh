@@ -44,6 +44,12 @@ if [ ! -d "kernel" ]; then
     exit 1
 fi
 
+# Check that profiles/ directory exists
+if [ ! -d "profiles" ]; then
+    echo "❌ Error: Required directory not found: profiles/"
+    exit 1
+fi
+
 echo "✅ All required files and directories found"
 
 echo "🚀 Starting deployment to Google Cloud Run..."

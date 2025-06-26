@@ -73,7 +73,7 @@ kernel_logger.setLevel(logging.WARNING)
 
 def get_available_structure_types():
     """Get available structure types from profiles directory"""
-    app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+    app_root = APP_ROOT
     profiles_dir = f"{app_root}/profiles"
     
     available_types = []
@@ -127,7 +127,7 @@ def get_available_structure_types():
 
 def get_profile_name_for_structure_type(structure_type: str):
     """Convert structure type to profile filename"""
-    app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+    app_root = APP_ROOT
     profiles_dir = f"{app_root}/profiles"
     
     # Direct mapping for common types
@@ -576,6 +576,16 @@ class EnhancedConnectionManager:
 # GLOBAL VARIABLES AND CONSTANTS
 # ==============================================================================
 
+# Dynamic app root detection for different deployment environments
+def get_app_root():
+    """Get application root directory, works in both local and cloud environments"""
+    current_file = os.path.abspath(__file__)
+    # Navigate from backend/api/routers/discovery.py to project root
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+
+APP_ROOT = get_app_root()
+logger.info(f"📂 App root detected: {APP_ROOT}")
+
 # Global manager instance
 discovery_manager = EnhancedConnectionManager()
 active_sessions: Dict[str, DiscoverySession] = {}
@@ -818,7 +828,7 @@ async def get_available_profiles(current_user=Depends(get_current_user_optional)
     try:
         from kernel.detector_profile import DetectorProfileManager
         
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        app_root = APP_ROOT
         profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
         
         # Get available types
@@ -943,7 +953,7 @@ async def configure_custom_profile(request: CustomProfileRequest, current_user=D
         from kernel import G2StructureDetector
         import copy
         
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        app_root = APP_ROOT
         profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
         
         # Load base profile
@@ -1095,7 +1105,7 @@ async def get_cached_kernels(structure_type: str = None):
         from kernel.detector_profile import DetectorProfileManager
         
         # Use app root profiles/ directory as single source for consistency
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        app_root = APP_ROOT
         profile_manager = DetectorProfileManager(
             profiles_dir=f"{app_root}/profiles"
         )
@@ -1231,7 +1241,7 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
         from kernel.detector_profile import DetectorProfileManager
         
         # Use app root profiles/ directory as single source for consistency
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        app_root = APP_ROOT
         profile_manager = DetectorProfileManager(
             profiles_dir=f"{app_root}/profiles"
         )
@@ -1389,7 +1399,7 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
                         from kernel.detector_profile import DetectorProfileManager
                         
                         # Load the Dutch windmill profile from app root profiles/ directory
-                        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+                        app_root = APP_ROOT
                         profile_manager = DetectorProfileManager(
                             profiles_dir=f"{app_root}/profiles"
                         )
@@ -1802,7 +1812,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         
         # Load profile to get correct resolution and patch size
         from kernel.detector_profile import DetectorProfileManager
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        app_root = APP_ROOT
         profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
         profile_name = get_profile_name_for_structure_type(structure_type)
         profile = profile_manager.load_profile(profile_name)
@@ -2174,7 +2184,7 @@ async def get_session_detector(session_id: str, structure_type: str):
             from kernel.detector_profile import DetectorProfileManager
             
             # Use app root profiles/ directory as single source for consistency
-            app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+            app_root = APP_ROOT
             profile_manager = DetectorProfileManager(
                 profiles_dir=f"{app_root}/profiles"
             )
@@ -2242,7 +2252,7 @@ async def run_coordinated_detection(session_id: str, scan_area):
     from kernel.detector_profile import DetectorProfileManager
     
     # Use app root profiles/ directory as single source for consistency
-    app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+    app_root = APP_ROOT
     profile_manager = DetectorProfileManager(
         profiles_dir=f"{app_root}/profiles"
     )

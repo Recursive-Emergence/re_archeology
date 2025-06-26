@@ -45,6 +45,7 @@ COPY --chown=1000:1000 backend/ ./backend/
 COPY --chown=1000:1000 frontend/ ./frontend/
 COPY --chown=1000:1000 kernel/ ./kernel/
 COPY --chown=1000:1000 lidar_factory/ ./lidar_factory/
+COPY --chown=1000:1000 profiles/ ./profiles/
 COPY --chown=1000:1000 start_server.py ./start_server.py
 COPY --chown=1000:1000 .env.cloudrun ./.env
 COPY --chown=1000:1000 sage-striker-294302-b89a8b7e205b.json ./sage-striker-294302-b89a8b7e205b.json
