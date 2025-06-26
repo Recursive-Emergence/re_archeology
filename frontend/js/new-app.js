@@ -64,6 +64,8 @@ class REArchaeologyApp {
             this.handleUrlCoordinates();
 
             this.setupDefaultScanArea();
+            // Load available structure types early before other systems
+            await this.loadAvailableStructureTypes();
             this.setupEventListeners();
             // Set initial scan button text based on the default checkbox state
             const enableDetection = document.getElementById('enableDetection')?.checked || false;
@@ -859,6 +861,7 @@ class REArchaeologyApp {
             return;
         }
         
+        
         if (!this.detectionLens) {
             console.warn('⚠️ Detection lens not found, creating it');
             this.createDetectionLens();
@@ -899,6 +902,7 @@ class REArchaeologyApp {
             console.warn(`⚠️ Patch location (${screenPoint.x}, ${screenPoint.y}) is outside map view bounds (${mapBounds.width}x${mapBounds.height})`);
             // Still update the position but log the issue
         }
+        
         
         // Force immediate positioning by temporarily disabling transitions
         const originalTransition = this.detectionLens.style.transition;
@@ -1585,7 +1589,7 @@ class REArchaeologyApp {
                     markerSize = [24, 24];
                 } else {
                     // Low confidence - dim star
-                    markerHtml = '✩';
+                    markerHtml = '🥚';
                     markerClass = 'windmill-star-marker-low';
                     markerSize = [20, 20];
                 }
@@ -1964,6 +1968,102 @@ class REArchaeologyApp {
             
             window.Logger?.app('info', 'User logged out');
         }
+    }
+
+    // ========================================
+    // STRUCTURE TYPES LOADING
+    // ========================================
+
+    async loadAvailableStructureTypes() {
+        try {
+            window.Logger?.app('info', 'Loading available structure types...');
+            
+            const response = await fetch('/api/v1/discovery/structure_types', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            const structureSelect = document.getElementById('structureType');
+            
+            if (!structureSelect) {
+                window.Logger?.app('warn', 'Structure type select element not found');
+                return;
+            }
+
+            // Clear existing options
+            structureSelect.innerHTML = '';
+
+            // Add options from backend
+            if (data.available_types && data.available_types.length > 0) {
+                data.available_types.forEach(structureType => {
+                    const option = document.createElement('option');
+                    option.value = structureType;
+                    option.textContent = this.formatStructureTypeName(structureType);
+                    
+                    // Select windmill by default if available, or the default from API
+                    if (structureType === data.default_type || structureType === 'windmill') {
+                        option.selected = true;
+                    }
+                    
+                    structureSelect.appendChild(option);
+                });
+                
+                window.Logger?.app('info', `Loaded ${data.available_types.length} structure types`);
+            } else {
+                // Fallback to hardcoded options if API fails
+                this.addFallbackStructureTypes(structureSelect);
+                window.Logger?.app('warn', 'No structure types from API, using fallback options');
+            }
+
+        } catch (error) {
+            window.Logger?.app('error', `Failed to load structure types: ${error.message}`);
+            console.error('❌ Structure types loading error:', error);
+            
+            // Fallback to hardcoded options
+            const structureSelect = document.getElementById('structureType');
+            if (structureSelect) {
+                this.addFallbackStructureTypes(structureSelect);
+            }
+        }
+    }
+
+    formatStructureTypeName(structureType) {
+        // Create user-friendly display names
+        const typeMap = {
+            'windmill': 'Windmill Structures',
+            'tower': 'Tower Structures', 
+            'mound': 'Archaeological Mounds',
+            'geoglyph': 'Geoglyphs',
+            'citadel': 'Citadel Structures',
+            'generic': 'Generic Structures'
+        };
+        
+        return typeMap[structureType] || structureType.replace(/[_-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    addFallbackStructureTypes(selectElement) {
+        const fallbackOptions = [
+            { value: 'windmill', text: 'Windmill Structures', selected: true },
+            { value: 'tower', text: 'Tower Structures' },
+            { value: 'mound', text: 'Archaeological Mounds' },
+            { value: 'generic', text: 'Generic Structures' }
+        ];
+
+        selectElement.innerHTML = '';
+        fallbackOptions.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.text;
+            option.selected = opt.selected || false;
+            selectElement.appendChild(option);
+        });
     }
 
     // ========================================

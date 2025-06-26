@@ -83,8 +83,14 @@ def get_available_structure_types():
         import os
         import glob
         
+        logger.info(f"🔍 Scanning profiles directory: {profiles_dir}")
+        logger.info(f"🔍 Directory exists: {os.path.exists(profiles_dir)}")
+        if os.path.exists(profiles_dir):
+            logger.info(f"🔍 Directory contents: {os.listdir(profiles_dir)}")
+        
         # Find all .json files in profiles directory
         profile_files = glob.glob(f"{profiles_dir}/*.json")
+        logger.info(f"🔍 Found profile files: {profile_files}")
         
         for profile_file in profile_files:
             # Extract structure type from filename (remove .json extension)
@@ -121,7 +127,10 @@ def get_available_structure_types():
         return available_types, default_type
         
     except Exception as e:
-        logger.warning(f"Error scanning profiles directory: {e}")
+        logger.error(f"❌ Error scanning profiles directory: {e}")
+        logger.error(f"❌ Exception type: {type(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         # Fallback to basic types
         return ["windmill", "tower", "mound"], "windmill"
 
