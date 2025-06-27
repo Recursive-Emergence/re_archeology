@@ -353,6 +353,32 @@ class G2StructureDetector:
         logger.info(f"🏁 All feature modules completed: {len(results)} results")
         return results
     
+    def extract_profile_region(self, elevation: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Extract a square region from the elevation patch using the profile's detection_radius_m and detection_center.
+        Always return None if region is clipped by patch boundary.
+        """
+        detection_radius_m = getattr(self.profile.geometry, 'detection_radius_m', 15.0)
+        detection_center = getattr(self.profile.geometry, 'detection_center', 'apex')
+        resolution_m = self.profile.geometry.resolution_m
+        region_size_px = int(detection_radius_m * 2 / resolution_m)
+        h, w = elevation.shape
+        if detection_center == 'apex':
+            apex_idx = np.unravel_index(np.nanargmax(elevation), elevation.shape)
+            center_y, center_x = apex_idx
+        else:
+            center_y, center_x = h // 2, w // 2
+        half_region = region_size_px // 2
+        start_y = center_y - half_region
+        start_x = center_x - half_region
+        end_y = start_y + region_size_px
+        end_x = start_x + region_size_px
+        # Strict: reject if region would be clipped
+        if start_y < 0 or start_x < 0 or end_y > h or end_x > w:
+            return None
+        region = elevation[start_y:end_y, start_x:end_x]
+        return region
+
     def detect_structure(self, elevation_patch: ElevationPatch) -> G2DetectionResult:
         """
         Perform G₂-level structure detection with recursive reasoning
@@ -373,8 +399,25 @@ class G2StructureDetector:
         base_score = 0.5
         logger.info(f"G₂ base score: {base_score:.3f} (feature-driven detection)")
         
+        # Use profile-driven region extraction for region-based features
+        region = self.extract_profile_region(elevation_patch.elevation_data)
+        if region is None:
+            logger.warning("Detection region is clipped and allow_clipped_region is False; returning negative detection.")
+            return G2DetectionResult(
+                detected=False,
+                confidence=0.0,
+                final_score=0.0,
+                base_score=base_score,
+                aggregation_result=None,
+                feature_results={},
+                refinement_attempts=0,
+                refinement_history=[],
+                reason="Detection region was clipped by patch boundary.",
+                metadata={}
+            )
+        
         # Step 2: Run feature modules in parallel  
-        feature_results = self.run_feature_modules_parallel(elevation_patch.elevation_data)
+        feature_results = self.run_feature_modules_parallel(region)
         
         # Step 3: Set up streaming aggregator and add evidence
         self.aggregator.set_expected_modules(len(self.feature_modules))

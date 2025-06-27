@@ -607,6 +607,11 @@ session_patches: Dict[str, List[ScanPatch]] = {}
 class SessionRequest(BaseModel):
     session_id: str
 
+class CoordinateDetectionRequest(BaseModel):
+    lat: float
+    lon: float
+    structure_type: str = "windmill"
+
 # ==============================================================================
 # ROUTER INITIALIZATION
 # ==============================================================================
@@ -1705,6 +1710,88 @@ async def get_earth_engine_status():
 # ==============================================================================
 # LIDAR SCANNING ENDPOINTS
 # ==============================================================================
+
+@router.post("/discovery/detect-coordinate")
+async def detect_at_coordinate(
+    request: CoordinateDetectionRequest,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """Detect structures at exact coordinates using the same method as validation script"""
+    try:
+        logger.info(f"🎯 Exact coordinate detection at ({request.lat:.6f}, {request.lon:.6f}) for {request.structure_type}")
+        
+        # Load profile like validation script does
+        from kernel.detector_profile import DetectorProfileManager
+        app_root = APP_ROOT
+        profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
+        profile_name = get_profile_name_for_structure_type(request.structure_type)
+        profile = profile_manager.load_profile(profile_name)
+        
+        # Create detector
+        from kernel import G2StructureDetector
+        detector = G2StructureDetector(profile=profile)
+        
+        # Get elevation data using exact coordinates like validation script
+        from lidar_factory.factory import LidarMapFactory
+        patch_size_m = min(profile.geometry.patch_size_m)
+        resolution_m = profile.geometry.resolution_m
+        
+        logger.info(f"📊 Requesting patch: {patch_size_m}m at {resolution_m}m resolution")
+        result = LidarMapFactory.get_patch(
+            lat=request.lat,  # Use exact coordinates like validator
+            lon=request.lon,  # Use exact coordinates like validator  
+            size_m=patch_size_m,
+            preferred_resolution_m=resolution_m,
+            preferred_data_type='DSM'
+        )
+        
+        if result is None or not hasattr(result, 'data'):
+            raise HTTPException(status_code=404, detail="No elevation data available at these coordinates")
+        
+        # Create elevation patch like validation script
+        from kernel.core_detector import ElevationPatch
+        elevation_patch = ElevationPatch(
+            elevation_data=result.data,
+            lat=request.lat,  # Use exact coordinates like validator
+            lon=request.lon,  # Use exact coordinates like validator
+            source="WebApp_ExactCoordinate",
+            resolution_m=resolution_m,
+            patch_size_m=patch_size_m
+        )
+        
+        # Run detection
+        detection_result = detector.detect_structure(elevation_patch)
+        
+        # Format result like validation script
+        response = {
+            "status": "success",
+            "coordinates": {
+                "lat": request.lat,
+                "lon": request.lon
+            },
+            "structure_type": request.structure_type,
+            "profile_used": profile.name,
+            "detection": {
+                "detected": detection_result.detected,
+                "confidence": float(detection_result.confidence),
+                "final_score": float(detection_result.final_score),
+                "base_score": float(detection_result.base_score)
+            },
+            "feature_scores": {}
+        }
+        
+        # Add feature scores if available
+        if hasattr(detection_result, 'feature_results') and detection_result.feature_results:
+            for feature_name, feature_result in detection_result.feature_results.items():
+                if hasattr(feature_result, 'score'):
+                    response["feature_scores"][feature_name] = float(feature_result.score)
+        
+        logger.info(f"🎯 Exact detection result: detected={detection_result.detected}, score={detection_result.final_score:.3f}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Exact coordinate detection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/discovery/lidar-scan")
 async def start_lidar_scan(

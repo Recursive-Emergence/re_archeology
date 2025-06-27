@@ -47,6 +47,8 @@ class GeometricParameters:
     patch_shape: PatchShape = PatchShape.SQUARE
     patch_size_m: Tuple[float, float] = (20.0, 20.0)  # (width, height) in meters
     aspect_ratio_tolerance: float = 0.3  # Tolerance for non-square patches
+    detection_radius_m: float = 15.0  # Canonical detection region radius (default 15m for windmill)
+    detection_center: str = "apex"  # Centering method: "apex" or "center"
     
     def get_patch_size_px(self) -> Tuple[int, int]:
         """Convert patch size from meters to pixels"""

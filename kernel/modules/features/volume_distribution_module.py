@@ -43,13 +43,7 @@ class VolumeDistributionModule(BaseFeatureModule):
     
     def compute(self, elevation_patch: np.ndarray, **kwargs) -> FeatureResult:
         """
-        Compute volume distribution score
-        
-        Args:
-            elevation_patch: Local elevation data patch
-            
-        Returns:
-            FeatureResult with volume distribution analysis
+        Compute volume distribution score (favoring windmills: high base fraction, strong penalty for top-heavy)
         """
         try:
             h, w = elevation_patch.shape
@@ -107,20 +101,17 @@ class VolumeDistributionModule(BaseFeatureModule):
                 if total_volume > 0:
                     volume_distribution = volume_per_bin / total_volume
                     
-                    # Calculate windmill-likeness metrics
-                    base_bins = int(self.height_bins * 0.4)  # Bottom 40% of height range
+                    # Use a higher base bin fraction (e.g., bottom 60%)
+                    base_bins = int(self.height_bins * 0.6)
                     base_volume_fraction = np.sum(volume_distribution[:base_bins])
                     
-                    # Volume concentration in base (good for windmills)
-                    base_concentration_score = min(1.0, base_volume_fraction / self.base_fraction_threshold)
-                    
-                    # Inverse of top-heavy distribution (bad for windmills)
-                    top_bins = int(self.height_bins * 0.6)  # Top 60% of height range
+                    # Stronger penalty for top-heavy (top 40%)
+                    top_bins = int(self.height_bins * 0.6)
                     top_volume_fraction = np.sum(volume_distribution[top_bins:])
-                    top_heavy_penalty = top_volume_fraction
+                    base_concentration_score = base_volume_fraction  # Directly use base fraction
                     
-                    # Combined score: favor base concentration, penalize top-heavy
-                    distribution_score = base_concentration_score * (1.0 - top_heavy_penalty * 0.5)
+                    # Score: high for windmills (base-heavy), low for trees/urban (top-heavy or flat)
+                    distribution_score = base_concentration_score * (1.0 - top_volume_fraction)
                     distribution_score = max(0.0, min(1.0, distribution_score))
                     
                     return FeatureResult(
@@ -131,7 +122,6 @@ class VolumeDistributionModule(BaseFeatureModule):
                             "base_volume_fraction": float(base_volume_fraction),
                             "top_volume_fraction": float(top_volume_fraction),
                             "base_concentration_score": float(base_concentration_score),
-                            "top_heavy_penalty": float(top_heavy_penalty),
                             "height_range": float(height_range),
                             "max_height": float(max_height),
                             "base_elevation": float(base_elevation),

@@ -7,555 +7,502 @@ Updated to use the new clean phi0_core with apex-centered detection.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from phi0_core import PhiZeroStructureDetector, ElevationPatch
 import logging
-import ee
 import os
+import json
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'kernel')))
+from kernel.detector_profile import DetectorProfileManager
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'lidar_factory')))
+from lidar_factory.factory import LidarMapFactory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
  
-def initialize_earth_engine():
-    """Initialize Earth Engine with service account authentication"""
-    try:
-        service_account_path = "/media/im3/plus/lab4/RE/re_archaeology/sage-striker-294302-b89a8b7e205b.json"
-        if os.path.exists(service_account_path):
-            credentials = ee.ServiceAccountCredentials(
-                'elevation-pattern-detection@sage-striker-294302.iam.gserviceaccount.com',
-                service_account_path
-            )
-            ee.Initialize(credentials)
-            logger.info("✅ Earth Engine initialized with service account")
-        else:
-            ee.Initialize()
-            logger.info("✅ Earth Engine initialized with default credentials")
-    except Exception as e:
-        logger.error(f"❌ Earth Engine initialization failed: {e}")
-        raise
-
-def load_elevation_patch(lat, lon, name, buffer_radius_m=20, resolution_m=0.5):
-    """Load elevation patch from Earth Engine AHN4 data"""
-    try:
-        center = ee.Geometry.Point([lon, lat])
-        polygon = center.buffer(buffer_radius_m).bounds()
-        ahn4_dsm = ee.ImageCollection("AHN/AHN4").select('dsm').median()
-        ahn4_dsm = ahn4_dsm.reproject(crs='EPSG:28992', scale=resolution_m)
-        rect = ahn4_dsm.sampleRectangle(region=polygon, defaultValue=-9999, properties=[])
-        elev_block = rect.get('dsm').getInfo()
-        elevation_array = np.array(elev_block, dtype=np.float32)
-        elevation_array = np.where(elevation_array == -9999, np.nan, elevation_array)
-        
-        if np.isnan(elevation_array).all():
-            raise Exception(f"No valid elevation data for {name}")
-        
-        if np.isnan(elevation_array).any():
-            mean_val = np.nanmean(elevation_array)
-            elevation_array = np.where(np.isnan(elevation_array), mean_val, elevation_array)
-        
-        patch = ElevationPatch(
-            elevation_data=elevation_array,
-            coordinates=(lat, lon),
-            patch_size_m=buffer_radius_m * 2,
-            resolution_m=resolution_m,
-            metadata={'source': 'AHN4', 'name': name}
-        )
-        logger.info(f"✅ Loaded {name}: {elevation_array.shape}, range: {np.min(elevation_array):.2f}-{np.max(elevation_array):.2f}m")
-        return patch
-    except Exception as e:
-        logger.error(f"❌ Failed to load {name}: {e}")
-        return None
-
-def compute_elevation_histogram_score(local_elevation, kernel_elevation):
-    """Compute elevation histogram similarity score using the same logic as the detection algorithm"""
-    
-    # Check for meaningful variation
-    local_range = np.max(local_elevation) - np.min(local_elevation)
-    kernel_range = np.max(kernel_elevation) - np.min(kernel_elevation)
-    
-    print(f"    Local range: {local_range:.2f}m, Kernel range: {kernel_range:.2f}m")
-    
-    if local_range < 0.5 or kernel_range < 0.5:
-        print("    Insufficient variation")
-        return 0.0, None, None
-    
-    # Apply base elevation removal
-    local_relative = local_elevation - np.min(local_elevation)
-    kernel_relative = kernel_elevation - np.min(kernel_elevation)
-    
-    # Normalize to [0,1]
-    local_max_rel = np.max(local_relative)
-    kernel_max_rel = np.max(kernel_relative)
-    
-    if local_max_rel <= 0.1 or kernel_max_rel <= 0.1:
-        print("    Insufficient relative variation")
-        return 0.0, None, None
-    
-    local_normalized = local_relative / local_max_rel
-    kernel_normalized = kernel_relative / kernel_max_rel
-    
-    # Create histograms
-    num_bins = 16
-    bin_edges = np.linspace(0, 1, num_bins + 1)
-    
-    local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
-    kernel_hist, _ = np.histogram(kernel_normalized.flatten(), bins=bin_edges, density=True)
-    
-    # Normalize to probability distributions
-    local_hist = local_hist / (np.sum(local_hist) + 1e-8)
-    kernel_hist = kernel_hist / (np.sum(kernel_hist) + 1e-8)
-    
-    # Compute cosine similarity
-    local_norm = np.linalg.norm(local_hist)
-    kernel_norm = np.linalg.norm(kernel_hist)
-    
-    if local_norm > 1e-8 and kernel_norm > 1e-8:
-        score = np.dot(local_hist, kernel_hist) / (local_norm * kernel_norm)
-        score = max(0.0, min(1.0, score))
-    else:
-        score = 0.0
-    
-    return score, local_hist, kernel_hist
-
-def compute_elevation_histogram_score_v2(local_elevation, kernel_elevation, detector):
-    """Compute elevation histogram similarity using the new detector's method"""
-    try:
-        # Use the detector's internal method
-        score = detector._compute_elevation_histogram_score(local_elevation, kernel_elevation)
-        
-        # Also compute histograms for visualization
-        local_range = np.max(local_elevation) - np.min(local_elevation)
-        kernel_range = np.max(kernel_elevation) - np.min(kernel_elevation)
-        
-        print(f"    Local range: {local_range:.2f}m, Kernel range: {kernel_range:.2f}m")
-        
-        if local_range < 0.5 or kernel_range < 0.5:
-            print("    Insufficient variation")
-            return 0.0, None, None
-        
-        # Apply same normalization as detector
-        local_relative = local_elevation - np.min(local_elevation)
-        kernel_relative = kernel_elevation - np.min(kernel_elevation)
-        
-        local_max_rel = np.max(local_relative)
-        kernel_max_rel = np.max(kernel_relative)
-        
-        if local_max_rel < 0.1 or kernel_max_rel < 0.1:
-            print("    Insufficient relative variation")
-            return 0.0, None, None
-        
-        local_normalized = local_relative / local_max_rel
-        kernel_normalized = kernel_relative / kernel_max_rel
-        
-        # Create histograms for visualization
-        num_bins = 16
-        bin_edges = np.linspace(0, 1, num_bins + 1)
-        
-        local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
-        kernel_hist, _ = np.histogram(kernel_normalized.flatten(), bins=bin_edges, density=True)
-        
-        # Normalize to probability distributions
-        local_hist = local_hist / (np.sum(local_hist) + 1e-8)
-        kernel_hist = kernel_hist / (np.sum(kernel_hist) + 1e-8)
-        
-        return score, local_hist, kernel_hist
-        
-    except Exception as e:
-        print(f"    Error in histogram computation: {e}")
-        return 0.0, None, None
-
-def debug_kernel_construction(detector, training_patches):
-    """Debug the kernel construction process to understand histogram differences"""
-    print("\n=== DEBUGGING KERNEL CONSTRUCTION ===")
-    
-    all_elevations = []
-    individual_histograms = []
-    
-    for i, patch in enumerate(training_patches):
-        if hasattr(patch, 'elevation_data') and patch.elevation_data is not None:
-            elevation = patch.elevation_data
-            h, w = elevation.shape
-            kernel_size = detector.kernel_size
-            
-            if h >= kernel_size and w >= kernel_size:
-                # Find apex center (same as in learn_pattern_kernel)
-                center_y, center_x = detector._find_optimal_kernel_center(elevation)
-                half_kernel = kernel_size // 2
-                
-                if (center_y >= half_kernel and center_y < h - half_kernel and
-                    center_x >= half_kernel and center_x < w - half_kernel):
-                    
-                    start_y = center_y - half_kernel
-                    start_x = center_x - half_kernel
-                    elevation_kernel = elevation[start_y:start_y+kernel_size, start_x:start_x+kernel_size]
-                    
-                    if np.std(elevation_kernel) > 0.01:
-                        all_elevations.append(elevation_kernel)
-                        
-                        # Compute histogram for this individual training patch
-                        elev_range = np.max(elevation_kernel) - np.min(elevation_kernel)
-                        if elev_range >= 0.5:
-                            elev_relative = elevation_kernel - np.min(elevation_kernel)
-                            elev_max_rel = np.max(elev_relative)
-                            if elev_max_rel >= 0.1:
-                                elev_normalized = elev_relative / elev_max_rel
-                                
-                                num_bins = 16
-                                bin_edges = np.linspace(0, 1, num_bins + 1)
-                                hist, _ = np.histogram(elev_normalized.flatten(), bins=bin_edges, density=True)
-                                hist = hist / (np.sum(hist) + 1e-8)
-                                individual_histograms.append({
-                                    'name': patch.metadata['name'] if patch.metadata else f'Patch_{i}',
-                                    'histogram': hist,
-                                    'elevation': elevation_kernel,
-                                    'range': elev_range
-                                })
-                                
-                                print(f"Training patch {i} ({patch.metadata.get('name', 'Unknown')}): range={elev_range:.2f}m")
-    
-    if all_elevations:
-        # Step 1: Raw average
-        raw_average = np.mean(all_elevations, axis=0)
-        print(f"Step 1 - Raw average: shape={raw_average.shape}, range={np.max(raw_average)-np.min(raw_average):.2f}m")
-        
-        # Step 2: In the current implementation, no G2 symmetrization is applied to elevation kernel
-        # The elevation kernel is simply the mean of all training elevation patches
-        symmetrized = raw_average  # No additional symmetrization applied
-        print(f"Step 2 - Final elevation kernel (no symmetrization): range={np.max(symmetrized)-np.min(symmetrized):.2f}m")
-        
-        # Compare histograms
-        print(f"\nHistogram comparison:")
-        print(f"Number of individual training histograms: {len(individual_histograms)}")
-        
-        # Compute final kernel histogram
-        kernel_range = np.max(symmetrized) - np.min(symmetrized)
-        if kernel_range >= 0.5:
-            kernel_relative = symmetrized - np.min(symmetrized)
-            kernel_max_rel = np.max(kernel_relative)
-            if kernel_max_rel >= 0.1:
-                kernel_normalized = kernel_relative / kernel_max_rel
-                
-                num_bins = 16
-                bin_edges = np.linspace(0, 1, num_bins + 1)
-                kernel_hist, _ = np.histogram(kernel_normalized.flatten(), bins=bin_edges, density=True)
-                kernel_hist = kernel_hist / (np.sum(kernel_hist) + 1e-8)
-                
-                print(f"Final kernel histogram computed successfully")
-                
-                # DETAILED DEBUGGING: Step by step analysis
-                print(f"\n=== DETAILED STEP-BY-STEP ANALYSIS ===")
-                
-                # Show raw individual elevations vs final kernel
-                print(f"Raw elevation analysis:")
-                for idx, indiv in enumerate(individual_histograms):
-                    raw_elev = all_elevations[idx]
-                    print(f"  Training {idx} ({indiv['name']}):")
-                    print(f"    Raw elevation range: {np.min(raw_elev):.2f} to {np.max(raw_elev):.2f}m")
-                    print(f"    Raw elevation std: {np.std(raw_elev):.2f}m")
-                    
-                    # Compare raw vs final kernel
-                    raw_relative = raw_elev - np.min(raw_elev)
-                    raw_normalized = raw_relative / np.max(raw_relative)
-                    raw_hist, _ = np.histogram(raw_normalized.flatten(), bins=bin_edges, density=True)
-                    raw_hist = raw_hist / (np.sum(raw_hist) + 1e-8)
-                    
-                    raw_vs_final = np.dot(raw_hist, kernel_hist) / (
-                        np.linalg.norm(raw_hist) * np.linalg.norm(kernel_hist) + 1e-8)
-                    print(f"    Raw vs final kernel similarity: {raw_vs_final:.4f}")
-                    
-                    # Check if processing changes histogram significantly
-                    processed_vs_raw = np.dot(indiv['histogram'], raw_hist) / (
-                        np.linalg.norm(indiv['histogram']) * np.linalg.norm(raw_hist) + 1e-8)
-                    print(f"    Processed vs raw similarity: {processed_vs_raw:.4f}")
-                
-                print(f"\nFinal kernel elevation analysis:")
-                print(f"  Range: {np.min(symmetrized):.2f} to {np.max(symmetrized):.2f}m")
-                print(f"  Std: {np.std(symmetrized):.2f}m")
-                
-                # Check if the issue is in normalization or histogram computation
-                print(f"\nHistogram computation validation:")
-                kernel_relative_check = symmetrized - np.min(symmetrized)
-                kernel_normalized_check = kernel_relative_check / np.max(kernel_relative_check)
-                print(f"  Kernel normalized range: {np.min(kernel_normalized_check):.3f} to {np.max(kernel_normalized_check):.3f}")
-                print(f"  Kernel normalized std: {np.std(kernel_normalized_check):.3f}")
-                
-                # Compare with individual training histograms
-                if individual_histograms:
-                    # Average training histogram (calculate first)
-                    avg_training_hist = np.mean([h['histogram'] for h in individual_histograms], axis=0)
-                    
-                    # Show actual histogram values
-                    print(f"\nActual histogram comparison (first few bins):")
-                    print(f"  Final kernel hist: {kernel_hist[:5]}")
-                    print(f"  Avg training hist: {avg_training_hist[:5]}")
-                    print(f"  Training 0 hist: {individual_histograms[0]['histogram'][:5]}")
-                    
-                    print(f"\nComparing final kernel vs individual training patches:")
-                    for indiv in individual_histograms:
-                        similarity = np.dot(kernel_hist, indiv['histogram']) / (
-                            np.linalg.norm(kernel_hist) * np.linalg.norm(indiv['histogram']) + 1e-8)
-                        print(f"  {indiv['name']}: similarity = {similarity:.4f}")
-                    
-                    avg_similarity = np.dot(kernel_hist, avg_training_hist) / (
-                        np.linalg.norm(kernel_hist) * np.linalg.norm(avg_training_hist) + 1e-8)
-                    print(f"  Average training: similarity = {avg_similarity:.4f}")
-                    
-                    return {
-                        'individual_histograms': individual_histograms,
-                        'kernel_histogram': kernel_hist,
-                        'avg_training_histogram': avg_training_hist,
-                        'raw_average': raw_average,
-                        'symmetrized': symmetrized
-                    }
-                
-                # CRITICAL TEST: Extract same region from same training patch and compare
-                print(f"\n=== CRITICAL CONSISTENCY TEST ===")
-                if individual_histograms and training_patches:
-                    # Take the first training patch and extract the same region again
-                    test_patch = training_patches[0]
-                    test_elevation = test_patch.elevation_data
-                    test_center_y, test_center_x = detector._find_optimal_kernel_center(test_elevation)
-                    
-                    # Extract the same region as was used in training
-                    half_kernel = detector.kernel_size // 2
-                    if (test_center_y >= half_kernel and test_center_y < test_elevation.shape[0] - half_kernel and
-                        test_center_x >= half_kernel and test_center_x < test_elevation.shape[1] - half_kernel):
-                        
-                        start_y = test_center_y - half_kernel
-                        start_x = test_center_x - half_kernel
-                        extracted_region = test_elevation[start_y:start_y+detector.kernel_size, 
-                                                        start_x:start_x+detector.kernel_size]
-                        
-                        # Compute histogram using the same method as detector
-                        test_score = detector._compute_elevation_histogram_score(extracted_region, symmetrized)
-                        
-                        # Also compute histogram manually for comparison
-                        test_range = np.max(extracted_region) - np.min(extracted_region)
-                        if test_range >= 0.5:
-                            test_relative = extracted_region - np.min(extracted_region)
-                            test_max_rel = np.max(test_relative)
-                            if test_max_rel >= 0.1:
-                                test_normalized = test_relative / test_max_rel
-                                test_hist, _ = np.histogram(test_normalized.flatten(), bins=bin_edges, density=True)
-                                test_hist = test_hist / (np.sum(test_hist) + 1e-8)
-                                
-                                manual_similarity = np.dot(test_hist, kernel_hist) / (
-                                    np.linalg.norm(test_hist) * np.linalg.norm(kernel_hist) + 1e-8)
-                                
-                                original_similarity = individual_histograms[0]['histogram']
-                                orig_vs_reextracted = np.dot(original_similarity, test_hist) / (
-                                    np.linalg.norm(original_similarity) * np.linalg.norm(test_hist) + 1e-8)
-                                
-                                print(f"Consistency test for {test_patch.metadata.get('name', 'Unknown')}:")
-                                print(f"  Detector score: {test_score:.4f}")
-                                print(f"  Manual similarity: {manual_similarity:.4f}")
-                                print(f"  Original vs re-extracted: {orig_vs_reextracted:.4f}")
-                                print(f"  Expected (from training): {individual_histograms[0]['histogram']} vs kernel similarity")
-                                
-                                if abs(test_score - manual_similarity) > 0.01:
-                                    print(f"  ⚠️  DISCREPANCY: Detector and manual methods differ!")
-                                if orig_vs_reextracted < 0.95:
-                                    print(f"  ⚠️  INCONSISTENCY: Re-extraction differs from original!")
-    
-    return None
+def load_profile_histogram(profile_path):
+    """Load the trained histogram fingerprint from the windmill profile using DetectorProfileManager."""
+    manager = DetectorProfileManager(profiles_dir=os.path.dirname(profile_path))
+    profile = manager.load_profile(os.path.basename(profile_path))
+    # The feature name may be 'ElevationHistogram' or 'histogram' depending on config
+    feature = profile.features.get('ElevationHistogram') or profile.features.get('histogram')
+    if not feature:
+        raise ValueError("ElevationHistogram feature not found in profile")
+    fingerprint = feature.parameters.get('trained_histogram_fingerprint')
+    if fingerprint is None:
+        raise ValueError("trained_histogram_fingerprint not found in profile parameters")
+    return fingerprint
 
 def debug_elevation_histograms():
-    """Debug elevation histogram matching with apex-centered extraction for fair comparison."""
-    
-    print("=== DEBUGGING ELEVATION HISTOGRAM MATCHING (Apex-Centered Comparison) ===")
-    
-    # Initialize Earth Engine
-    initialize_earth_engine()
-    
-    # Initialize new detection system with apex-centered kernel learning
-    # Use smaller kernel size to allow apex centering with 82x82 patches
-    detector = PhiZeroStructureDetector(
-        resolution_m=0.5, 
-        kernel_size=21,  # Smaller kernel allows apex centering in 82x82 patches
-        structure_type="windmill"
-    )
-    
-    # Test windmill and negative locations
+    print("=== DEBUGGING ELEVATION HISTOGRAM MATCHING (Profile Fingerprint, Profile-Driven Region) ===")
+    # De Kat reference for profile update
+    de_kat_lat = 52.47505310183309
+    de_kat_lon = 4.8177388422949585
+    profile_path = "/media/im3/plus/lab4/RE/re_archaeology/profiles/dutch_windmill.json"
+    # Update profile fingerprint at the start
+    update_profile_with_dekat_fingerprint(profile_path, de_kat_lat, de_kat_lon)
+    # Load updated profile
+    manager = DetectorProfileManager(profiles_dir=os.path.dirname(profile_path))
+    profile = manager.load_profile(os.path.basename(profile_path))
+    detection_radius_m = getattr(profile.geometry, 'detection_radius_m', 15.0)
+    detection_center = getattr(profile.geometry, 'detection_center', 'apex')
+    patch_size_m = profile.geometry.patch_size_m[0]
+    resolution_m = profile.geometry.resolution_m
+    region_size_px = int(detection_radius_m * 2 / resolution_m)
+    # Use updated fingerprint
+    profile_hist = profile.features.get('ElevationHistogram') or profile.features.get('histogram')
+    fingerprint = profile_hist.parameters.get('trained_histogram_fingerprint')
+    profile_hist = np.array(fingerprint, dtype=np.float32)
+    profile_hist = profile_hist / (np.sum(profile_hist) + 1e-8)
+    print(f"Loaded profile histogram: {profile_hist}")
+    # Test locations as before
     test_locations = [
-        # Windmills (should score high)
-        {"name": "De Kat", "lat": 52.47505310183309, "lon": 4.8177388422949585, "is_windmill": True},
-        {"name": "De Zoeker", "lat": 52.47590104112108, "lon": 4.817647238879872, "is_windmill": True},  # moved 5m north
-        {"name": "Het Klaverblad", "lat": 52.4775485810242, "lon": 4.813724798553969, "is_windmill": True},
-        {"name": "A pincacle pole", "lat": 52.483710, "lon": 4.810826,  "is_windmill": False},
-        #{"name": "A tall tree", "lat": 51.869760, "lon": 4.632234,  "is_windmill": False},
-        # Negative patches (should score low)
-        {"name": "Some Trees", "lat": 52.628085, "lon": 4.762604, "is_windmill": False},  # 52.628085,4.762604
-        {"name": "Factory-like building", "lat": 52.010008  , "lon": 4.709127, "is_windmill": False},
+        {"name": "De Kat", "lat": de_kat_lat, "lon": de_kat_lon},
+        {"name": "De Zoeker", "lat": 52.47590104112108, "lon": 4.817647238879872},
+        {"name": "Het Jonge Schaap", "lat": 52.47621811347626, "lon": 4.816644787814995},
+        {"name": "De Bonte Hen", "lat": 52.47793734015221, "lon": 4.813402499137949},
+        {"name": "De Huisman", "lat": 52.47323132365517, "lon": 4.816668420518732},
+        {"name": "Kinderdijk Windmill Complex", "lat": 51.8820, "lon": 4.6300},
+        {"name": "De Gooyer Windmill Amsterdam", "lat": 52.3667, "lon": 4.9270},
+        {"name": "Molen de Adriaan Haarlem", "lat": 52.3823, "lon": 4.6308},
+        {"name": "Historic Windmill Leiden", "lat": 52.1589, "lon": 4.4937},
+        {"name": "Urban Area Amsterdam 1", "lat": 52.483814, "lon": 4.804392},
+        {"name": "Urban Area Amsterdam 2", "lat": 52.483185, "lon": 4.810733},
+        {"name": "Urban Area Amsterdam 3", "lat": 52.483814, "lon": 4.803359},
+        {"name": "Urban Area Amsterdam 4", "lat": 52.483903, "lon": 4.806456},
+        {"name": "Some Trees Area", "lat": 52.628085, "lon": 4.762604},
     ]
-    
-    # Load training data to create kernel
-    print("\n1. Loading training windmills...")
-    training_patches = []
     for loc in test_locations:
-        if loc["is_windmill"]:
-            patch = load_elevation_patch(loc["lat"], loc["lon"], loc["name"], buffer_radius_m=40)
-            if patch:
-                training_patches.append(patch)
-    
-    if not training_patches:
-        print("❌ Failed to load training data")
-        return
-    
-    # Construct kernel using apex-centered approach
-    print("   Using apex-centered kernel extraction...")
-    detector.learn_pattern_kernel(training_patches, use_apex_center=True)
-    print(f"✅ Kernel constructed from {len(training_patches)} windmills with apex centering")
-    
-    # Debug kernel construction process
-    debug_info = debug_kernel_construction(detector, training_patches)
-    
-    # Get the elevation kernel
-    if not hasattr(detector, 'elevation_kernel') or detector.elevation_kernel is None:
-        print("❌ No elevation kernel available")
-        return
-    
-    kernel_elevation = detector.elevation_kernel
-    print(f"   Kernel elevation shape: {kernel_elevation.shape}")
-    print(f"   Kernel elevation range: {np.min(kernel_elevation):.2f}-{np.max(kernel_elevation):.2f}m")
-    
-    # Test all locations with apex-centered extraction for fair comparison
-    results = []
-    
-    print("\n2. Testing locations with apex-centered extraction...")
-    for loc in test_locations:
-        print(f"\nTesting: {loc['name']} ({'windmill' if loc['is_windmill'] else 'negative'})")
-        
-        # Load patch
-        patch = load_elevation_patch(loc["lat"], loc["lon"], loc["name"], buffer_radius_m=40)
-        if not patch:
+        print(f"\n=== Checking site: {loc['name']} ===")
+        patch_result = LidarMapFactory.get_patch(
+            lat=loc["lat"],
+            lon=loc["lon"],
+            size_m=patch_size_m,
+            preferred_resolution_m=resolution_m,
+            preferred_data_type="DSM"
+        )
+        if patch_result is None or patch_result.data is None:
+            print(f"❌ Failed to load patch for {loc['name']}")
             continue
-        
-        elevation = patch.elevation_data
+        elevation = patch_result.data
         h, w = elevation.shape
-        kernel_size = detector.kernel_size
-        
-        # Show apex information for ALL patches (windmills and negatives)
-        apex_y, apex_x = detector._find_optimal_kernel_center(elevation)
-        geometric_center_y, geometric_center_x = h//2, w//2
-        apex_elevation = elevation[apex_y, apex_x]
-        center_elevation_val = elevation[geometric_center_y, geometric_center_x]
-        
-        print(f"  Patch shape: {elevation.shape}")
-        print(f"  Apex location: ({apex_y}, {apex_x}) = {apex_elevation:.2f}m")
-        print(f"  Geometric center: ({geometric_center_y}, {geometric_center_x}) = {center_elevation_val:.2f}m")
-        print(f"  Apex vs center difference: {apex_elevation - center_elevation_val:.2f}m")
-        
-        # Extract kernel region using APEX centering for ALL patches (fair comparison)
-        center_elevation = None
-        extraction_method = "unknown"
-        
-        if h >= kernel_size and w >= kernel_size:
-            # Try apex-centered extraction first
-            half_kernel = kernel_size // 2
-            
-            # Check if we can extract a full kernel around the apex
-            if (apex_y >= half_kernel and apex_y < h - half_kernel and
-                apex_x >= half_kernel and apex_x < w - half_kernel):
-                start_y = apex_y - half_kernel
-                start_x = apex_x - half_kernel
-                center_elevation = elevation[start_y:start_y+kernel_size, start_x:start_x+kernel_size]
-                extraction_method = "apex-centered"
-                print(f"  ✅ Using apex-centered extraction at ({apex_y}, {apex_x})")
-            else:
-                # Fallback to geometric center if apex is too close to edge
-                start_y = (h - kernel_size) // 2
-                start_x = (w - kernel_size) // 2
-                center_elevation = elevation[start_y:start_y+kernel_size, start_x:start_x+kernel_size]
-                extraction_method = "geometric-centered (apex too close to edge)"
-                print(f"  ⚠️  Apex too close to edge, using geometric center")
+        # --- Apex/center detection (profile-driven) ---
+        if detection_center == 'apex':
+            apex_idx = np.unravel_index(np.nanargmax(elevation), elevation.shape)
+            center_y, center_x = apex_idx
         else:
-            # Patch is smaller than kernel - use full patch
-            center_elevation = elevation
-            extraction_method = "full-patch (too small)"
-            print(f"  ⚠️  Patch too small for kernel, using full patch")
-        
-        print(f"  Extraction method: {extraction_method}")
-        print(f"  Extracted region shape: {center_elevation.shape}")
-        print(f"  Extracted elevation range: {np.min(center_elevation):.2f}-{np.max(center_elevation):.2f}m")
-        
-        # Compute histogram score using the same method as the detector
-        score, local_hist, kernel_hist = compute_elevation_histogram_score_v2(center_elevation, kernel_elevation, detector)
-        
-        print(f"  📊 Elevation histogram score: {score:.4f}")
-        
-        # Store results
-        if local_hist is not None and kernel_hist is not None:
-            results.append({
-                'name': loc['name'],
-                'is_windmill': loc['is_windmill'],
-                'score': score,
-                'local_hist': local_hist,
-                'kernel_hist': kernel_hist,
-                'elevation': center_elevation,
-                'elevation_range': np.max(center_elevation) - np.min(center_elevation)
-            })
-    
-    # Analyze results
-    if results:
-        print(f"\n3. Results Summary:")
-        print("   Name                    | Type     | Score   | Range")
-        print("   " + "-"*55)
-        
-        windmill_scores = []
-        negative_scores = []
-        
-        for result in results:
-            type_str = "Windmill" if result['is_windmill'] else "Negative"
-            print(f"   {result['name']:22} | {type_str:8} | {result['score']:.4f} | {result['elevation_range']:.2f}m")
-            
-            if result['is_windmill']:
-                windmill_scores.append(result['score'])
-            else:
-                negative_scores.append(result['score'])
-        
-        # Problem analysis
-        if windmill_scores and negative_scores:
-            print(f"\n4. Problem Analysis:")
-            print(f"   Average windmill score: {np.mean(windmill_scores):.4f}")
-            print(f"   Average negative score: {np.mean(negative_scores):.4f}")
-            print(f"   Score difference: {np.mean(windmill_scores) - np.mean(negative_scores):.4f}")
-            
-            if np.mean(negative_scores) >= np.mean(windmill_scores) * 0.9:
-                print("   *** PROBLEM: Negatives score nearly as high as windmills! ***")
-                print("   This explains the high false positive rate.")
-            else:
-                print("   ✅ Good separation between windmills and negatives")
-        
-        # Create visualization
-        if len(results) >= 2:
-            fig, axes = plt.subplots(2, len(results), figsize=(4*len(results), 8))
-            if len(results) == 1:
-                axes = axes.reshape(2, 1)
-            
-            for i, result in enumerate(results):
-                # Plot elevation pattern
-                axes[0, i].imshow(result['elevation'], cmap='terrain')
-                title_color = 'green' if result['is_windmill'] else 'red'
-                axes[0, i].set_title(f"{result['name']}\nScore: {result['score']:.4f}", 
-                                    color=title_color, fontsize=10)
-                axes[0, i].axis('off')
-                
-                # Plot histograms
-                bins = np.arange(len(result['local_hist']))
-                width = 0.4
-                axes[1, i].bar(bins - width/2, result['local_hist'], width, label='Local', alpha=0.7)
-                axes[1, i].bar(bins + width/2, result['kernel_hist'], width, label='Kernel', alpha=0.7)
-                axes[1, i].set_title('Elevation Histograms')
-                axes[1, i].legend()
-                axes[1, i].set_xlabel('Normalized Elevation Bin')
-                axes[1, i].set_ylabel('Density')
-            
-            plt.tight_layout()
-            plt.savefig('/media/im3/plus/lab4/RE/re_archaeology/simple_histogram_debug_clean.png', dpi=150, bbox_inches='tight')
-            print(f"\n5. Visualization saved to simple_histogram_debug_clean.png")
-    
+            center_y, center_x = h // 2, w // 2
+        half_region = region_size_px // 2
+        start_y = center_y - half_region
+        start_x = center_x - half_region
+        end_y = start_y + region_size_px
+        end_x = start_x + region_size_px
+        # Strict: reject if region would be clipped
+        if start_y < 0 or start_x < 0 or end_y > h or end_x > w:
+            print(f"❌ Region for {loc['name']} would be clipped by patch boundary. Skipping.")
+            continue
+        center_elevation = elevation[start_y:end_y, start_x:end_x]
+        print(f"Extracted region shape: {center_elevation.shape}")
+        # Save region for comparison
+        # np.save(f"/media/im3/plus/lab4/RE/re_archaeology/region_debug_{loc['name'].replace(' ', '_')}.npy", center_elevation)
+        # --- Manual histogram calculation (profile-driven) ---
+        local_range = np.max(center_elevation) - np.min(center_elevation)
+        if local_range < 0.5:
+            print("Insufficient variation in patch")
+            continue
+        local_relative = center_elevation - np.min(center_elevation)
+        local_max_rel = np.max(local_relative)
+        if local_max_rel < 0.1:
+            print("Insufficient relative variation in patch")
+            continue
+        local_normalized = local_relative / local_max_rel
+        num_bins = len(profile_hist)
+        bin_edges = np.linspace(0, 1, num_bins + 1)
+        local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
+        local_hist = local_hist / (np.sum(local_hist) + 1e-8)
+        local_norm = np.linalg.norm(local_hist)
+        profile_norm = np.linalg.norm(profile_hist)
+        if local_norm > 1e-8 and profile_norm > 1e-8:
+            score = np.dot(local_hist, profile_hist) / (local_norm * profile_norm)
+            score = max(0.0, min(1.0, score))
+        else:
+            score = 0.0
+        print(f"[Manual] Profile histogram similarity score for {loc['name']}: {score:.4f}")
+        # --- Kernel module calculation ---
+        from kernel.modules.features.histogram_module import ElevationHistogramModule
+        hist_params = profile.features.get('ElevationHistogram').parameters
+        kernel_module = ElevationHistogramModule()
+        kernel_module.configure(**hist_params)
+        kernel_module.trained_histogram_fingerprint = np.array(fingerprint, dtype=np.float32)
+        kernel_result = kernel_module.compute(center_elevation)
+        print(f"[Kernel] ElevationHistogramModule score: {kernel_result.score:.4f}")
+        print(f"[Kernel] Metadata: {json.dumps(kernel_result.metadata, indent=2, default=str)}")
+        # Plot the histograms for each site
+        bins = np.arange(num_bins)
+        width = 0.4
+        plt.figure(figsize=(8, 4))
+        plt.bar(bins - width/2, local_hist, width, label=f"{loc['name']} (manual)", alpha=0.7)
+        plt.bar(bins + width/2, profile_hist, width, label='Profile', alpha=0.7)
+        plt.title(f"Elevation Histogram Comparison\n{loc['name']}\nManual Score: {score:.4f} | Kernel Score: {kernel_result.score:.4f}")
+        plt.xlabel('Normalized Elevation Bin')
+        plt.ylabel('Density')
+        plt.legend()
+        plt.tight_layout()
+        plot_path = f"/media/im3/plus/lab4/RE/re_archaeology/simple_histogram_debug_{loc['name'].replace(' ', '_')}.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"Histogram comparison plot saved to {plot_path}")
+
+def generate_apex_histogram_fingerprint(lat, lon, radius_m=10.0, bin_count=16, profile_path=None, output_json=True):
+    """
+    Generate an apex-centered histogram fingerprint for a given location.
+    Args:
+        lat (float): Latitude of the site.
+        lon (float): Longitude of the site.
+        radius_m (float): Radius in meters for the region (default 10.0).
+        bin_count (int): Number of histogram bins (default 16).
+        profile_path (str): Optional path to a profile for patch size/resolution.
+        output_json (bool): If True, print JSON for copy-paste.
+    Returns:
+        np.ndarray: The normalized histogram fingerprint.
+    """
+    # Load profile for patch size and resolution if provided
+    if profile_path:
+        manager = DetectorProfileManager(profiles_dir=os.path.dirname(profile_path))
+        profile = manager.load_profile(os.path.basename(profile_path))
+        patch_size_m = profile.geometry.patch_size_m[0]
+        resolution_m = profile.geometry.resolution_m
     else:
-        print("❌ No valid results to analyze")
+        patch_size_m = 40.0
+        resolution_m = 0.5
+    region_size_px = int(radius_m * 2 / resolution_m)
+    # Fetch patch
+    patch_result = LidarMapFactory.get_patch(
+        lat=lat,
+        lon=lon,
+        size_m=patch_size_m,
+        preferred_resolution_m=resolution_m,
+        preferred_data_type="DSM"
+    )
+    if patch_result is None or patch_result.data is None:
+        print(f"❌ Failed to load patch for ({lat}, {lon})")
+        return None
+    elevation = patch_result.data
+    h, w = elevation.shape
+    # Find apex
+    apex_idx = np.unravel_index(np.nanargmax(elevation), elevation.shape)
+    center_y, center_x = apex_idx
+    half_region = region_size_px // 2
+    start_y = max(center_y - half_region, 0)
+    start_x = max(center_x - half_region, 0)
+    end_y = min(start_y + region_size_px, h)
+    end_x = min(start_x + region_size_px, w)
+    region = elevation[start_y:end_y, start_x:end_x]
+    # Compute histogram
+    local_range = np.max(region) - np.min(region)
+    if local_range < 0.5:
+        print("Insufficient variation in patch")
+        return None
+    local_relative = region - np.min(region)
+    local_max_rel = np.max(local_relative)
+    if local_max_rel < 0.1:
+        print("Insufficient relative variation in patch")
+        return None
+    local_normalized = local_relative / local_max_rel
+    bin_edges = np.linspace(0, 1, bin_count + 1)
+    local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
+    local_hist = local_hist / (np.sum(local_hist) + 1e-8)
+    if output_json:
+        print("Apex-centered histogram fingerprint:")
+        print(json.dumps(local_hist.tolist(), indent=2))
+    return local_hist
+
+def debug_with_dekat_apex_fingerprint():
+    print("=== DEBUGGING: All sites vs De Kat apex-centered fingerprint ===")
+    # De Kat coordinates
+    de_kat_lat = 52.47505310183309
+    de_kat_lon = 4.8177388422949585
+    profile_path = "/media/im3/plus/lab4/RE/re_archaeology/profiles/dutch_windmill.json"
+    # Generate De Kat apex-centered fingerprint (10m radius, 16 bins)
+    de_kat_hist = generate_apex_histogram_fingerprint(
+        de_kat_lat, de_kat_lon, radius_m=10.0, bin_count=16, profile_path=profile_path, output_json=False
+    )
+    if de_kat_hist is None:
+        print("Failed to generate De Kat fingerprint.")
+        return
+    # Get patch size and resolution from profile
+    manager = DetectorProfileManager(profiles_dir=os.path.dirname(profile_path))
+    profile = manager.load_profile(os.path.basename(profile_path))
+    patch_size_m = profile.geometry.patch_size_m[0]
+    resolution_m = profile.geometry.resolution_m
+    region_size_px = int(10.0 * 2 / resolution_m)
+    # Test all sites
+    test_locations = [
+        {"name": "De Kat", "lat": de_kat_lat, "lon": de_kat_lon},
+        {"name": "De Zoeker", "lat": 52.47590104112108, "lon": 4.817647238879872},
+        {"name": "Het Jonge Schaap", "lat": 52.47621811347626, "lon": 4.816644787814995},
+        {"name": "De Bonte Hen", "lat": 52.47793734015221, "lon": 4.813402499137949},
+        {"name": "De Huisman", "lat": 52.47323132365517, "lon": 4.816668420518732},
+        {"name": "Kinderdijk Windmill Complex", "lat": 51.8820, "lon": 4.6300},
+        {"name": "De Gooyer Windmill Amsterdam", "lat": 52.3667, "lon": 4.9270},
+        {"name": "Molen de Adriaan Haarlem", "lat": 52.3823, "lon": 4.6308},
+        {"name": "Historic Windmill Leiden", "lat": 52.1589, "lon": 4.4937},
+        {"name": "Urban Area Amsterdam 1", "lat": 52.483814, "lon": 4.804392},
+        {"name": "Urban Area Amsterdam 2", "lat": 52.483185, "lon": 4.810733},
+        {"name": "Urban Area Amsterdam 3", "lat": 52.483814, "lon": 4.803359},
+        {"name": "Urban Area Amsterdam 4", "lat": 52.483903, "lon": 4.806456},
+        {"name": "Some Trees Area", "lat": 52.628085, "lon": 4.762604},
+    ]
+    for loc in test_locations:
+        print(f"\n=== Checking site: {loc['name']} ===")
+        patch_result = LidarMapFactory.get_patch(
+            lat=loc["lat"],
+            lon=loc["lon"],
+            size_m=patch_size_m,
+            preferred_resolution_m=resolution_m,
+            preferred_data_type="DSM"
+        )
+        if patch_result is None or patch_result.data is None:
+            print(f"❌ Failed to load patch for {loc['name']}")
+            continue
+        elevation = patch_result.data
+        h, w = elevation.shape
+        # Find apex
+        apex_idx = np.unravel_index(np.nanargmax(elevation), elevation.shape)
+        center_y, center_x = apex_idx
+        half_region = region_size_px // 2
+        start_y = max(center_y - half_region, 0)
+        start_x = max(center_x - half_region, 0)
+        end_y = min(start_y + region_size_px, h)
+        end_x = min(start_x + region_size_px, w)
+        region = elevation[start_y:end_y, start_x:end_x]
+        # Compute histogram
+        local_range = np.max(region) - np.min(region)
+        if local_range < 0.5:
+            print("Insufficient variation in patch")
+            continue
+        local_relative = region - np.min(region)
+        local_max_rel = np.max(local_relative)
+        if local_max_rel < 0.1:
+            print("Insufficient relative variation in patch")
+            continue
+        local_normalized = local_relative / local_max_rel
+        bin_edges = np.linspace(0, 1, 16 + 1)
+        local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
+        local_hist = local_hist / (np.sum(local_hist) + 1e-8)
+        # Cosine similarity
+        local_norm = np.linalg.norm(local_hist)
+        de_kat_norm = np.linalg.norm(de_kat_hist)
+        if local_norm > 1e-8 and de_kat_norm > 1e-8:
+            score = np.dot(local_hist, de_kat_hist) / (local_norm * de_kat_norm)
+            score = max(0.0, min(1.0, score))
+        else:
+            score = 0.0
+        print(f"[Apex] De Kat fingerprint similarity score for {loc['name']}: {score:.4f}")
+        # Optionally plot
+        bins = np.arange(16)
+        width = 0.4
+        plt.figure(figsize=(8, 4))
+        plt.bar(bins - width/2, local_hist, width, label=f"{loc['name']} (apex)", alpha=0.7)
+        plt.bar(bins + width/2, de_kat_hist, width, label='De Kat Apex', alpha=0.7)
+        plt.title(f"Elevation Histogram Comparison\n{loc['name']} vs De Kat Apex\nScore: {score:.4f}")
+        plt.xlabel('Normalized Elevation Bin')
+        plt.ylabel('Density')
+        plt.legend()
+        plt.tight_layout()
+        plot_path = f"/media/im3/plus/lab4/RE/re_archaeology/simple_histogram_debug_{loc['name'].replace(' ', '_')}_vs_DeKatApex.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"Histogram comparison plot saved to {plot_path}")
+
+def test_dekat_fingerprint_self_similarity():
+    """
+    Generate De Kat apex-centered fingerprint and immediately compare it to itself.
+    Should yield a similarity score very close to 1.0 if logic is consistent.
+    """
+    print("=== TEST: De Kat fingerprint self-similarity (apex-centered) ===")
+    de_kat_lat = 52.47505310183309
+    de_kat_lon = 4.8177388422949585
+    profile_path = "/media/im3/plus/lab4/RE/re_archaeology/profiles/dutch_windmill.json"
+    # Generate fingerprint
+    hist = generate_apex_histogram_fingerprint(
+        de_kat_lat, de_kat_lon, radius_m=10.0, bin_count=16, profile_path=profile_path, output_json=False
+    )
+    if hist is None:
+        print("Failed to generate De Kat fingerprint.")
+        return
+    # Compare to itself
+    norm = np.linalg.norm(hist)
+    if norm > 1e-8:
+        score = np.dot(hist, hist) / (norm * norm)
+    else:
+        score = 0.0
+    print(f"Self-similarity score (should be 1.0): {score:.6f}")
+    # Optionally plot
+    bins = np.arange(16)
+    plt.figure(figsize=(8, 4))
+    plt.bar(bins, hist, width=0.7, label='De Kat Apex Histogram', alpha=0.7)
+    plt.title(f"De Kat Apex Histogram (Self-comparison)\nScore: {score:.6f}")
+    plt.xlabel('Normalized Elevation Bin')
+    plt.ylabel('Density')
+    plt.legend()
+    plt.tight_layout()
+    plot_path = "/media/im3/plus/lab4/RE/re_archaeology/dekat_apex_histogram_self.png"
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Self-comparison plot saved to {plot_path}")
+
+def test_dekat_fingerprint_other_sites():
+    """
+    Generate De Kat apex-centered fingerprint and compare it to all other sites (apex-centered, same logic).
+    Prints similarity scores and saves plots for each site.
+    """
+    print("=== TEST: De Kat fingerprint similarity to all sites (apex-centered) ===")
+    de_kat_lat = 52.47505310183309
+    de_kat_lon = 4.8177388422949585
+    profile_path = "/media/im3/plus/lab4/RE/re_archaeology/profiles/dutch_windmill.json"
+    # Generate De Kat fingerprint
+    de_kat_hist = generate_apex_histogram_fingerprint(
+        de_kat_lat, de_kat_lon, radius_m=10.0, bin_count=16, profile_path=profile_path, output_json=False
+    )
+    if de_kat_hist is None:
+        print("Failed to generate De Kat fingerprint.")
+        return
+    # Test locations (same as debug_with_dekat_apex_fingerprint)
+    test_locations = [
+        {"name": "De Kat", "lat": de_kat_lat, "lon": de_kat_lon},
+        {"name": "De Zoeker", "lat": 52.47590104112108, "lon": 4.817647238879872},
+        {"name": "Het Jonge Schaap", "lat": 52.47621811347626, "lon": 4.816644787814995},
+        {"name": "De Bonte Hen", "lat": 52.47793734015221, "lon": 4.813402499137949},
+        {"name": "De Huisman", "lat": 52.47323132365517, "lon": 4.816668420518732},
+        {"name": "Kinderdijk Windmill Complex", "lat": 51.8820, "lon": 4.6300},
+        {"name": "De Gooyer Windmill Amsterdam", "lat": 52.3667, "lon": 4.9270},
+        {"name": "Molen de Adriaan Haarlem", "lat": 52.3823, "lon": 4.6308},
+        {"name": "Historic Windmill Leiden", "lat": 52.1589, "lon": 4.4937},
+        {"name": "Urban Area Amsterdam 1", "lat": 52.483814, "lon": 4.804392},
+        {"name": "Urban Area Amsterdam 2", "lat": 52.483185, "lon": 4.810733},
+        {"name": "Urban Area Amsterdam 3", "lat": 52.483814, "lon": 4.803359},
+        {"name": "Urban Area Amsterdam 4", "lat": 52.483903, "lon": 4.806456},
+        {"name": "Some Trees Area", "lat": 52.628085, "lon": 4.762604},
+    ]
+    profile_path = "/media/im3/plus/lab4/RE/re_archaeology/profiles/dutch_windmill.json"
+    manager = DetectorProfileManager(profiles_dir=os.path.dirname(profile_path))
+    profile = manager.load_profile(os.path.basename(profile_path))
+    patch_size_m = profile.geometry.patch_size_m[0]
+    resolution_m = profile.geometry.resolution_m
+    region_size_px = int(10.0 * 2 / resolution_m)
+    for loc in test_locations:
+        print(f"\n=== Checking site: {loc['name']} ===")
+        patch_result = LidarMapFactory.get_patch(
+            lat=loc["lat"],
+            lon=loc["lon"],
+            size_m=patch_size_m,
+            preferred_resolution_m=resolution_m,
+            preferred_data_type="DSM"
+        )
+        if patch_result is None or patch_result.data is None:
+            print(f"❌ Failed to load patch for {loc['name']}")
+            continue
+        elevation = patch_result.data
+        h, w = elevation.shape
+        # Find apex
+        apex_idx = np.unravel_index(np.nanargmax(elevation), elevation.shape)
+        center_y, center_x = apex_idx
+        half_region = region_size_px // 2
+        start_y = max(center_y - half_region, 0)
+        start_x = max(center_x - half_region, 0)
+        end_y = min(start_y + region_size_px, h)
+        end_x = min(start_x + region_size_px, w)
+        region = elevation[start_y:end_y, start_x:end_x]
+        # Compute histogram
+        local_range = np.max(region) - np.min(region)
+        if local_range < 0.5:
+            print("Insufficient variation in patch")
+            continue
+        local_relative = region - np.min(region)
+        local_max_rel = np.max(local_relative)
+        if local_max_rel < 0.1:
+            print("Insufficient relative variation in patch")
+            continue
+        local_normalized = local_relative / local_max_rel
+        bin_edges = np.linspace(0, 1, 16 + 1)
+        local_hist, _ = np.histogram(local_normalized.flatten(), bins=bin_edges, density=True)
+        local_hist = local_hist / (np.sum(local_hist) + 1e-8)
+        # Cosine similarity
+        local_norm = np.linalg.norm(local_hist)
+        de_kat_norm = np.linalg.norm(de_kat_hist)
+        if local_norm > 1e-8 and de_kat_norm > 1e-8:
+            score = np.dot(local_hist, de_kat_hist) / (local_norm * de_kat_norm)
+            score = max(0.0, min(1.0, score))
+        else:
+            score = 0.0
+        print(f"[Apex] De Kat fingerprint similarity score for {loc['name']}: {score:.4f}")
+        # Optionally plot
+        bins = np.arange(16)
+        width = 0.4
+        plt.figure(figsize=(8, 4))
+        plt.bar(bins - width/2, local_hist, width, label=f"{loc['name']} (apex)", alpha=0.7)
+        plt.bar(bins + width/2, de_kat_hist, width, label='De Kat Apex', alpha=0.7)
+        plt.title(f"Elevation Histogram Comparison\n{loc['name']} vs De Kat Apex\nScore: {score:.4f}")
+        plt.xlabel('Normalized Elevation Bin')
+        plt.ylabel('Density')
+        plt.legend()
+        plt.tight_layout()
+        plot_path = f"/media/im3/plus/lab4/RE/re_archaeology/simple_histogram_debug_{loc['name'].replace(' ', '_')}_vs_DeKatApex.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"Histogram comparison plot saved to {plot_path}")
+
+def update_profile_with_dekat_fingerprint(profile_path, de_kat_lat, de_kat_lon):
+    """
+    Generate De Kat apex-centered 15m fingerprint and update the profile in memory and on disk.
+    Adds a fingerprint_last_updated ISO timestamp for traceability.
+    """
+    import datetime
+    manager = DetectorProfileManager(profiles_dir=os.path.dirname(profile_path))
+    profile = manager.load_profile(os.path.basename(profile_path))
+    detection_radius_m = getattr(profile.geometry, 'detection_radius_m', 15.0)
+    # Use attribute access for FeatureConfiguration objects
+    if 'ElevationHistogram' in profile.features:
+        bin_count = getattr(profile.features['ElevationHistogram'].parameters, 'bin_count', 16)
+    elif 'histogram' in profile.features:
+        bin_count = getattr(profile.features['histogram'].parameters, 'bin_count', 16)
+    else:
+        bin_count = 16
+    fingerprint = generate_apex_histogram_fingerprint(
+        de_kat_lat, de_kat_lon, radius_m=detection_radius_m, bin_count=bin_count, profile_path=profile_path, output_json=False
+    )
+    timestamp = datetime.datetime.now().isoformat()
+    if fingerprint is not None:
+        # Update in memory
+        if 'ElevationHistogram' in profile.features:
+            profile.features['ElevationHistogram'].parameters['trained_histogram_fingerprint'] = fingerprint.tolist()
+            profile.features['ElevationHistogram'].parameters['fingerprint_last_updated'] = timestamp
+        elif 'histogram' in profile.features:
+            profile.features['histogram'].parameters['trained_histogram_fingerprint'] = fingerprint.tolist()
+            profile.features['histogram'].parameters['fingerprint_last_updated'] = timestamp
+        # Save to disk
+        with open(profile_path, 'r') as f:
+            profile_json = json.load(f)
+        if 'features' in profile_json and 'ElevationHistogram' in profile_json['features']:
+            profile_json['features']['ElevationHistogram']['parameters']['trained_histogram_fingerprint'] = fingerprint.tolist()
+            profile_json['features']['ElevationHistogram']['parameters']['fingerprint_last_updated'] = timestamp
+        elif 'features' in profile_json and 'histogram' in profile_json['features']:
+            profile_json['features']['histogram']['parameters']['trained_histogram_fingerprint'] = fingerprint.tolist()
+            profile_json['features']['histogram']['parameters']['fingerprint_last_updated'] = timestamp
+        with open(profile_path, 'w') as f:
+            json.dump(profile_json, f, indent=2)
+        print(f"Profile fingerprint updated with De Kat apex-centered 15m reference. Timestamp: {timestamp}")
+    else:
+        print("Failed to generate De Kat fingerprint for profile update.")
+
+# Example usage:
+# generate_apex_histogram_fingerprint(52.47505310183309, 4.8177388422949585, radius_m=10.0, bin_count=16, profile_path="/media/im3/plus/lab4/RE/re_archaeology/profiles/dutch_windmill.json")
 
 if __name__ == "__main__":
     debug_elevation_histograms()
+    # test_dekat_fingerprint_self_similarity()
+    # test_dekat_fingerprint_other_sites()
+    # test_dekat_fingerprint_other_sites_with_region_viz()
+    # test_dekat_fingerprint_other_sites_with_region_viz_extended()
+    # test_dekat_fingerprint_other_sites_with_combined_viz()

@@ -115,71 +115,48 @@ class ElevationEntropyModule(BaseFeatureModule):
     
     def compute(self, elevation_patch: np.ndarray, **kwargs) -> FeatureResult:
         """
-        Compute elevation entropy score
-        
-        Args:
-            elevation_patch: 2D elevation data array
-            **kwargs: Additional parameters
-            
-        Returns:
-            FeatureResult with entropy-based structure confidence
+        Compute elevation entropy score using surface roughness and Shannon entropy multiplier.
         """
         try:
-            # Calculate local elevation variance
-            local_var = np.var(elevation_patch)
-            
-            # Calculate gradient variation
-            grad_x = np.gradient(elevation_patch, axis=1)
-            grad_y = np.gradient(elevation_patch, axis=0)
-            grad_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-            grad_var = np.var(grad_magnitude)
-            
             # Surface roughness using Laplacian
             laplacian = laplace(elevation_patch)
             surface_roughness = np.std(laplacian)
-            
-            # Combine metrics (normalized empirically)
-            raw_entropy = (local_var + grad_var + surface_roughness) / 3.0
-            normalized_entropy = min(1.0, raw_entropy / self.entropy_threshold)
-            
-            # Inverted bell curve: low score for optimal entropy (supports windmill detection)
-            # With negative polarity: low score → low negative evidence → high windmill likelihood
-            optimal_min, optimal_max = 0.2, 0.6
-            
-            if optimal_min <= normalized_entropy <= optimal_max:
-                # Within optimal range - low score (good for windmill with negative polarity)
-                structure_score = abs(normalized_entropy - 0.4) * 0.5  # Minimum at 0.4
-            else:
-                # Outside optimal range - high score (bad for windmill with negative polarity)
-                if normalized_entropy < optimal_min:
-                    # Too low entropy (flat farmland) - high negative evidence
-                    structure_score = 0.7 + (optimal_min - normalized_entropy) / optimal_min * 0.3
-                else:
-                    # Too high entropy (trees/vegetation) - high negative evidence
-                    structure_score = 0.7 + (normalized_entropy - optimal_max) / (1.0 - optimal_max) * 0.3
-            
-            # Additional validation - check for extreme values
+
+            # Shannon entropy of elevation values
+            def shannon_entropy(region, bins=32):
+                hist, _ = np.histogram(region.flatten(), bins=bins, density=True)
+                hist = hist[hist > 0]
+                return -np.sum(hist * np.log2(hist))
+            se = shannon_entropy(elevation_patch)
+
+            # Combine: surface roughness * (1 + alpha * shannon_entropy)
+            alpha = 0.15  # Tunable multiplier weight
+            raw_score = surface_roughness * (1 + alpha * se)
+
+            # Normalize (empirically, e.g., divide by 20.0 to map to ~[0,1] for typical data)
+            normalized_score = min(1.0, raw_score / 20.0)
+
+            # Lower score = more regular (windmill), higher = more complex (trees)
+            structure_score = normalized_score
+
             if np.any(np.isnan(elevation_patch)) or np.any(np.isinf(elevation_patch)):
                 return FeatureResult(
                     score=0.0,
                     valid=False,
                     reason="Invalid elevation data (NaN/Inf values)"
                 )
-            
+
             return FeatureResult(
                 score=structure_score,
-                polarity="negative",  # Set explicit negative polarity to bypass dynamic interpretation
+                polarity="negative",
                 metadata={
-                    "combined_entropy": float(structure_score),
-                    "local_variance": float(local_var),
-                    "gradient_variance": float(grad_var),
                     "surface_roughness": float(surface_roughness),
-                    "raw_entropy": float(raw_entropy),
-                    "normalized_entropy": float(normalized_entropy)
+                    "shannon_entropy": float(se),
+                    "raw_score": float(raw_score),
+                    "normalized_score": float(normalized_score)
                 },
                 reason=f"Entropy analysis: structure_score={structure_score:.3f}, polarity=negative"
             )
-            
         except Exception as e:
             return FeatureResult(
                 score=0.0,

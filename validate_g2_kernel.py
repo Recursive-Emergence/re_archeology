@@ -497,12 +497,12 @@ Base Score: {g2_result.get('base_score', 0):.3f}"""
         for i, site in enumerate(all_sites):
             logger.info(f"Processing site {i+1}/{len(all_sites)}: {site.name}")
             
-            # Get real AHN4 LiDAR data
-            lidar_data = self.get_ahn4_lidar_data(site)
+            # Get valid apex-centered region for detection
+            lidar_data = self.get_valid_detection_patch(site)
             
-            # Skip site if no real data available
+            # Skip site if no valid region available
             if lidar_data is None:
-                logger.warning(f"Skipping {site.name} - no real AHN4 data available")
+                logger.warning(f"Skipping {site.name} - could not extract valid apex-centered region for detection")
                 continue
             
             # Save LiDAR image
@@ -705,6 +705,56 @@ Average Processing Time: {metrics['avg_processing_time']:.3f}s
         plt.close()
         
         logger.info(f"Summary visualization saved to {summary_path}")
+    
+    def extract_apex_centered_region(self, elevation: np.ndarray, detection_radius_m: float, resolution_m: float) -> Optional[np.ndarray]:
+        """
+        Extract a square region of size (2*detection_radius_m) centered on the apex (max elevation).
+        Returns None if the region would be clipped.
+        """
+        region_size_px = int(detection_radius_m * 2 / resolution_m)
+        h, w = elevation.shape
+        apex_idx = np.unravel_index(np.nanargmax(elevation), elevation.shape)
+        center_y, center_x = apex_idx
+        half_region = region_size_px // 2
+        start_y = center_y - half_region
+        start_x = center_x - half_region
+        end_y = start_y + region_size_px
+        end_x = start_x + region_size_px
+        # Strict: reject if region would be clipped
+        if start_y < 0 or start_x < 0 or end_y > h or end_x > w:
+            return None
+        return elevation[start_y:end_y, start_x:end_x]
+
+    def get_valid_detection_patch(self, site: ValidationSite) -> Optional[np.ndarray]:
+        """
+        Fetch LiDAR patch and extract a valid apex-centered region for detection.
+        If the region would be clipped, attempt to fetch a larger patch (if possible).
+        Returns None if a valid region cannot be extracted.
+        """
+        patch_edge_size_m = 40  # Default patch size
+        target_resolution_m = 0.5
+        detection_radius_m = getattr(self.dutch_profile.geometry, 'detection_radius_m', 15.0)
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            lidar_patch_result = LidarMapFactory.get_patch(
+                lat=site.lat,
+                lon=site.lon,
+                size_m=patch_edge_size_m,
+                preferred_resolution_m=target_resolution_m,
+                preferred_data_type="DSM"
+            )
+            if lidar_patch_result is None or lidar_patch_result.data is None:
+                logger.error(f"Failed to fetch LiDAR data for {site.name} (attempt {attempt+1})")
+                return None
+            elevation = lidar_patch_result.data
+            region = self.extract_apex_centered_region(elevation, detection_radius_m, target_resolution_m)
+            if region is not None:
+                return region
+            else:
+                logger.warning(f"Apex-centered region would be clipped for {site.name} (attempt {attempt+1}). Trying larger patch.")
+                patch_edge_size_m += 10  # Increase patch size and try again
+        logger.error(f"Could not extract valid apex-centered region for {site.name} after {max_attempts} attempts.")
+        return None
 
 def main():
     """Main validation execution"""

@@ -179,7 +179,6 @@ data/temp/*
 gcp-credentials.json
 sage-striker-294302-bc8908922c70.json
 *-credentials.json
-*.json
 
 # Database files
 *.db
@@ -208,3 +207,4 @@ sage*.json
 .env.cloudrun
 .env.cloudrun.yaml
 g2_validation_results/
+kernel/tests/*

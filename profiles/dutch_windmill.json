@@ -1,0 +1,157 @@
+{
+  "name": "Dutch Windmill",
+  "description": "Optimized profile for detecting circular windmill mound structures using modular feature configuration",
+  "structure_type": "windmill",
+  "version": "2.0",
+  "created_by": "Modular G\u2082 System",
+  "geometry": {
+    "resolution_m": 0.5,
+    "structure_radius_m": 8.0,
+    "min_structure_size_m": 4.0,
+    "max_structure_size_m": 40.0,
+    "patch_shape": "square",
+    "patch_size_m": [
+      40.0,
+      40.0
+    ],
+    "aspect_ratio_tolerance": 0.25,
+    "detection_radius_m": 15.0,
+    "detection_center": "apex"
+  },
+  "thresholds": {
+    "detection_threshold": 0.55,
+    "confidence_threshold": 0.0,
+    "early_decision_threshold": 0.85,
+    "min_modules_for_decision": 3,
+    "max_modules_for_efficiency": 6,
+    "uncertainty_tolerance": 0.15
+  },
+  "features": {
+    "ElevationHistogram": {
+      "enabled": true,
+      "weight": 3.0,
+      "polarity_preference": "positive",
+      "parameters": {
+        "similarity_method": "correlation",
+        "bin_count": 16,
+        "edge_enhancement": true,
+        "adaptive_binning": true,
+        "noise_reduction": true,
+        "min_variation": 0.25,
+        "min_similarity_threshold": 0.5,
+        "enable_threshold_rejection": true,
+        "trained_histogram_fingerprint": [
+          0.20166666654062498,
+          0.0324999999796875,
+          0.14333333324375,
+          0.08805555550052083,
+          0.2661111109447917,
+          0.049166666635937495,
+          0.04972222219114583,
+          0.025555555539583334,
+          0.02666666665,
+          0.013611111102604165,
+          0.022499999985937498,
+          0.056666666631249994,
+          0.021111111097916666,
+          0.0008333333328125,
+          0.0011111111104166666,
+          0.0013888888880208333
+        ],
+        "fingerprint_last_updated": "2025-06-27T12:25:09.320035",
+        "histogram_smoothing": true,
+        "smoothing_radius": 1.0
+      }
+    },
+    "volume": {
+      "enabled": true,
+      "weight": 0.1,
+      "polarity_preference": null,
+      "parameters": {
+        "volume_method": "adaptive",
+        "base_volume_normalization": 40.0,
+        "base_prominence_normalization": 4.0,
+        "border_width_factor": 0.3,
+        "adaptive_scaling": true,
+        "concentration_bonus": 1.2,
+        "relative_prominence_weight": 0.5,
+        "min_volume_threshold": 3.0,
+        "auto_range_adaptation": true,
+        "percentile_normalization": true
+      }
+    },
+    "dropoff": {
+      "enabled": true,
+      "weight": 1.0,
+      "polarity_preference": "positive",
+      "parameters": {
+        "edge_method": "gradient",
+        "smoothing_radius": 0.8,
+        "adaptive_threshold": true,
+        "directional_analysis": true,
+        "edge_enhancement": true,
+        "sigma_inner_factor": 0.7,
+        "sigma_outer_factor": 1.3
+      }
+    },
+    "compactness": {
+      "enabled": true,
+      "weight": 2.0,
+      "polarity_preference": "positive",
+      "parameters": {
+        "shape_method": "circularity",
+        "n_angles": 45,
+        "min_samples": 12,
+        "symmetry_factor": 0.85,
+        "adaptive_radius": true,
+        "fourier_analysis": true,
+        "edge_detection": true,
+        "noise_tolerance": 0.08
+      }
+    },
+    "entropy": {
+      "enabled": true,
+      "weight": 2.0,
+      "polarity_preference": "negative",
+      "parameters": {
+        "entropy_method": "shannon",
+        "spatial_bins": 16,
+        "edge_weight": 1.3,
+        "normalization": "local",
+        "adaptive_threshold": true
+      }
+    },
+    "planarity": {
+      "enabled": true,
+      "weight": 0.5,
+      "polarity_preference": "negative",
+      "parameters": {
+        "plane_method": "least_squares",
+        "outlier_threshold": 2.0,
+        "edge_weight": 0.7,
+        "smoothing_radius": 1.2,
+        "adaptive_fitting": true
+      }
+    },
+    "VolumeDistribution": {
+      "enabled": true,
+      "weight": 1.0,
+      "polarity_preference": "positive",
+      "parameters": {
+        "num_slices": 10,
+        "concentration_threshold": 0.6,
+        "min_base_fraction": 0.3,
+        "height_method": "percentile_95"
+      }
+    }
+  },
+  "aggregation_method": "streaming",
+  "parallel_execution": true,
+  "max_workers": 6,
+  "enable_refinement": true,
+  "max_refinement_attempts": 3,
+  "optimization_history": [],
+  "performance_metrics": {},
+  "last_used": null,
+  "use_count": 0
+}
