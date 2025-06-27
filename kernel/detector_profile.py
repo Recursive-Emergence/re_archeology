@@ -34,6 +34,8 @@ class StructureType(Enum):
     GEOGLYPH = "geoglyph"
     ROAD = "road"
     CANAL = "canal"
+    CITADEL = "citadel"
+    MOUND = "mound"
     GENERIC = "generic"
 
 
@@ -69,6 +71,14 @@ class FeatureConfiguration:
     parameters: Dict[str, Any] = field(default_factory=dict)
     polarity_preference: Optional[str] = None  # "positive", "negative", or None for dynamic
     confidence_threshold: float = 0.0  # Minimum confidence to include this feature
+    
+    def __init__(self, enabled: bool = True, weight: float = 1.0, parameters: Dict[str, Any] = None, polarity_preference: Optional[str] = None, confidence_threshold: float = 0.0, polarity: Optional[str] = None, **kwargs):
+        self.enabled = enabled
+        self.weight = weight
+        self.parameters = parameters if parameters is not None else {}
+        # Accept both 'polarity' and 'polarity_preference' for compatibility with JSON
+        self.polarity_preference = polarity_preference if polarity_preference is not None else polarity
+        self.confidence_threshold = confidence_threshold
     
     def __post_init__(self):
         """Validate configuration parameters"""
@@ -163,6 +173,12 @@ class DetectorProfile:
     performance_metrics: Dict[str, float] = field(default_factory=dict)
     last_used: Optional[str] = None
     use_count: int = 0
+    
+    # --- Add support for new JSON fields ---
+    environmental_context: Optional[Dict[str, Any]] = field(default_factory=dict)
+    archaeological_parameters: Optional[Dict[str, Any]] = field(default_factory=dict)
+    detection_priorities: Optional[Dict[str, Any]] = field(default_factory=dict)
+    validation_notes: Optional[Dict[str, Any]] = field(default_factory=dict)
     
     def get_enabled_features(self) -> Dict[str, FeatureConfiguration]:
         """Get only the enabled feature configurations"""

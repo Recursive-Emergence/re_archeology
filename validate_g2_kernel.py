@@ -56,6 +56,7 @@ _DUTCH_WINDMILL_LOCATIONS_DATA = [
     ("Urban Area Amsterdam 2",   52.483185, 4.810733, 0, "negative"),
     ("Urban Area Amsterdam 3",  52.483814, 4.803359, 0, "negative"),
     ("Urban Area Amsterdam 4",  52.483903, 4.806456, 0, "negative"),
+    ("Urban Area Amsterdam 5",  52.483903, 4.801294, 0, "negative"),
     ("Some Trees Area", 52.628085, 4.762604, 0, "negative"),
     ("Rural Area Near Utrecht", 52.483275, 4.803802, 0, "negative"),
     ("Open Field Near Rotterdam", 52.483185, 4.806899, 0, "negative"),
@@ -728,32 +729,40 @@ Average Processing Time: {metrics['avg_processing_time']:.3f}s
     def get_valid_detection_patch(self, site: ValidationSite) -> Optional[np.ndarray]:
         """
         Fetch LiDAR patch and extract a valid apex-centered region for detection.
-        If the region would be clipped, attempt to fetch a larger patch (if possible).
+        If the region would be clipped, attempt to fetch a larger patch (if possible),
+        and after a few size increases, try shifting the patch center in a dense grid in different directions.
         Returns None if a valid region cannot be extracted.
         """
         patch_edge_size_m = 40  # Default patch size
         target_resolution_m = 0.5
         detection_radius_m = getattr(self.dutch_profile.geometry, 'detection_radius_m', 15.0)
-        max_attempts = 2
+        max_attempts = 5
+        # Use a dense grid of shifts: -6 to +6 meters in 2m steps (dy, dx)
+        shift_range = range(-6, 7, 2)
+        shift_offsets = [(dy, dx) for dy in shift_range for dx in shift_range]
         for attempt in range(max_attempts):
-            lidar_patch_result = LidarMapFactory.get_patch(
-                lat=site.lat,
-                lon=site.lon,
-                size_m=patch_edge_size_m,
-                preferred_resolution_m=target_resolution_m,
-                preferred_data_type="DSM"
-            )
-            if lidar_patch_result is None or lidar_patch_result.data is None:
-                logger.error(f"Failed to fetch LiDAR data for {site.name} (attempt {attempt+1})")
-                return None
-            elevation = lidar_patch_result.data
-            region = self.extract_apex_centered_region(elevation, detection_radius_m, target_resolution_m)
-            if region is not None:
-                return region
-            else:
-                logger.warning(f"Apex-centered region would be clipped for {site.name} (attempt {attempt+1}). Trying larger patch.")
-                patch_edge_size_m += 10  # Increase patch size and try again
-        logger.error(f"Could not extract valid apex-centered region for {site.name} after {max_attempts} attempts.")
+            current_patch_size = patch_edge_size_m + attempt * 10
+            for dy, dx in shift_offsets:
+                shifted_lat = site.lat + (dy / 111111)  # Approximate meters to degrees latitude
+                shifted_lon = site.lon + (dx / (111111 * np.cos(np.radians(site.lat))))
+                lidar_patch_result = LidarMapFactory.get_patch(
+                    lat=shifted_lat,
+                    lon=shifted_lon,
+                    size_m=current_patch_size,
+                    preferred_resolution_m=target_resolution_m,
+                    preferred_data_type="DSM"
+                )
+                if lidar_patch_result is None or lidar_patch_result.data is None:
+                    logger.error(f"Failed to fetch LiDAR data for {site.name} (attempt {attempt+1}, shift {dy},{dx})")
+                    continue
+                elevation = lidar_patch_result.data
+                region = self.extract_apex_centered_region(elevation, detection_radius_m, target_resolution_m)
+                if region is not None:
+                    logger.info(f"Valid apex-centered region found for {site.name} (attempt {attempt+1}, shift {dy},{dx})")
+                    return region
+                else:
+                    logger.warning(f"Apex-centered region would be clipped for {site.name} (attempt {attempt+1}, shift {dy},{dx}). Trying next.")
+        logger.error(f"Could not extract valid apex-centered region for {site.name} after {max_attempts} attempts with dense shifts.")
         return None
 
 def main():

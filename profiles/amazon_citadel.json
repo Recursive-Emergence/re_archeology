@@ -1,7 +1,7 @@
 {
   "name": "Amazon Citadel Detector",
   "description": "Optimized profile for detecting fortified settlements and defensive earthworks in Amazonian archaeological contexts",
-  "structure_type": "amazon_citadel",
+  "structure_type": "citadel",
   "version": "1.0",
   "created_by": "Archaeological G₂ System",
   "geometry": {
@@ -14,7 +14,8 @@
       180.0,
       180.0
     ],
-    "aspect_ratio_tolerance": 0.6
+    "aspect_ratio_tolerance": 0.6,
+    "detection_center": "apex"
   },
   "thresholds": {
     "detection_threshold": 0.4,
@@ -24,82 +25,84 @@
     "max_modules_for_efficiency": 7,
     "uncertainty_tolerance": 0.25
   },
-  "feature_overrides": {
+  "features": {
     "histogram": {
-      "similarity_method": "correlation",
-      "bin_count": 35,
-      "edge_enhancement": true,
-      "adaptive_binning": true,
-      "noise_reduction": true,
-      "min_variation": 0.2,
-      "polarity_preference": "positive"
+      "weight": 1.1,
+      "polarity": "positive",
+      "params": {
+        "similarity_method": "correlation",
+        "bin_count": 35,
+        "edge_enhancement": true,
+        "adaptive_binning": true,
+        "noise_reduction": true,
+        "min_variation": 0.2
+      }
     },
     "volume": {
-      "volume_method": "compound",
-      "base_volume_normalization": 350.0,
-      "base_prominence_normalization": 3.5,
-      "border_width_factor": 0.2,
-      "adaptive_scaling": true,
-      "concentration_bonus": 1.3,
-      "relative_prominence_weight": 0.7,
-      "min_volume_threshold": 15.0,
-      "auto_range_adaptation": true,
-      "percentile_normalization": true,
-      "polarity_preference": "positive"
+      "weight": 1.4,
+      "polarity": "positive",
+      "params": {
+        "volume_method": "compound",
+        "base_volume_normalization": 350.0,
+        "base_prominence_normalization": 3.5,
+        "border_width_factor": 0.2,
+        "adaptive_scaling": true,
+        "concentration_bonus": 1.3,
+        "relative_prominence_weight": 0.7,
+        "min_volume_threshold": 15.0,
+        "auto_range_adaptation": true,
+        "percentile_normalization": true
+      }
     },
     "dropoff": {
-      "edge_method": "compound_gradient",
-      "smoothing_radius": 2.0,
-      "adaptive_threshold": true,
-      "directional_analysis": true,
-      "edge_enhancement": true,
-      "sigma_inner_factor": 0.5,
-      "sigma_outer_factor": 2.0,
-      "polarity_preference": "positive"
+      "weight": 1.2,
+      "polarity": "positive",
+      "params": {
+        "edge_method": "compound_gradient",
+        "smoothing_radius": 2.0,
+        "adaptive_threshold": true,
+        "directional_analysis": true,
+        "edge_enhancement": true,
+        "sigma_inner_factor": 0.5,
+        "sigma_outer_factor": 2.0
+      }
     },
     "compactness": {
-      "shape_method": "polygonal",
-      "n_angles": 48,
-      "min_samples": 20,
-      "symmetry_factor": 0.5,
-      "adaptive_radius": true,
-      "fourier_analysis": true,
-      "edge_detection": true,
-      "noise_tolerance": 0.15,
-      "polarity_preference": "neutral"
+      "weight": 0.6,
+      "polarity": "neutral",
+      "params": {
+        "shape_method": "polygonal",
+        "n_angles": 48,
+        "min_samples": 20,
+        "symmetry_factor": 0.5,
+        "adaptive_radius": true,
+        "fourier_analysis": true,
+        "edge_detection": true,
+        "noise_tolerance": 0.15
+      }
     },
     "entropy": {
-      "entropy_method": "multiscale",
-      "spatial_bins": 24,
-      "edge_weight": 0.9,
-      "normalization": "adaptive",
-      "adaptive_threshold": true,
-      "polarity_preference": "negative"
+      "weight": 2.8,
+      "polarity": "negative",
+      "params": {
+        "entropy_method": "multiscale",
+        "spatial_bins": 24,
+        "edge_weight": 0.9,
+        "normalization": "adaptive",
+        "adaptive_threshold": true
+      }
     },
     "planarity": {
-      "plane_method": "segmented",
-      "outlier_threshold": 3.0,
-      "edge_weight": 0.4,
-      "smoothing_radius": 2.5,
-      "adaptive_fitting": true,
-      "polarity_preference": "negative"
+      "weight": 0.4,
+      "polarity": "negative",
+      "params": {
+        "plane_method": "segmented",
+        "outlier_threshold": 3.0,
+        "edge_weight": 0.4,
+        "smoothing_radius": 2.5,
+        "adaptive_fitting": true
+      }
     }
-  },
-  "polarity_preferences": {
-    "histogram": "positive",
-    "volume": "positive",
-    "dropoff": "positive",
-    "compactness": "neutral",
-    "entropy": "negative",
-    "planarity": "negative"
-  },
-  "feature_weights": {
-    "histogram": 1.1,
-    "volume": 1.4,
-    "dropoff": 1.2,
-    "compactness": 0.6,
-    "entropy": 2.8,
-    "planarity": 0.4
   },
   "environmental_context": {
     "terrain_type": "strategic_highland",
@@ -110,12 +113,27 @@
   },
   "archaeological_parameters": {
     "cultural_period": "late_pre_columbian",
-    "settlement_type": ["fortified", "elite_residential", "ceremonial_complex"],
-    "typical_height_range_m": [2.0, 15.0],
-    "typical_diameter_range_m": [50.0, 400.0],
+    "settlement_type": [
+      "fortified",
+      "elite_residential",
+      "ceremonial_complex"
+    ],
+    "typical_height_range_m": [
+      2.0,
+      15.0
+    ],
+    "typical_diameter_range_m": [
+      50.0,
+      400.0
+    ],
     "shape_variability": "moderate",
     "preservation_quality": "good_to_excellent",
-    "defensive_features": ["walls", "ditches", "palisades", "terraces"]
+    "defensive_features": [
+      "walls",
+      "ditches",
+      "palisades",
+      "terraces"
+    ]
   },
   "detection_priorities": {
     "defensive_architecture": 0.9,
@@ -131,9 +149,20 @@
   "optimization_history": [],
   "performance_metrics": {},
   "validation_notes": {
-    "known_sites": ["Monte_Alegre", "Marajoara_complexes"],
-    "false_positive_patterns": ["natural_mesas", "mining_terraces", "modern_clearings"],
-    "challenging_contexts": ["secondary_growth", "cattle_ranching", "erosion_damage"]
+    "known_sites": [
+      "Monte_Alegre",
+      "Marajoara_complexes"
+    ],
+    "false_positive_patterns": [
+      "natural_mesas",
+      "mining_terraces",
+      "modern_clearings"
+    ],
+    "challenging_contexts": [
+      "secondary_growth",
+      "cattle_ranching",
+      "erosion_damage"
+    ]
   },
   "last_used": null,
   "use_count": 0
