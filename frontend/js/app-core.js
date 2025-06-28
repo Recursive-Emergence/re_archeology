@@ -446,13 +446,110 @@ export class REArchaeologyApp {
             }
         }
     }
-    async initializeAuth() { /* implement as needed */ }
-    updateAuthUI() { /* implement as needed */ }
-    showLoginSection() { /* implement as needed */ }
-    async handleGoogleLogin(response) { /* implement as needed */ }
-    async validateStoredToken(token) { /* implement as needed */ }
-    setupGoogleAuth() { /* implement as needed */ }
-    async handleLogout() { /* implement as needed */ }
+    async initializeAuth() {
+        // Set up Google Auth and check for existing session
+        this.setupGoogleAuth();
+        const storedToken = localStorage.getItem('google_id_token');
+        if (storedToken) {
+            const valid = await this.validateStoredToken(storedToken);
+            if (valid) {
+                this.accessToken = storedToken;
+                this.currentUser = valid;
+                this.updateAuthUI();
+                return;
+            } else {
+                localStorage.removeItem('google_id_token');
+            }
+        }
+        this.showLoginSection();
+    }
+
+    setupGoogleAuth() {
+        // Attach Google login callback
+        window.handleGoogleLogin = this.handleGoogleLogin.bind(this);
+        // Explicitly render the Google button if needed
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+            window.google.accounts.id.initialize({
+                client_id: window.AppConfig.googleClientId,
+                callback: window.handleGoogleLogin,
+                auto_select: false
+            });
+            window.google.accounts.id.renderButton(
+                document.querySelector('.g_id_signin'),
+                { theme: 'outline', size: 'medium' }
+            );
+        } else {
+            // If Google script hasn't loaded yet, try again shortly
+            setTimeout(() => this.setupGoogleAuth(), 500);
+        }
+    }
+
+    async handleGoogleLogin(response) {
+        if (!response || !response.credential) {
+            window.Logger?.app('error', 'Google login failed: No credential');
+            return;
+        }
+        const idToken = response.credential;
+        // Optionally validate token with backend here
+        const valid = await this.validateStoredToken(idToken);
+        if (valid) {
+            this.accessToken = idToken;
+            this.currentUser = valid;
+            localStorage.setItem('google_id_token', idToken);
+            this.updateAuthUI();
+            // Force UI update in case DOM is not refreshed
+            setTimeout(() => this.updateAuthUI(), 100);
+        } else {
+            window.Logger?.app('error', 'Google token validation failed');
+            this.showLoginSection();
+        }
+    }
+
+    async validateStoredToken(token) {
+        // For demo: decode token client-side (in production, validate with backend)
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            if (payload && payload.email) {
+                return { name: payload.name, email: payload.email, picture: payload.picture };
+            }
+        } catch (e) {
+            window.Logger?.app('error', 'Invalid Google token');
+        }
+        return null;
+    }
+
+    updateAuthUI() {
+        // Hide login, show chat input, show user profile
+        document.getElementById('login-section').style.display = 'none';
+        document.getElementById('chat-input-form').style.display = '';
+        document.getElementById('chat-input').disabled = false;
+        document.getElementById('send-btn').disabled = false;
+        const user = this.currentUser;
+        if (user) {
+            document.getElementById('user-profile').style.display = '';
+            document.getElementById('user-avatar').src = user.picture || '';
+            document.getElementById('user-name').textContent = user.name || '';
+            document.getElementById('user-email').textContent = user.email || '';
+            document.getElementById('logout-btn').style.display = '';
+            document.getElementById('logout-btn').onclick = () => this.handleLogout();
+        }
+    }
+
+    showLoginSection() {
+        document.getElementById('login-section').style.display = '';
+        document.getElementById('chat-input-form').style.display = 'none';
+        document.getElementById('chat-input').disabled = true;
+        document.getElementById('send-btn').disabled = true;
+        document.getElementById('user-profile').style.display = 'none';
+    }
+
+    async handleLogout() {
+        localStorage.removeItem('google_id_token');
+        this.accessToken = null;
+        this.currentUser = null;
+        this.showLoginSection();
+    }
+
     formatStructureTypeName(structureType) {
         const typeMap = {
             'windmill': 'Windmill Structures',
