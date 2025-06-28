@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 import asyncio
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 import os
 import json
@@ -15,8 +15,16 @@ from backend.api.routers.discovery_utils import get_available_structure_types, g
 from backend.api.routers.discovery_models import SessionIdRequest
 from backend.api.routers.discovery_sessions import active_sessions, _active_detection_tasks, _session_tile_data
 from backend.api.routers.discovery_connections import discovery_manager
+from lidar_factory.factory import LidarMapFactory
 
 router = APIRouter()
+
+# Global variable to store the most recent patch info
+current_patch_info = None  # {"resolution": "0.5m", "resolution_m": 0.5, "resolution_description": "High resolution", "source_dataset": "Dataset name", "lat": 52.4751, "lon": 4.8156, "timestamp": "2023-10-01T12:00:00Z"}
+
+def get_app_root():
+    # Use /app if it exists (Docker/Cloud), else use current working directory (local)
+    return "/app" if os.path.exists("/app") else os.getcwd()
 
 # --- LiDAR Scan Endpoints ---
 
@@ -30,7 +38,6 @@ async def start_lidar_scan(
     Streams elevation data patches without structure detection.
     """
     try:
-        from lidar_factory.factory import LidarMapFactory
         import uuid
         from datetime import datetime, timezone
         import numpy as np
@@ -42,7 +49,8 @@ async def start_lidar_scan(
         tile_size_m = 40
         prefer_high_resolution = config.get('prefer_high_resolution', False)
         enable_detection = config.get('enable_detection', False)
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        # Use dynamic app_root
+        app_root = get_app_root()
         import logging
         logger = logging.getLogger(__name__)
         available_types, default_type = get_available_structure_types(app_root, logger)
@@ -86,7 +94,6 @@ async def start_lidar_scan(
             "status": "started",
             "message": f"LiDAR scan started for {scan_grid_size}x{scan_grid_size} tiles" + (" with detection" if enable_detection else ""),
             "total_tiles": scan_grid_size * scan_grid_size,
-            "actual_resolution": f"{preferred_resolution}m",
             "enable_detection": enable_detection,
             "structure_type": structure_type
         }
@@ -128,7 +135,6 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
     Background task to perform tile-by-tile LiDAR scanning using LidarFactory
     """
     try:
-        from lidar_factory.factory import LidarMapFactory
         import numpy as np
         from datetime import datetime, timezone
         config = session_info["config"]
@@ -140,7 +146,8 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         streaming_mode = config.get('streaming_mode', True)
         preferred_resolution = session_info.get('preferred_resolution', 1.0)
         enable_detection = config.get('enable_detection', False)
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        # Use dynamic app_root
+        app_root = get_app_root()
         import logging
         logger = logging.getLogger(__name__)
         available_types, default_type = get_available_structure_types(app_root, logger)
@@ -197,6 +204,19 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         preferred_resolution_m=preferred_resolution,
                         preferred_data_type=data_type
                     )
+                    # --- Update global current_patch_info with latest patch info ---
+                    if result is not None:
+                        global current_patch_info
+                        current_patch_info = {
+                            "resolution": f"{result.resolution_m}m",
+                            "resolution_m": result.resolution_m,
+                            "resolution_description": getattr(result, "resolution_description", None),
+                            "is_high_resolution": getattr(result, "is_high_resolution", None),
+                            "source_dataset": getattr(result, "source_dataset", None),
+                            "lat": tile_lat,
+                            "lon": tile_lon,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
                     elevation_data = None
                     if result is not None:
                         elevation_data = result.data
@@ -609,7 +629,7 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
 async def get_discovered_sites():
     """Return the list of discovered archaeological sites from lattice/discovered.json"""
     try:
-        app_root = "/media/im3/plus/lab4/RE/re_archaeology"
+        app_root = get_app_root()
         discovered_path = os.path.join(app_root, "lattice", "discovered.json")
         if not os.path.exists(discovered_path):
             return JSONResponse(status_code=404, content={"error": "discovered.json not found"})
@@ -624,3 +644,30 @@ async def get_discovered_sites():
         logger = logging.getLogger(__name__)
         logger.error(f"❌ Failed to load discovered sites: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.get("/api/resolution")
+async def get_lidar_resolution(
+    lat: float = Query(...),
+    lon: float = Query(...),
+    radius_km: float = Query(1.0),
+    data_type: str = Query("DSM")
+):
+    # Return the most recent patch info (global)
+    if current_patch_info is not None and current_patch_info.get('resolution') is not None:
+        return {
+            'success': True,
+            'resolution': current_patch_info['resolution'],
+            'resolution_m': current_patch_info['resolution_m'],
+            'resolution_description': current_patch_info['resolution_description'],
+            'source_dataset': current_patch_info['source_dataset'],
+            'message': 'Resolution from most recent scan.'
+        }
+    else:
+        return {
+            'success': False,
+            'resolution': None,
+            'resolution_m': None,
+            'resolution_description': None,
+            'source_dataset': None,
+            'message': 'No scan has been run yet, resolution unavailable.'
+        }

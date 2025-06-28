@@ -1,3 +1,5 @@
+import { calculateAreaBounds } from './utils.js';
+
 // Map setup, layers, events, scan area management
 export function setupMap(app) {
     const container = document.getElementById('mapContainer');
@@ -56,7 +58,22 @@ export function setupMapEvents(app) {
     });
 }
 
-export function selectScanArea(app, lat, lon, radiusKm = 1) {
+// Fetch real resolution from backend for a given area
+async function fetchResolutionForArea(lat, lon, radiusKm) {
+    try {
+        // Adjust the URL and params as needed for your backend API
+        const response = await fetch(`/api/resolution?lat=${lat}&lon=${lon}&radius_km=${radiusKm}`);
+        if (!response.ok) throw new Error('Failed to fetch resolution');
+        const data = await response.json();
+        console.log('Resolution API response:', data); // Debug log
+        return data.resolution || null;
+    } catch (err) {
+        console.warn('Could not fetch real resolution:', err);
+        return null;
+    }
+}
+
+export async function selectScanArea(app, lat, lon, radiusKm = 1) {
     window.Logger?.map('info', 'Setting scan area', { lat, lon, radiusKm });
     if (app.scanAreaRectangle) app.map.removeLayer(app.scanAreaRectangle);
     if (app.scanAreaLabel) app.map.removeLayer(app.scanAreaLabel);
@@ -96,6 +113,10 @@ export function selectScanArea(app, lat, lon, radiusKm = 1) {
     app.selectedArea = { lat, lon, radius: radiusKm, bounds };
     if (app.updateButtonStates) app.updateButtonStates();
     if (app.updateUrlWithCoordinates) app.updateUrlWithCoordinates(lat, lon);
+    // Fetch and update real resolution
+    updateScanAreaLabel(app, 'Determining...');
+    const realResolution = await fetchResolutionForArea(lat, lon, radiusKm);
+    updateScanAreaLabel(app, realResolution);
 }
 
 export function zoomToScanArea(app) {
@@ -133,15 +154,6 @@ export function calculateScanParameters(app) {
     } else {
         return { tileSize: 128, requestHighRes: false };
     }
-}
-
-export function calculateAreaBounds(lat, lon, radiusKm) {
-    const radiusInDegreesLat = radiusKm / 111.32;
-    const radiusInDegreesLon = radiusKm / (111.32 * Math.cos(lat * Math.PI / 180));
-    return [
-        [lat - radiusInDegreesLat, lon - radiusInDegreesLon],
-        [lat + radiusInDegreesLat, lon + radiusInDegreesLon]
-    ];
 }
 
 function calculateOptimalBorderWeight(app) {

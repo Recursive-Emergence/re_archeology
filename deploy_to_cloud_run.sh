@@ -50,6 +50,12 @@ if [ ! -d "profiles" ]; then
     exit 1
 fi
 
+# Check that lattice/ directory exists
+if [ ! -d "lattice" ]; then
+    echo "❌ Error: Required directory not found: lattice/"
+    exit 1
+fi
+
 echo "✅ All required files and directories found"
 
 echo "🚀 Starting deployment to Google Cloud Run..."

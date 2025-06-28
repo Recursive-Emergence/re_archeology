@@ -614,8 +614,8 @@ class DetectorProfileManager:
     def __init__(self, profiles_dir: str = "profiles", templates_dir: str = "templates"):
         self.profiles_dir = Path(profiles_dir)
         self.templates_dir = Path(templates_dir)
-        self.profiles_dir.mkdir(exist_ok=True)
-        self.templates_dir.mkdir(exist_ok=True)
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        self.templates_dir.mkdir(parents=True, exist_ok=True)
         self._profiles_cache: Dict[str, DetectorProfile] = {}
     
     def save_profile(self, profile: DetectorProfile, filename: Optional[str] = None) -> str:

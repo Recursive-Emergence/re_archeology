@@ -1,4 +1,6 @@
 // WebSocket connection and message handling
+let lidarResolutionFetched = false;
+
 export function connectWebSocket(app) {
     try {
         if (app.websocket) {
@@ -44,7 +46,14 @@ export function handleWebSocketMessage(app, data) {
     if (window.Logger) {
         window.Logger.websocket('debug', `Message received: ${data.type}`, { keys: Object.keys(data) });
         if (data.type === 'lidar_tile') {
-            // ...handle lidar_tile if needed...
+            // Fetch and update real resolution only on first lidar_tile
+            if (!lidarResolutionFetched && app.selectedArea) {
+                lidarResolutionFetched = true;
+                import('../js/map.js').then(({ fetchResolutionForArea, updateScanAreaLabel }) => {
+                    fetchResolutionForArea(data.center_lat, data.center_lon, app.selectedArea.radius)
+                        .then(res => updateScanAreaLabel(app, res));
+                });
+            }
         }
     }
     if (data.type === 'patch_result') {
