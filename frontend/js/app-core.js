@@ -36,7 +36,79 @@ export class REArchaeologyApp {
         this.layers = { patches: null, detections: null, animations: null };
         this.patches = new Map();
         this.detections = [];
+        // Add a layer group for discovered sites
+        this.discoveredSitesLayer = null;
         window.Logger?.app('info', 'RE-Archaeology App initialized');
+    }
+
+    async loadDiscoveredSites(retryCount = 0) {
+        if (!this.map || !window.L) {
+            if (retryCount < 5) {
+                window.Logger?.app('warn', 'Map or Leaflet not ready, retrying discovered sites load...');
+                setTimeout(() => this.loadDiscoveredSites(retryCount + 1), 500);
+            } else {
+                window.Logger?.app('error', 'Map or Leaflet not available after retries, cannot show discovered sites.');
+            }
+            return;
+        }
+        try {
+            window.Logger?.app('info', 'Loading discovered sites...');
+            const response = await fetch('/api/v1/discovery/discovered_sites', {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            const data = await response.json();
+            console.log('Discovered sites raw data:', data);
+            if (!Array.isArray(data)) {
+                window.Logger?.app('warn', 'Discovered sites response is not an array');
+                return;
+            }
+            // Remove old layer if exists
+            if (this.discoveredSitesLayer && this.map) {
+                this.map.removeLayer(this.discoveredSitesLayer);
+            }
+            // Create a new layer group
+            this.discoveredSitesLayer = window.L.layerGroup();
+            const markerLatLngs = [];
+            data.forEach(site => {
+                if (typeof site.latitude !== 'number' || typeof site.longitude !== 'number') return;
+                // Log coordinates for debugging
+                console.log('Discovered site marker:', site.latitude, site.longitude, site.name || site.type || 'Discovered Site');
+                // Use a custom emoji marker (🏺) for visibility
+                const emojiIcon = window.L.divIcon({
+                    html: '<span style="font-size: 2rem; line-height: 2rem;">🏺</span>',
+                    className: 'discovered-site-emoji-marker',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16],
+                    popupAnchor: [0, -16]
+                });
+                const marker = window.L.marker([site.latitude, site.longitude], {
+                    icon: emojiIcon,
+                    title: site.name || site.type || 'Discovered Site'
+                });
+                let popupHtml = `<b>${site.name ? this.escapeHtml(site.name) : 'Discovered Site'}</b>`;
+                if (site.type) popupHtml += `<br><i>${this.escapeHtml(site.type)}</i>`;
+                if (site.description) popupHtml += `<br>${this.escapeHtml(site.description)}`;
+                if (site.country) popupHtml += `<br><small>${this.escapeHtml(site.country)}</small>`;
+                marker.bindPopup(popupHtml);
+                this.discoveredSitesLayer.addLayer(marker);
+                markerLatLngs.push([site.latitude, site.longitude]);
+                window.Logger?.app('debug', `Added marker for site: ${site.name || site.type || 'Discovered Site'} at [${site.latitude}, ${site.longitude}]`);
+            });
+            this.discoveredSitesLayer.addTo(this.map);
+            // Fit map to bounds if there are markers
+            if (markerLatLngs.length > 0) {
+                const bounds = window.L.latLngBounds(markerLatLngs);
+                this.map.fitBounds(bounds, { padding: [40, 40] });
+            }
+            window.Logger?.app('info', `Loaded ${data.length} discovered sites`);
+        } catch (error) {
+            window.Logger?.app('error', `Failed to load discovered sites: ${error.message}`);
+            console.error('❌ Discovered sites loading error:', error);
+        }
     }
 
     async waitForDOM() {
@@ -60,6 +132,8 @@ export class REArchaeologyApp {
             this.handleUrlCoordinates();
             this.setupDefaultScanArea();
             await this.loadAvailableStructureTypes?.();
+            // Load discovered sites after map is ready
+            await this.loadDiscoveredSites();
             setupUI(this);
             const enableDetection = document.getElementById('enableDetection')?.checked || false;
             updateScanButtonText(this, enableDetection);
@@ -310,6 +384,11 @@ export class REArchaeologyApp {
         Object.values(this.layers).forEach(layer => layer?.clearLayers?.());
         this.patches.clear();
         this.currentLidarSession = null;
+        // Remove discovered sites layer from map
+        if (this.discoveredSitesLayer && this.map) {
+            this.map.removeLayer(this.discoveredSitesLayer);
+            this.discoveredSitesLayer = null;
+        }
         this.updateScanAreaLabel?.();
     }
 
@@ -318,7 +397,12 @@ export class REArchaeologyApp {
     addChatMessage(role, content) { /* implement as needed */ }
     showTypingIndicator() { /* implement as needed */ }
     hideTypingIndicator() { /* implement as needed */ }
-    escapeHtml(text) { /* implement as needed */ }
+    escapeHtml(text) {
+        if (!text) return '';
+        return String(text).replace(/[&<>"]/g, function (c) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+        });
+    }
     async loadAvailableStructureTypes() {
         try {
             window.Logger?.app('info', 'Loading available structure types...');

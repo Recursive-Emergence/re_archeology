@@ -1,0 +1,13 @@
+[
+    { "latitude": -14.9898697, "longitude": -64.5968503, "name": "Cotoca", "country": "Bolivia" },
+    { "latitude": -15.2012842, "longitude": -64.4677797, "name": "Landívar", "country": "Bolivia" },
+    { "latitude": -12.558333, "longitude": -53.111111, "name": "Kuhikugu", "country": "Brazil" },
+    { "latitude": 18.61136604220061, "longitude": -89.55191178650831, "name": "Calakmul", "country": "Mexico" },
+    { "latitude": 17.248280164331604, "longitude": -89.14352060761487, "name": "El Pilar", "country": "Mexico" },
+    { "latitude": 19.692181814056454, "longitude": -98.84543537868696, "name": "Teotihuacan", "country": "Mexico" },
+    { "latitude": -2.3099356769569743, "longitude": -78.10998659241247, "name": "Upano Valley", "country": "Ecuador" },
+    { "latitude": 39.703242, "longitude": 68.265728, "name": "Tugunbulak", "country": "Uzbekistan" },
+    { "latitude": 39.696297, "longitude": 68.320786, "name": "Tashbulak", "country": "Uzbekistan" },
+    { "latitude": 52.47505310183309, "longitude": 4.8177388422949585, "name": "De Kat Windmill", "country": "Netherlands" },
+    { "latitude": 52.47590104112108, "longitude": 4.817647238879872, "name": "De Zoeker Windmill", "country": "Netherlands" }
+]
