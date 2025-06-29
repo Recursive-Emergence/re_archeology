@@ -4,16 +4,16 @@ let lidarResolutionFetched = false;
 export function connectWebSocket(app) {
     try {
         if (app.websocket) {
-            console.log('🔌 Closing existing WebSocket connection');
+            // console.log('🔌 Closing existing WebSocket connection'); // Suppressed for clean UI
             app.websocket.close();
             app.websocket = null;
         }
         const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/ws/discovery`;
-        console.log('🔌 Connecting to WebSocket:', wsUrl);
+        // console.log('🔌 Connecting to WebSocket:', wsUrl); // Suppressed for clean UI
         app.websocket = new WebSocket(wsUrl);
         app.websocket.onopen = () => {
-            console.log('✅ WebSocket connected successfully');
+            // console.log('✅ WebSocket connected successfully'); // Suppressed for clean UI
             app.websocket.send(JSON.stringify({
                 type: 'ping',
                 timestamp: new Date().toISOString()
@@ -24,21 +24,21 @@ export function connectWebSocket(app) {
                 const data = JSON.parse(event.data);
                 handleWebSocketMessage(app, data);
             } catch (error) {
-                console.error('❌ WebSocket message error:', error);
+                // console.error('❌ WebSocket message error:', error); // Suppressed for clean UI
             }
         };
         app.websocket.onclose = (event) => {
-            console.log('🔌 WebSocket disconnected:', event.code, event.reason);
+            // console.log('🔌 WebSocket disconnected:', event.code, event.reason); // Suppressed for clean UI
             app.websocket = null;
             if (app.currentLidarSession) {
                 setTimeout(() => connectWebSocket(app), 2000);
             }
         };
         app.websocket.onerror = (error) => {
-            console.error('❌ WebSocket error:', error);
+            // console.error('❌ WebSocket error:', error); // Suppressed for clean UI
         };
     } catch (error) {
-        console.error('❌ Failed to connect WebSocket:', error);
+        // console.error('❌ Failed to connect WebSocket:', error); // Suppressed for clean UI
     }
 }
 
@@ -57,11 +57,11 @@ export function handleWebSocketMessage(app, data) {
         }
     }
     if (data.type === 'patch_result') {
-        console.log('[DEBUG] patch_result message:', data);
+        // console.log('[DEBUG] patch_result message:', data); // Suppressed for clean UI
         app.handlePatchResult?.(data.patch || data);
     }
     if (data.type === 'detection_result') {
-        console.log('[DEBUG] detection_result message:', data);
+        // console.log('[DEBUG] detection_result message:', data); // Suppressed for clean UI
         app.handleDetectionResult?.(data);
     }
     switch (data.type) {

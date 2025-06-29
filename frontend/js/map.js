@@ -17,22 +17,24 @@ export function setupMap(app) {
         center: [52.4751, 4.8156],
         zoom: 13,
         zoomControl: true,
-        attributionControl: true
+        attributionControl: true,
+        minZoom: 3,
+        maxZoom: 19
     });
     addBaseLayers(app);
     setupMapEvents(app);
-    window.Logger?.map('info', 'Map initialization complete');
 }
 
 function addBaseLayers(app) {
+    const minZoom = 3, maxZoom = 19;
     const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles © Esri', maxZoom: 19
+        attribution: 'Tiles © Esri', minZoom, maxZoom
     }).addTo(app.map);
     const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors', maxZoom: 19
+        attribution: '© OpenStreetMap contributors', minZoom, maxZoom
     });
     const terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenTopoMap contributors', maxZoom: 17
+        attribution: '© OpenTopoMap contributors', minZoom, maxZoom: 17
     });
     L.control.layers({
         '🛰️ Satellite': satellite,
@@ -43,7 +45,6 @@ function addBaseLayers(app) {
 }
 
 export function setupLayers(app) {
-    window.Logger?.map('info', 'Initializing layer groups...');
     app.layers.patches = L.layerGroup().addTo(app.map);
     app.layers.detections = L.layerGroup().addTo(app.map);
     app.layers.animations = L.layerGroup().addTo(app.map);
@@ -52,7 +53,6 @@ export function setupLayers(app) {
 export function setupMapEvents(app) {
     app.map.on('click', (e) => {
         if (e.originalEvent.ctrlKey && !app.isScanning) {
-            window.Logger?.map('info', 'Ctrl+Click detected, setting scan area');
             selectScanArea(app, e.latlng.lat, e.latlng.lng);
         }
     });
@@ -65,16 +65,13 @@ async function fetchResolutionForArea(lat, lon, radiusKm) {
         const response = await fetch(`/api/resolution?lat=${lat}&lon=${lon}&radius_km=${radiusKm}`);
         if (!response.ok) throw new Error('Failed to fetch resolution');
         const data = await response.json();
-        console.log('Resolution API response:', data); // Debug log
         return data.resolution || null;
     } catch (err) {
-        console.warn('Could not fetch real resolution:', err);
         return null;
     }
 }
 
 export async function selectScanArea(app, lat, lon, radiusKm = 1) {
-    window.Logger?.map('info', 'Setting scan area', { lat, lon, radiusKm });
     if (app.scanAreaRectangle) app.map.removeLayer(app.scanAreaRectangle);
     if (app.scanAreaLabel) app.map.removeLayer(app.scanAreaLabel);
     const bounds = calculateAreaBounds(lat, lon, radiusKm);
@@ -112,7 +109,13 @@ export async function selectScanArea(app, lat, lon, radiusKm = 1) {
     app.updateScanAreaBorder = updateBorder;
     app.selectedArea = { lat, lon, radius: radiusKm, bounds };
     if (app.updateButtonStates) app.updateButtonStates();
-    if (app.updateUrlWithCoordinates) app.updateUrlWithCoordinates(lat, lon);
+    // Only update URL with zoom if not present in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (!urlParams.has('zoom') && app.updateUrlWithCoordinates) {
+        app.updateUrlWithCoordinates(lat, lon, app.map.getZoom());
+    } else if (app.updateUrlWithCoordinates) {
+        app.updateUrlWithCoordinates(lat, lon, urlParams.get('zoom'));
+    }
     // Fetch and update real resolution
     updateScanAreaLabel(app, 'Determining...');
     const realResolution = await fetchResolutionForArea(lat, lon, radiusKm);
@@ -121,13 +124,14 @@ export async function selectScanArea(app, lat, lon, radiusKm = 1) {
 
 export function zoomToScanArea(app) {
     if (!app.selectedArea?.bounds) {
-        console.warn('⚠️ No scan area selected for zooming');
         return;
     }
     const bounds = L.latLngBounds(app.selectedArea.bounds);
+    // Use the map's current maxZoom for consistency
+    const maxZoom = app.map.getMaxZoom ? app.map.getMaxZoom() : 18;
     app.map.fitBounds(bounds, {
         padding: [50, 50],
-        maxZoom: 16,
+        maxZoom: maxZoom,
         animate: true,
         duration: 1.0
     });

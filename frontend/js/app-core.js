@@ -61,7 +61,7 @@ export class REArchaeologyApp {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             const data = await response.json();
-            console.log('Discovered sites raw data:', data);
+            // console.log('Discovered sites raw data:', data); // Suppressed for clean UI
             if (!Array.isArray(data)) {
                 window.Logger?.app('warn', 'Discovered sites response is not an array');
                 return;
@@ -76,7 +76,7 @@ export class REArchaeologyApp {
             data.forEach(site => {
                 if (typeof site.latitude !== 'number' || typeof site.longitude !== 'number') return;
                 // Log coordinates for debugging
-                console.log('Discovered site marker:', site.latitude, site.longitude, site.name || site.type || 'Discovered Site');
+                // console.log('Discovered site marker:', site.latitude, site.longitude, site.name || site.type || 'Discovered Site'); // Suppressed for clean UI
                 // Use a custom emoji marker (🏺) for visibility
                 const emojiIcon = window.L.divIcon({
                     html: '<span style="font-size: 2rem; line-height: 2rem;">🏺</span>',
@@ -107,7 +107,7 @@ export class REArchaeologyApp {
             window.Logger?.app('info', `Loaded ${data.length} discovered sites`);
         } catch (error) {
             window.Logger?.app('error', `Failed to load discovered sites: ${error.message}`);
-            console.error('❌ Discovered sites loading error:', error);
+            // console.error('❌ Discovered sites loading error:', error); // Suppressed for clean UI
         }
     }
 
@@ -129,10 +129,15 @@ export class REArchaeologyApp {
             await this.waitForDOM();
             setupMap(this);
             setupLayers(this);
-            this.handleUrlCoordinates();
-            this.setupDefaultScanArea();
+            this.setupMapUrlSync();
+            const params = new URLSearchParams(window.location.search);
+            const hasUrlCoords = params.has('lat') && params.has('lon');
+            if (hasUrlCoords) {
+                this.handleUrlCoordinates();
+            } else {
+                this.setupDefaultScanArea();
+            }
             await this.loadAvailableStructureTypes?.();
-            // Load discovered sites after map is ready
             await this.loadDiscoveredSites();
             setupUI(this);
             const enableDetection = document.getElementById('enableDetection')?.checked || false;
@@ -142,8 +147,33 @@ export class REArchaeologyApp {
             await this.initializeAuth?.();
             window.Logger?.app('info', 'Application initialized successfully');
         } catch (error) {
-            console.error('❌ Application initialization failed:', error);
+            // console.error('❌ Application initialization failed:', error); // Suppressed for clean UI
             throw error;
+        }
+    }
+
+    setupMapUrlSync() {
+        if (!this.map) return;
+        this.map.on('moveend zoomend', () => {
+            const center = this.map.getCenter();
+            const zoom = this.map.getZoom();
+            this.updateUrlWithCoordinates(center.lat, center.lng, zoom);
+        });
+    }
+
+    setupDefaultScanArea() {
+        // Use map's minZoom for broad view
+        const minZoom = this.map ? this.map.getMinZoom() : 4;
+        const params = new URLSearchParams(window.location.search);
+        const hasUrlCoords = params.has('lat') && params.has('lon');
+        const zoom = hasUrlCoords ? (params.has('zoom') ? parseInt(params.get('zoom')) : (this.map ? this.map.getMaxZoom() : 18)) : minZoom;
+        if (!hasUrlCoords) {
+            // Set default to Amazon area and broad view
+            selectScanArea(this, -2.284550660236957, -66.35742187500001, 1.0);
+            if (this.map) {
+                this.map.setView([-2.284550660236957, -66.35742187500001], zoom, { animate: true });
+                // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
+            }
         }
     }
 
@@ -151,54 +181,72 @@ export class REArchaeologyApp {
         const params = new URLSearchParams(window.location.search);
         const lat = parseFloat(params.get('lat'));
         const lon = parseFloat(params.get('lon'));
+        const zoom = params.has('zoom') ? parseInt(params.get('zoom')) : (this.map ? this.map.getMaxZoom() : 18);
         const valid = !isNaN(lat) && !isNaN(lon);
+        const setViewWithTilesReady = () => {
+            if (this.map && this.map._layers) {
+                // Find the first tile layer
+                const tileLayer = Object.values(this.map._layers).find(l => l instanceof window.L.TileLayer);
+                if (tileLayer && !tileLayer._tilesToLoad) {
+                    selectScanArea(this, lat, lon, 1.0);
+                    this.map.setView([lat, lon], zoom, { animate: true });
+                    // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
+                } else if (tileLayer) {
+                    tileLayer.once('load', () => {
+                        selectScanArea(this, lat, lon, 1.0);
+                        this.map.setView([lat, lon], zoom, { animate: true });
+                        // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
+                    });
+                } else {
+                    // No tile layer yet, try again shortly
+                    setTimeout(setViewWithTilesReady, 100);
+                }
+            } else {
+                setTimeout(setViewWithTilesReady, 100);
+            }
+        };
         if (valid) {
-            selectScanArea(this, lat, lon, 1.0);
-            this.map.setView([lat, lon], 13, { animate: true });
+            setViewWithTilesReady();
         }
         window.addEventListener('popstate', () => {
             const params = new URLSearchParams(window.location.search);
             const lat = parseFloat(params.get('lat'));
             const lon = parseFloat(params.get('lon'));
+            const zoom = params.has('zoom') ? parseInt(params.get('zoom')) : (this.map ? this.map.getMaxZoom() : 18);
             if (!isNaN(lat) && !isNaN(lon)) {
                 selectScanArea(this, lat, lon, 1.0);
-                this.map.setView([lat, lon], 13, { animate: true });
+                this.map.setView([lat, lon], zoom, { animate: true });
+                // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
             }
         });
     }
 
-    updateUrlWithCoordinates(lat, lon) {
+    updateUrlWithCoordinates(lat, lon, zoom) {
         const url = new URL(window.location.href);
         url.searchParams.set('lat', lat);
         url.searchParams.set('lon', lon);
+        if (zoom) url.searchParams.set('zoom', zoom);
         window.history.pushState({}, '', url);
     }
 
-    navigateToCoordinates(lat, lon, updateHistory = true) {
+    navigateToCoordinates(lat, lon, zoom = 13, updateHistory = true) {
         const latNum = parseFloat(lat);
         const lonNum = parseFloat(lon);
+        const zoomNum = parseInt(zoom);
         if (isNaN(latNum) || isNaN(lonNum)) {
-            console.warn('Invalid coordinates provided:', lat, lon);
+            // console.warn('Invalid coordinates provided:', lat, lon); // Suppressed for clean UI
             return false;
         }
         selectScanArea(this, latNum, lonNum, 1.0);
-        this.map.setView([latNum, lonNum], 13, { animate: true });
         if (updateHistory) {
-            this.updateUrlWithCoordinates(latNum, lonNum);
+            this.updateUrlWithCoordinates(latNum, lonNum, zoomNum);
+        }
+        // Set the view and zoom only here, after scan area is set
+        if (this.map) {
+            this.map.setView([latNum, lonNum], zoomNum, { animate: true });
+            // console.log('Requested zoom:', zoomNum, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
         }
         return true;
-    }
-
-    setupDefaultScanArea() {
-        const params = new URLSearchParams(window.location.search);
-        const hasUrlCoords = params.has('lat') && params.has('lon');
-        if (!hasUrlCoords) {
-            // Set default to Amazon area and zoom 4
-            selectScanArea(this, -2.284550660236957, -66.35742187500001, 1.0);
-            if (this.map) {
-                this.map.setView([-2.284550660236957, -66.35742187500001], 4, { animate: true });
-            }
-        }
     }
 
     async startLidarScan() {
@@ -231,7 +279,7 @@ export class REArchaeologyApp {
                 window.Logger?.lidar('info', 'LiDAR scan started successfully');
             }, 500);
         } catch (error) {
-            console.error('❌ Failed to start LiDAR scan:', error);
+            // console.error('❌ Failed to start LiDAR scan:', error); // Suppressed for clean UI
             alert('Failed to start LiDAR scan: ' + error.message);
             this.cleanupAfterStop?.();
         }
@@ -242,7 +290,7 @@ export class REArchaeologyApp {
         if (typeof zoomToScanArea === 'function') {
             zoomToScanArea(this);
         } else {
-            console.warn('zoomToScanArea is not defined');
+            // console.warn('zoomToScanArea is not defined'); // Suppressed for clean UI
         }
     }
 
@@ -356,7 +404,7 @@ export class REArchaeologyApp {
                 this.mapVisualization.disableHeatmapMode();
             }
         } catch (error) {
-            console.error('❌ Failed to stop LiDAR scan:', error);
+            // console.error('❌ Failed to stop LiDAR scan:', error); // Suppressed for clean UI
         } finally {
             this.cleanupAfterStop?.();
         }
@@ -370,7 +418,7 @@ export class REArchaeologyApp {
         });
         if (response.ok) {
             const result = await response.json();
-            console.log('✅ LiDAR session stopped:', result.message);
+            // console.log('✅ LiDAR session stopped:', result.message); // Suppressed for clean UI
         }
     }
 
@@ -438,7 +486,6 @@ export class REArchaeologyApp {
             }
         } catch (error) {
             window.Logger?.app('error', `Failed to load structure types: ${error.message}`);
-            console.error('❌ Structure types loading error:', error);
             const structureSelect = document.getElementById('structureType');
             if (structureSelect) {
                 structureSelect.innerHTML = '';

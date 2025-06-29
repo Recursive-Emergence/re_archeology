@@ -99,22 +99,22 @@ window.setLogLevel = function(level) {
     if (window.Logger) {
         window.Logger.setLevel(level);
         window.AppConfig.logging.level = level.toUpperCase();
-        console.log(`Log level set to: ${level.toUpperCase()}`);
-        console.log('Available levels: DEBUG, INFO, WARN, ERROR, SILENT');
-        console.log('Example: setLogLevel("SILENT") to disable all logs');
+        // console.log(`Log level set to: ${level.toUpperCase()}`); // Suppressed for clean UI
+        // console.log('Available levels: DEBUG, INFO, WARN, ERROR, SILENT'); // Suppressed for clean UI
+        // console.log('Example: setLogLevel("SILENT") to disable all logs'); // Suppressed for clean UI
     }
 };
 
 // Console helper to show current config
 window.showConfig = function() {
-    console.group('🔧 RE-Archaeology Configuration');
-    console.log('Logging Level:', window.AppConfig.logging.level);
-    console.log('Logging Categories:', window.AppConfig.logging.categories);
-    console.log('Development Mode:', window.AppConfig.development);
-    console.groupEnd();
+    // console.group('🔧 RE-Archaeology Configuration'); // Suppressed for clean UI
+    // console.log('Logging Level:', window.AppConfig.logging.level); // Suppressed for clean UI
+    // console.log('Logging Categories:', window.AppConfig.logging.categories); // Suppressed for clean UI
+    // console.log('Development Mode:', window.AppConfig.development); // Suppressed for clean UI
+    // console.groupEnd(); // Suppressed for clean UI
 };
 
 // Show config on startup if in development
 if (window.location.hostname === 'localhost' || window.AppConfig.development.showDebugInfo) {
-    console.log('🔧 RE-Archaeology Config loaded. Use showConfig() to view settings or setLogLevel("SILENT") to reduce logs.');
+    // console.log('🔧 RE-Archaeology Config loaded. Use showConfig() to view settings or setLogLevel("SILENT") to reduce logs.'); // Suppressed for clean UI
 }

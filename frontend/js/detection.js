@@ -44,15 +44,13 @@ export function stopDetectionAnimation(app) {
 
 export function handlePatchResult(app, patchData) {
     if (!app.detectionActive) {
-        console.warn('⚠️ Detection not active, ignoring patch result');
+        // console.warn('⚠️ Detection not active, ignoring patch result'); // Suppressed for clean UI
         return;
     }
     if (!app.detectionLens) {
         createDetectionLens(app);
-        if (!app.detectionLens) {
-            console.error('❌ Failed to create detection lens');
-            return;
-        }
+        // console.error('❌ Failed to create detection lens'); // Suppressed for clean UI
+        return;
     }
     if (app.lensTimeouts) {
         app.lensTimeouts.forEach(timeout => clearTimeout(timeout));
@@ -62,7 +60,7 @@ export function handlePatchResult(app, patchData) {
     }
     const { lat, lon, confidence, is_positive, patch_size_m } = patchData;
     if (!lat || !lon) {
-        console.warn('⚠️ Invalid patch coordinates:', patchData);
+        // console.warn('⚠️ Invalid patch coordinates:', patchData); // Suppressed for clean UI
         return;
     }
     // Use a unique variable name for this function's screenPoint
@@ -91,7 +89,6 @@ export function createDetectionLens(app) {
     if (!app.detectionOverlay) {
         app.initializeDetectionOverlay?.();
         if (!app.detectionOverlay) {
-            console.error('❌ Failed to initialize detection overlay');
             return;
         }
     }

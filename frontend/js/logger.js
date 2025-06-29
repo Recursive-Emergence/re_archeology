@@ -15,7 +15,6 @@ class Logger {
             'ERROR': 3,
             'SILENT': 4
         };
-        
         // Tracking for rate limiting
         this.rateLimits = new Map();
         this.maxLogsPerSecond = 5;
@@ -26,15 +25,12 @@ class Logger {
         if (window.AppConfig?.logging?.level) {
             return window.AppConfig.logging.level;
         }
-        
         // Check for URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const urlLevel = urlParams.get('logLevel');
-        
         if (urlLevel) {
             return urlLevel.toUpperCase();
         }
-        
         // Default to INFO in production, DEBUG in development
         return window.location.hostname === 'localhost' ? 'DEBUG' : 'INFO';
     }
@@ -42,19 +38,15 @@ class Logger {
     shouldLog(level, message) {
         const levelValue = this.levels[level] || 0;
         const currentLevelValue = this.levels[this.level] || 0;
-        
         if (levelValue < currentLevelValue) {
             return false;
         }
-
         // Rate limiting for repeated messages
         const now = Date.now();
         const key = `${level}:${message.substring(0, 50)}`;
         const maxLogs = window.AppConfig?.logging?.maxLogsPerSecond || this.maxLogsPerSecond;
-        
         if (this.rateLimits.has(key)) {
             const { count, lastTime } = this.rateLimits.get(key);
-            
             if (now - lastTime < 1000) {
                 if (count >= maxLogs) {
                     return false;
@@ -66,18 +58,15 @@ class Logger {
         } else {
             this.rateLimits.set(key, { count: 1, lastTime: now });
         }
-
         return true;
     }
 
     formatMessage(category, message, data = null) {
         const timestamp = new Date().toISOString().substring(11, 23);
         let formatted = `[${timestamp}] ${category}: ${message}`;
-        
         if (data !== null && data !== undefined) {
             formatted += ` | ${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}`;
         }
-        
         return formatted;
     }
 
