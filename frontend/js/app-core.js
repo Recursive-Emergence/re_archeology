@@ -100,10 +100,9 @@ export class REArchaeologyApp {
                 window.Logger?.app('debug', `Added marker for site: ${site.name || site.type || 'Discovered Site'} at [${site.latitude}, ${site.longitude}]`);
             });
             this.discoveredSitesLayer.addTo(this.map);
-            // Fit map to bounds if there are markers
+            // Store marker bounds for potential later use, but don't automatically fit
             if (markerLatLngs.length > 0) {
-                const bounds = window.L.latLngBounds(markerLatLngs);
-                this.map.fitBounds(bounds, { padding: [40, 40] });
+                this.discoveredSitesBounds = window.L.latLngBounds(markerLatLngs);
             }
             window.Logger?.app('info', `Loaded ${data.length} discovered sites`);
         } catch (error) {
@@ -288,11 +287,8 @@ export class REArchaeologyApp {
     // --- WebSocket and backend event passthroughs ---
     handleWebSocketMessage(data) { if (typeof handleWebSocketMessage === 'function') handleWebSocketMessage(this, data); }
     handleLidarTileUpdate(data) { 
-        // Auto-navigate to the scanning location on first tile
-        if (data.center_lat && data.center_lon && !this.hasNavigatedToScanLocation) {
-            this.map.setView([data.center_lat, data.center_lon], 15);
-            this.hasNavigatedToScanLocation = true;
-        }
+        // Don't auto-navigate on LiDAR tiles - use task-based navigation instead
+        // The task list will handle navigation to running tasks
         
         if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') {
             this.mapVisualization.addLidarHeatmapTile(data);
@@ -535,6 +531,22 @@ export class REArchaeologyApp {
             }
         } else {
             window.Logger?.app('warn', 'Cannot initialize task list - map or TaskList class not available');
+        }
+    }
+
+    fitToDiscoveredSitesIfNeeded() {
+        // Only fit to discovered sites if we have them and no running tasks
+        if (this.discoveredSitesBounds && this.taskList) {
+            const runningTasks = this.taskList.tasks.filter(task => task.status === 'running');
+            if (runningTasks.length === 0) {
+                console.log('No running tasks found, smoothly transitioning to discovered sites');
+                // Smooth transition to discovered sites
+                this.map.flyToBounds(this.discoveredSitesBounds, { 
+                    padding: [40, 40], 
+                    duration: 2.0,
+                    easeLinearity: 0.1
+                });
+            }
         }
     }
 } // End of class

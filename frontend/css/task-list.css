@@ -227,7 +227,94 @@
 
 /* Task Status Colors */
 .task-item.running {
-    border-left-color: #4CAF50;
+    border-left-color: #00ff88;
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 255, 136, 0.1));
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+    animation: runningTaskPulse 2s ease-in-out infinite;
+    position: relative;
+}
+
+.task-item.running::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border: 1px solid rgba(0, 255, 136, 0.6);
+    border-radius: 6px;
+    animation: runningTaskBorder 3s linear infinite;
+}
+
+.task-item.running .task-status {
+    background: linear-gradient(90deg, #00ff88, #00cc6a);
+    color: #000;
+    font-weight: bold;
+    animation: statusGlow 1.5s ease-in-out infinite alternate;
+}
+
+.task-item.running .progress-fill {
+    background: linear-gradient(90deg, #00ff88, #00cc6a, #00ff88);
+    background-size: 200% 100%;
+    animation: progressShimmer 2s linear infinite;
+}
+
+.task-item.running .task-id {
+    background: rgba(0, 255, 136, 0.3);
+    color: #fff;
+    font-weight: bold;
+}
+
+/* Running indicator animation */
+.running-indicator {
+    display: inline-block;
+    margin-right: 0.3rem;
+    animation: spin 1s linear infinite;
+}
+
+/* Running task animations */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes runningTaskPulse {
+    0%, 100% {
+        box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 25px rgba(0, 255, 136, 0.7);
+    }
+}
+
+@keyframes runningTaskBorder {
+    0% {
+        border-color: rgba(0, 255, 136, 0.6);
+    }
+    50% {
+        border-color: rgba(0, 255, 136, 1);
+    }
+    100% {
+        border-color: rgba(0, 255, 136, 0.6);
+    }
+}
+
+@keyframes statusGlow {
+    0% {
+        text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+    }
+    100% {
+        text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+    }
+}
+
+@keyframes progressShimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
 }
 
 .task-item.completed {

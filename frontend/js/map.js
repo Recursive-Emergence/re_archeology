@@ -14,8 +14,8 @@ export function setupMap(app) {
     container.offsetHeight;
     if (!container.offsetWidth || !container.offsetHeight) throw new Error('Map container has no dimensions');
     app.map = L.map(container, {
-        center: [52.4751, 4.8156],
-        zoom: 13,
+        center: [20, 0], // Start with a global view
+        zoom: 2,
         zoomControl: true,
         attributionControl: true,
         minZoom: 3,

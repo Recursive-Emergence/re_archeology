@@ -9,6 +9,7 @@ class TaskList {
         this.taskRectangles = new Map();
         this.refreshInterval = null;
         this.currentlySelectedTask = null;
+        this.isFirstLoad = true; // Track if this is the first load for auto-navigation
         
         this.init();
     }
@@ -24,6 +25,12 @@ class TaskList {
             this.tasks = await this.taskService.getTasks({ minDecay: 0.1 });
             this.renderTaskRectangles();
             this.renderTaskList();
+            
+            // Auto-navigate to running task if this is the first load
+            if (this.isFirstLoad) {
+                this.isFirstLoad = false;
+                await this.checkAndNavigateToRunningTask();
+            }
         } catch (error) {
             console.error('Failed to load tasks:', error);
             this.showErrorState();
@@ -87,6 +94,10 @@ class TaskList {
         const coordinates = this.taskService.formatCoordinates(task.start_coordinates);
         const findingsCount = task.findings ? task.findings.length : 0;
         const opacityValue = Math.max(0.3, task.decay_value);
+        
+        // Add running indicator for active tasks
+        const runningIndicator = task.status === 'running' ? 
+            '<span class="running-indicator">🔄</span>' : '';
 
         return `
             <div class="task-item ${task.status}" 
@@ -94,7 +105,9 @@ class TaskList {
                  style="border-left-color: ${statusColor}; opacity: ${opacityValue};">
                 <div class="task-header">
                     <span class="task-id">${task.id.slice(0, 6)}</span>
-                    <span class="task-status" style="color: ${statusColor};">${statusText}</span>
+                    <span class="task-status" style="color: ${statusColor};">
+                        ${runningIndicator}${statusText}
+                    </span>
                 </div>
                 <div class="task-details">
                     <div class="task-location">📍 ${coordinates}</div>
@@ -122,7 +135,7 @@ class TaskList {
 
     renderTaskRectangles() {
         // Clear existing rectangles
-        this.taskRectangles.forEach(rectangle => {
+        this.taskRectangles.forEach((rectangle, taskId) => {
             if (this.map && rectangle) {
                 try {
                     this.map.removeLayer(rectangle);
@@ -155,9 +168,25 @@ class TaskList {
         const [lat, lon] = task.start_coordinates;
         const { width_km, height_km } = task.range;
         
+        // For running tasks, show the actual LiDAR scanning boundary
+        // Backend converts rectangular task to square scanning area using max dimension as radius
+        let actualWidth, actualHeight;
+        if (task.status === 'running') {
+            // Backend uses: radius_km = max(width_km, height_km) / 2
+            // Then creates square: area_width_m = area_height_m = 2 * radius_m
+            const radius_km = Math.max(width_km, height_km) / 2;
+            const scanning_dimension = radius_km * 2; // This is the actual square size being scanned
+            actualWidth = scanning_dimension;
+            actualHeight = scanning_dimension;
+        } else {
+            // For non-running tasks, show original requested dimensions
+            actualWidth = width_km;
+            actualHeight = height_km;
+        }
+        
         // Convert km to approximate degrees
-        const latOffset = height_km / 111; // ~111 km per degree latitude
-        const lonOffset = width_km / (111 * Math.cos(lat * Math.PI / 180)); // Adjust for latitude
+        const latOffset = actualHeight / 111; // ~111 km per degree latitude
+        const lonOffset = actualWidth / (111 * Math.cos(lat * Math.PI / 180)); // Adjust for latitude
 
         const bounds = [
             [lat - latOffset / 2, lon - lonOffset / 2], // Southwest
@@ -169,7 +198,7 @@ class TaskList {
 
         const rectangle = L.rectangle(bounds, {
             color: statusColor,
-            weight: 1, // Thinner border
+            weight: task.status === 'running' ? 2 : 1,
             opacity: opacity,
             fillColor: statusColor,
             fillOpacity: opacity * 0.2,
@@ -190,14 +219,17 @@ class TaskList {
         });
 
         // Add tooltip
-        rectangle.bindTooltip(`
+        const tooltipContent = `
             <div class="task-tooltip">
                 <strong>Task ${task.id.slice(0, 8)}</strong><br>
                 Status: ${this.taskService.getStatusText(task.status)}<br>
                 Findings: ${task.findings ? task.findings.length : 0}<br>
-                Range: ${task.range.width_km}×${task.range.height_km} km
+                Requested: ${task.range.width_km}×${task.range.height_km} km
+                ${task.status === 'running' ? `<br>Scanning: ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)} km` : ''}
             </div>
-        `, {
+        `;
+        
+        rectangle.bindTooltip(tooltipContent, {
             sticky: true,
             direction: 'top'
         });
@@ -227,6 +259,45 @@ class TaskList {
         }
     }
 
+    async navigateToTaskSmoothly(taskId) {
+        try {
+            const navData = await this.taskService.getTaskNavigation(taskId);
+            
+            if (this.map) {
+                // Calculate target bounds with proper padding for the scanning area
+                const targetBounds = L.latLngBounds([
+                    navData.bounds.southwest,
+                    navData.bounds.northeast
+                ]);
+                
+                // Find the task to get its actual scanning dimensions
+                const task = this.tasks.find(t => t.id === taskId);
+                let paddingX = 100, paddingY = 100;
+                
+                if (task && task.status === 'running') {
+                    // For running tasks, show more context around the scanning area
+                    paddingX = 150;
+                    paddingY = 150;
+                }
+                
+                // Single smooth animation to the scanning area with appropriate zoom level
+                this.map.flyToBounds(targetBounds, {
+                    padding: [paddingX, paddingY],
+                    duration: 2.0,
+                    easeLinearity: 0.25,
+                    maxZoom: 14 // Prevent zooming too close
+                });
+
+                // Highlight the selected task after navigation completes
+                setTimeout(() => {
+                    this.highlightTask(taskId);
+                }, 2100);
+            }
+        } catch (error) {
+            console.error('Failed to navigate to task smoothly:', error);
+        }
+    }
+
     highlightTask(taskId) {
         // Remove previous highlight
         this.taskRectangles.forEach((rectangle, id) => {
@@ -249,13 +320,8 @@ class TaskList {
                 element.classList.add('highlighted');
             }
             
-            // Ensure rectangle is visible on map
-            if (this.map && rectangle.getBounds) {
-                const bounds = rectangle.getBounds();
-                if (bounds && !this.map.getBounds().intersects(bounds)) {
-                    this.map.fitBounds(bounds, { padding: [50, 50] });
-                }
-            }
+            // Don't automatically adjust map bounds during auto-navigation
+            // The bounds should already be correct from the navigation
         }
 
         // Add selection to task list item
@@ -269,9 +335,12 @@ class TaskList {
     }
 
     startAutoRefresh() {
-        // Refresh tasks every 30 seconds
+        // Refresh tasks every 30 seconds, but only start after initial load is complete
         this.refreshInterval = setInterval(() => {
-            this.loadTasks();
+            // Don't refresh if we're in the middle of initial navigation
+            if (!this.isFirstLoad) {
+                this.loadTasks();
+            }
         }, 30000);
     }
 
@@ -279,6 +348,28 @@ class TaskList {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
+        }
+    }
+
+    async checkAndNavigateToRunningTask() {
+        // Find running tasks
+        const runningTasks = this.tasks.filter(task => task.status === 'running');
+        
+        if (runningTasks.length > 0) {
+            // Navigate to the first running task with a longer delay to allow map to fully settle
+            const runningTask = runningTasks[0];
+            console.log('Auto-navigating to running task:', runningTask.id);
+            
+            // Wait for map to be fully ready and any other initializations to complete
+            setTimeout(async () => {
+                await this.navigateToTaskSmoothly(runningTask.id);
+            }, 1500);
+        } else {
+            // No running tasks, let the app decide whether to show discovered sites
+            console.log('No running tasks found');
+            if (window.reArchaeologyApp && typeof window.reArchaeologyApp.fitToDiscoveredSitesIfNeeded === 'function') {
+                setTimeout(() => window.reArchaeologyApp.fitToDiscoveredSitesIfNeeded(), 1500);
+            }
         }
     }
 
