@@ -130,6 +130,10 @@ export class REArchaeologyApp {
             await this.waitForDOM();
             setupMap(this);
             setupLayers(this);
+            
+            // Initialize map visualization for heatmap tiles
+            this.initializeMapVisualization();
+            
             this.setupMapUrlSync();
             await this.loadAvailableStructureTypes?.();
             await this.loadDiscoveredSites();
@@ -138,6 +142,11 @@ export class REArchaeologyApp {
             updateScanButtonText(this, enableDetection);
             this.initializeDetectionOverlay?.();
             connectWebSocket(this);
+            
+            // Enable heatmap mode by default to be ready for resumed tasks
+            if (this.mapVisualization && typeof this.mapVisualization.enableHeatmapMode === 'function') {
+                this.mapVisualization.enableHeatmapMode();
+            }
             
             // Initialize task list
             this.initializeTaskList();
@@ -278,7 +287,18 @@ export class REArchaeologyApp {
 
     // --- WebSocket and backend event passthroughs ---
     handleWebSocketMessage(data) { if (typeof handleWebSocketMessage === 'function') handleWebSocketMessage(this, data); }
-    handleLidarTileUpdate(data) { if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') this.mapVisualization.addLidarHeatmapTile(data); this.updateAnimationProgress?.(data); }
+    handleLidarTileUpdate(data) { 
+        // Auto-navigate to the scanning location on first tile
+        if (data.center_lat && data.center_lon && !this.hasNavigatedToScanLocation) {
+            this.map.setView([data.center_lat, data.center_lon], 15);
+            this.hasNavigatedToScanLocation = true;
+        }
+        
+        if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') {
+            this.mapVisualization.addLidarHeatmapTile(data);
+        }
+        this.updateAnimationProgress?.(data); 
+    }
     handleLidarHeatmapTileUpdate(data) { if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') this.mapVisualization.addLidarHeatmapTile(data.tile_data); this.updateAnimationProgress?.(data.tile_data); }
     handleLidarProgressUpdate(data) { /* implement as needed */ }
     handleSessionComplete(data) { /* implement as needed */ }

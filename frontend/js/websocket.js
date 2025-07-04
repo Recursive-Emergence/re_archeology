@@ -57,15 +57,20 @@ export function handleWebSocketMessage(app, data) {
         }
     }
     if (data.type === 'patch_result') {
-        // console.log('[DEBUG] patch_result message:', data); // Suppressed for clean UI
         app.handlePatchResult?.(data.patch || data);
     }
     if (data.type === 'detection_result') {
-        // console.log('[DEBUG] detection_result message:', data); // Suppressed for clean UI
         app.handleDetectionResult?.(data);
     }
     switch (data.type) {
         case 'lidar_tile':
+            // Start scanning animation if not already started
+            if (!app.isScanning) {
+                if (typeof app.startScanningAnimation === 'function') {
+                    app.startScanningAnimation('satellite');
+                }
+                app.isScanning = true;
+            }
             app.handleLidarTileUpdate?.(data);
             break;
         case 'lidar_heatmap_tile':
@@ -85,6 +90,19 @@ export function handleWebSocketMessage(app, data) {
         case 'session_failed':
         case 'lidar_error':
             // ...handle error if needed...
+            break;
+        case 'task_resumed':
+            // Enable heatmap visualization for resumed task
+            if (app.mapVisualization && typeof app.mapVisualization.enableHeatmapMode === 'function') {
+                app.mapVisualization.enableHeatmapMode();
+            }
+            // Start scanning animation to show activity
+            if (typeof app.startScanningAnimation === 'function') {
+                app.startScanningAnimation('satellite');
+            }
+            // Set app scanning state
+            app.isScanning = true;
+            app.currentLidarSession = data.session_id;
             break;
         default:
             break;

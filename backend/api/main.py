@@ -175,6 +175,13 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"⚠️ Neo4j connection/schema failed: {e} - continuing startup without database")
     
+    # Check for running tasks and restart them
+    try:
+        from backend.api.startup_tasks import check_and_restart_running_tasks
+        await check_and_restart_running_tasks()
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to restart running tasks: {e}")
+    
     logger.info("🚀 RE-Archaeology API startup complete")
 
 def _initialize_neo4j():

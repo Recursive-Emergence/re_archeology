@@ -128,5 +128,10 @@ def safe_serialize(obj: Any) -> Any:
 
 def safe_asdict(dataclass_obj: Any) -> Any:
     """Convert dataclass to dict with safe JSON serialization."""
-    data = asdict(dataclass_obj)
-    return safe_serialize(data)
+    from dataclasses import is_dataclass
+    if is_dataclass(dataclass_obj):
+        data = asdict(dataclass_obj)
+        return safe_serialize(data)
+    else:
+        # If it's not a dataclass, just serialize it directly
+        return safe_serialize(dataclass_obj)

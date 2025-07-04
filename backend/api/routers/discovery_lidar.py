@@ -408,12 +408,24 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         }
                         await discovery_manager.send_message(tile_result)
                     session_info["processed_tiles"] = row * tiles_x + col + 1
+                    
+                    # Calculate progress percentage
+                    progress_percent = (session_info["processed_tiles"] / session_info["total_tiles"]) * 100
+                    
+                    # Update task progress if this is a resumed task
+                    if session_info.get("task_id"):
+                        try:
+                            from backend.api.startup_tasks import update_task_progress
+                            await update_task_progress(session_info["task_id"], progress_percent)
+                        except Exception as e:
+                            logger.error(f"Failed to update task progress: {e}")
+                    
                     progress_update = {
                         "session_id": session_id,
                         "type": "lidar_progress",
                         "processed_tiles": session_info["processed_tiles"],
                         "total_tiles": session_info["total_tiles"],
-                        "progress_percent": (session_info["processed_tiles"] / session_info["total_tiles"]) * 100,
+                        "progress_percent": progress_percent,
                         "actual_resolution": session_info.get("resolution_metadata", {}).get("resolution_description", f"{preferred_resolution}m"),
                         "is_high_resolution": session_info.get("resolution_metadata", {}).get("is_high_resolution", False),
                         "source_dataset": session_info.get("resolution_metadata", {}).get("source_dataset", "unknown"),
@@ -426,6 +438,16 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                     continue
         session_info["status"] = "completed"
         session_info["end_time"] = datetime.now(timezone.utc).isoformat()
+        
+        # Update task completion if this is a resumed task
+        if session_info.get("task_id"):
+            try:
+                from backend.api.startup_tasks import update_task_progress
+                await update_task_progress(session_info["task_id"], 100.0)
+                logger.info(f"✅ Marked task {session_info['task_id']} as completed")
+            except Exception as e:
+                logger.error(f"Failed to update task completion: {e}")
+        
         completion_message = {
             "session_id": session_id,
             "type": "lidar_completed",
@@ -486,39 +508,60 @@ async def get_session_detector(session_id: str, structure_type: str, app_root: s
 async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: str, logger):
     logger.info(f"[DEBUG] Entered run_coordinated_detection for session {session_id} with scan_area={scan_area}")
     logger.info(f"🎯 [DETECTION ENTRY] run_coordinated_detection called for session {session_id}. _session_tile_data keys: {list(_session_tile_data.keys())}")
+    
     if session_id not in _session_tile_data:
         logger.warning(f"❌ [DETECTION EARLY EXIT] No tile data found for session {session_id}. _session_tile_data keys: {list(_session_tile_data.keys())}")
         return
+    
     tile_count = len(_session_tile_data[session_id])
     logger.info(f"🎯 [DETECTION START] Starting coordinated detection for session {session_id} with {tile_count} tiles")
+    
     await discovery_manager.send_message({
         "type": "detection_starting",
         "session_id": session_id,
         "message": "Starting coordinated detection across scanned area",
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
+    
+    # Get task_id if this is a resumed task
+    task_id = None
+    if session_id in active_sessions:
+        task_id = active_sessions[session_id].get("task_id")
+    
+    findings = []  # Collect findings for task update
+    
     from kernel.detector_profile import DetectorProfileManager
     profile_manager = DetectorProfileManager(profiles_dir=f"{app_root}/profiles")
     profile = profile_manager.load_profile("dutch_windmill.json")
+    
     detection_patch_size_m = profile.geometry.patch_size_m[0]
     detection_step_size_m = 10
+    
     lat_center = scan_area.get('lat')
     lon_center = scan_area.get('lon')
     size_km = scan_area.get('size_km')
+    
     if lat_center is None or lon_center is None or size_km is None:
         logger.error(f"❌ Invalid scan_area parameters: lat={lat_center}, lon={lon_center}, size_km={size_km}")
         return
+    
     lat_m_per_deg = 111320
     lon_m_per_deg = 111320 * np.cos(np.radians(lat_center))
     half_size_m = (size_km * 1000) / 2
+    
     steps_lat = int(size_km * 1000 / detection_step_size_m)
     steps_lon = int(size_km * 1000 / detection_step_size_m)
+    total_steps = steps_lat * steps_lon
+    
     available_types, default_type = get_available_structure_types(app_root, logger)
     structure_type = default_type
+    
     detector = await get_session_detector(session_id, structure_type, app_root, logger)
     if not detector:
         logger.error("❌ Failed to get detector for coordinated detection")
         return
+    
+    processed_steps = 0
     for i in range(steps_lat):
         for j in range(steps_lon):
             if session_id not in _active_detection_tasks:
@@ -590,6 +633,17 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
                 }
                 await discovery_manager.send_message(patch_result_msg)
                 if is_positive:
+                    # Add to findings collection
+                    finding = {
+                        "lat": patch_lat,
+                        "lon": patch_lon,
+                        "confidence": confidence,
+                        "score": final_score,
+                        "type": structure_type,
+                        "detected_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    findings.append(finding)
+                    
                     detection_message = {
                         'type': 'detection_result',
                         'confidence': confidence,
@@ -602,6 +656,7 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }
                     await discovery_manager.send_message(detection_message)
+            
             # Send patch_scanning message for frontend lens movement (legacy-compatible)
             patch_id = f"{session_id}_{i}_{j}"
             await discovery_manager.send_message({
@@ -611,16 +666,44 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
                 'lon': float(patch_lon),
                 'timestamp': datetime.now(timezone.utc).isoformat()
             })
+            
+            # Update progress
+            processed_steps += 1
+            if processed_steps % 10 == 0:  # Update every 10 steps to avoid spam
+                detection_progress = (processed_steps / total_steps) * 100
+                await discovery_manager.send_message({
+                    'type': 'detection_progress',
+                    'session_id': str(session_id),
+                    'processed_steps': processed_steps,
+                    'total_steps': total_steps,
+                    'progress_percent': detection_progress,
+                    'findings_count': len(findings),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                })
+            
             await asyncio.sleep(0.15)
     if session_id in _active_detection_tasks:
         del _active_detection_tasks[session_id]
+    
+    # Update task with findings if this is a resumed task
+    if task_id and findings:
+        try:
+            from backend.api.startup_tasks import update_task_progress
+            # Don't change progress here - detection doesn't affect scan progress
+            # Just add the findings
+            await update_task_progress(task_id, None, findings)
+            logger.info(f"✅ Added {len(findings)} findings to task {task_id}")
+        except Exception as e:
+            logger.error(f"Failed to update task findings: {e}")
+    
     # At the end, send session_completed (legacy-compatible)
     await discovery_manager.send_message({
         'type': 'session_completed',
         'session': {
             'session_id': str(session_id),
             'status': 'completed',
-            'end_time': datetime.now(timezone.utc).isoformat()
+            'end_time': datetime.now(timezone.utc).isoformat(),
+            'findings_count': len(findings)
         },
         'timestamp': datetime.now(timezone.utc).isoformat()
     })

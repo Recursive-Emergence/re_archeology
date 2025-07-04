@@ -18,8 +18,17 @@ _session_tile_data: Dict[str, Dict[str, Any]] = {}
 # You can add session helper functions here as needed, e.g.:
 def get_active_sessions_dict() -> Dict[str, Any]:
     """Return a dict of all active sessions as dicts."""
-    from .discovery_utils import safe_asdict
-    return {sid: safe_asdict(sess) for sid, sess in active_sessions.items()}
+    from .discovery_utils import safe_asdict, safe_serialize
+    from dataclasses import is_dataclass
+    result = {}
+    for sid, sess in active_sessions.items():
+        if is_dataclass(sess):
+            result[sid] = safe_asdict(sess)
+        elif isinstance(sess, dict):
+            result[sid] = safe_serialize(sess)
+        else:
+            result[sid] = safe_serialize(sess)
+    return result
 
 def clear_all_sessions():
     """Clear all session state."""

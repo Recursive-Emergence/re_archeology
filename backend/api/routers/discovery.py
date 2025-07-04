@@ -293,10 +293,22 @@ async def get_active_sessions():
         for session_id, session in active_sessions.items():
             sessions_data[session_id] = safe_asdict(session)
         
+        # Count active sessions - handle both dataclass objects and dicts
+        active_count = 0
+        for s in active_sessions.values():
+            if hasattr(s, 'status'):
+                # DiscoverySession dataclass object
+                if s.status == 'active':
+                    active_count += 1
+            elif isinstance(s, dict):
+                # Dictionary session (from resumed tasks)
+                if s.get('status') == 'started' or s.get('status') == 'active':
+                    active_count += 1
+        
         return {
             'status': 'success',
             'sessions': sessions_data,
-            'total_active': len([s for s in active_sessions.values() if s.status == 'active'])
+            'total_active': active_count
         }
         
     except Exception as e:
@@ -796,9 +808,21 @@ async def run_discovery_session(session: DiscoverySession, manager: EnhancedConn
 async def get_discovery_status():
     """Get current discovery system status"""
     try:
+        # Count active sessions - handle both dataclass objects and dicts
+        active_count = 0
+        for s in active_sessions.values():
+            if hasattr(s, 'status'):
+                # DiscoverySession dataclass object
+                if s.status == 'active':
+                    active_count += 1
+            elif isinstance(s, dict):
+                # Dictionary session (from resumed tasks)
+                if s.get('status') == 'started' or s.get('status') == 'active':
+                    active_count += 1
+        
         return {
             'status': 'healthy',
-            'active_sessions': len([s for s in active_sessions.values() if s.status == 'active']),
+            'active_sessions': active_count,
             'total_sessions': len(active_sessions),
             'websocket_connections': len(discovery_manager.active_connections),
             'connection_stats': discovery_manager.get_connection_stats(),
