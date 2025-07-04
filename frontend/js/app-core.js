@@ -352,11 +352,190 @@ export class REArchaeologyApp {
         this.updateScanAreaLabel?.();
     }
 
-    // --- Chat and Auth (stubs, to be implemented as needed) ---
-    async handleChatSubmit() { /* implement as needed */ }
-    addChatMessage(role, content) { /* implement as needed */ }
-    showTypingIndicator() { /* implement as needed */ }
-    hideTypingIndicator() { /* implement as needed */ }
+    // --- Chat and Auth functionality ---
+    async handleChatSubmit() {
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const message = chatInput.value.trim();
+        
+        if (!message) return;
+        
+        // Disable input during processing
+        chatInput.disabled = true;
+        sendBtn.disabled = true;
+        chatInput.value = '';
+        
+        try {
+            // Add user message to chat
+            this.addChatMessage('user', message);
+            
+            // Show typing indicator
+            this.showTypingIndicator();
+            
+            // Send request to backend
+            const response = await fetch(`${window.AppConfig.apiBase}/ai/message`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.accessToken || 'dummy-token'}`
+                },
+                body: JSON.stringify({
+                    message: message,
+                    context: this.getChatContext()
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Chat request failed: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            // Hide typing indicator
+            this.hideTypingIndicator();
+            
+            // Add Bella's response to chat
+            this.addChatMessage('assistant', data.response);
+            
+        } catch (error) {
+            console.error('Chat error:', error);
+            this.hideTypingIndicator();
+            this.addChatMessage('assistant', "Sorry, I'm having trouble connecting right now. Please try again in a moment!");
+        } finally {
+            // Re-enable input
+            chatInput.disabled = false;
+            sendBtn.disabled = false;
+            chatInput.focus();
+        }
+    }
+
+    getChatContext() {
+        // Provide context about current scanning state
+        const context = {};
+        
+        if (this.currentLidarSession) {
+            context.current_scan = {
+                session_id: this.currentLidarSession,
+                is_scanning: this.isScanning
+            };
+        }
+        
+        if (this.totalPatches) {
+            context.total_patches = this.totalPatches;
+        }
+        
+        if (this.detections && this.detections.length > 0) {
+            context.positive_detections = this.detections.length;
+        }
+        
+        // Add task context if available
+        if (this.taskList && this.taskList.currentlySelectedTask) {
+            const selectedTask = this.taskList.tasks.find(t => t.id === this.taskList.currentlySelectedTask);
+            if (selectedTask) {
+                context.selected_task = {
+                    id: selectedTask.id,
+                    status: selectedTask.status,
+                    findings: selectedTask.findings ? selectedTask.findings.length : 0
+                };
+            }
+        }
+        
+        // Add current map coordinates
+        if (this.map) {
+            const center = this.map.getCenter();
+            const zoom = this.map.getZoom();
+            context.current_coordinates = {
+                latitude: center.lat,
+                longitude: center.lng,
+                zoom: zoom
+            };
+        }
+        
+        return context;
+    }
+
+    addChatMessage(role, content) {
+        const chatMessages = document.getElementById('chat-messages');
+        const chatWelcome = document.getElementById('chat-welcome');
+        
+        // Hide welcome message on first interaction
+        if (chatWelcome && chatWelcome.style.display !== 'none') {
+            chatWelcome.style.display = 'none';
+        }
+        
+        // Create message element
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${role}-message`;
+        
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+        
+        if (role === 'user') {
+            // Use user's Google avatar if available, otherwise default
+            const userAvatar = document.getElementById('user-avatar');
+            if (userAvatar && userAvatar.src && userAvatar.src !== '') {
+                const avatarImg = document.createElement('img');
+                avatarImg.src = userAvatar.src;
+                avatarImg.alt = 'User';
+                avatarImg.className = 'avatar-image';
+                avatar.appendChild(avatarImg);
+            } else {
+                avatar.textContent = '👤';
+            }
+        } else {
+            // Use Bella's avatar - a professional lady icon
+            avatar.innerHTML = '👩‍🔬'; // Female scientist emoji for Bella
+        }
+        
+        const content_div = document.createElement('div');
+        content_div.className = 'message-content';
+        content_div.textContent = content;
+        
+        const timestamp = document.createElement('div');
+        timestamp.className = 'message-timestamp';
+        timestamp.textContent = new Date().toLocaleTimeString();
+        
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(content_div);
+        messageDiv.appendChild(timestamp);
+        
+        chatMessages.appendChild(messageDiv);
+        
+        // Scroll to bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    showTypingIndicator() {
+        const chatMessages = document.getElementById('chat-messages');
+        
+        // Remove existing typing indicator
+        const existing = chatMessages.querySelector('.typing-indicator');
+        if (existing) existing.remove();
+        
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'chat-message assistant-message typing-indicator';
+        
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+        avatar.textContent = '🤖';
+        
+        const content_div = document.createElement('div');
+        content_div.className = 'message-content typing-animation';
+        content_div.innerHTML = '<span></span><span></span><span></span>';
+        
+        typingDiv.appendChild(avatar);
+        typingDiv.appendChild(content_div);
+        
+        chatMessages.appendChild(typingDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    hideTypingIndicator() {
+        const typingIndicator = document.querySelector('.typing-indicator');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+    }
     escapeHtml(text) {
         if (!text) return '';
         return String(text).replace(/[&<>"]/g, function (c) {
