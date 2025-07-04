@@ -181,7 +181,7 @@ class LidarTileCache:
                 tile_data = data['elevation']
                 metadata = data['metadata'].item()
                 
-            logger.info(f"✅ Cache hit: {tile_id} | Shape: {tile_data.shape} | Cached: {metadata.get('timestamp', 'unknown')}")
+            logger.debug(f"✅ Cache hit: {tile_id} | Shape: {tile_data.shape} | Cached: {metadata.get('timestamp', 'unknown')}")
             return tile_data
             
         except Exception as e:

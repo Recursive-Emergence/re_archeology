@@ -71,7 +71,7 @@ class LidarRoamCache:
         if cache_key in self.cache:
             # Move accessed item to the end to mark it as recently used (for LRU)
             self.cache.move_to_end(cache_key)
-            logger.info(f"Cache HIT for key: {cache_key}")
+            logger.debug(f"Cache HIT for key: {cache_key}")
             patch_data = self.cache[cache_key]
             # Still enqueue prefetches even on cache hit, as user might be moving to a new area
             if self.prefetch_active.is_set():

@@ -55,7 +55,7 @@ class LocalFileCache(LidarCacheStrategy):
             data = np.load(cache_file, allow_pickle=True)
             tile_data = data['elevation']
             metadata = data['metadata'].item()
-            logger.info(f"✅ Local cache hit: {cache_key} | Shape: {tile_data.shape}")
+            logger.debug(f"✅ Local cache hit: {cache_key} | Shape: {tile_data.shape}")
             return tile_data
         except Exception as e:
             logger.warning(f"Error loading from local cache: {e}")
@@ -207,7 +207,7 @@ class GCSCache(LidarCacheStrategy):
                 tile_data = data['elevation']
                 metadata = data['metadata'].item()
             
-            logger.info(f"✅ GCS cache hit: {cache_key} | Shape: {tile_data.shape}")
+            logger.debug(f"✅ GCS cache hit: {cache_key} | Shape: {tile_data.shape}")
             return tile_data
         except Exception as e:
             logger.warning(f"Error loading from GCS cache: {e}")

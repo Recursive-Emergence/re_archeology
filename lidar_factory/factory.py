@@ -104,7 +104,7 @@ class LidarMapFactory:
         """
         
         data_type_to_fetch = (preferred_data_type or DEFAULT_DATA_TYPE).upper()
-        logger.info(f"Requesting patch at ({lat:.4f}, {lon:.4f}), size: {size_m}m, type: {data_type_to_fetch}, pref_res: {preferred_resolution_m}m/px")
+        logger.debug(f"Requesting patch at ({lat:.4f}, {lon:.4f}), size: {size_m}m, type: {data_type_to_fetch}, pref_res: {preferred_resolution_m}m/px")
 
         # Initialize cloud cache
         cache = get_cache() if use_cache else None
@@ -135,10 +135,10 @@ class LidarMapFactory:
         # Sort candidates
         if preferred_resolution_m:
             candidate_datasets.sort(key=lambda ds: (abs(ds.resolution_m - preferred_resolution_m), ds.resolution_m))
-            logger.info(f"Found {len(candidate_datasets)} candidates for '{data_type_to_fetch}', sorted by preference for {preferred_resolution_m}m resolution.")
+            logger.debug(f"Found {len(candidate_datasets)} candidates for '{data_type_to_fetch}', sorted by preference for {preferred_resolution_m}m resolution.")
         else:
             candidate_datasets.sort(key=lambda ds: ds.resolution_m)
-            logger.info(f"Found {len(candidate_datasets)} candidates for '{data_type_to_fetch}', sorted by finest resolution first.")
+            logger.debug(f"Found {len(candidate_datasets)} candidates for '{data_type_to_fetch}', sorted by finest resolution first.")
 
         # Attempt to fetch data using the sorted candidates
         for ds_meta in candidate_datasets:
@@ -156,7 +156,7 @@ class LidarMapFactory:
                 )
                 if cached_data is not None:
                     # Cache returns raw numpy array, wrap it in LidarPatchResult
-                    logger.info(f"✅ Using cached data from {ds_meta.name}. Shape: {cached_data.shape}")
+                    logger.debug(f"✅ Using cached data from {ds_meta.name}. Shape: {cached_data.shape}")
                     result = LidarPatchResult(
                         data=cached_data,
                         source_dataset=ds_meta.name,

@@ -12,8 +12,8 @@ router = APIRouter()
 TASKS_DATA_PATH = Path(__file__).parent.parent.parent.parent / "data" / "tasks"
 
 def load_existing_tasks() -> List[Dict[str, Any]]:
-    """Load existing tasks from JSON files in data/tasks/ directory"""
-    tasks = []
+    """Load existing tasks from JSON files in data/tasks/ directory (most recent version of each task)"""
+    task_dict = {}  # Use dict to store latest version of each task
     
     try:
         # Find all JSON files in tasks directory
@@ -23,31 +23,34 @@ def load_existing_tasks() -> List[Dict[str, Any]]:
             try:
                 with open(task_file, 'r') as f:
                     task_data = json.load(f)
+                    task_id = task_data['id']
                     
-                # Calculate decay value for existing tasks
-                task_data["decay_value"] = calculate_task_decay(task_data)
-                
-                # Ensure progress is in the expected format
-                if isinstance(task_data.get("progress"), (int, float)):
-                    progress_val = task_data["progress"]
-                    task_data["progress"] = {
-                        "scan": progress_val,
-                        "detection": progress_val if task_data["status"] == "completed" else 0,
-                        "overall": progress_val
-                    }
-                
-                # Add profiles if not present (use default)
-                if "profiles" not in task_data:
-                    task_data["profiles"] = ["default_windmill"]
-                
-                # Add sessions if not present
-                if "sessions" not in task_data:
-                    task_data["sessions"] = {
-                        "scan": task_data.get("session_id", f"scan_{task_data['id'][:8]}"),
-                        "detection": f"detection_{task_data['id'][:8]}"
-                    }
-                
-                tasks.append(task_data)
+                    # Keep only the most recent version of each task
+                    if task_id not in task_dict or task_data['updated_at'] > task_dict[task_id]['updated_at']:
+                        # Calculate decay value for existing tasks
+                        task_data["decay_value"] = calculate_task_decay(task_data)
+                        
+                        # Ensure progress is in the expected format
+                        if isinstance(task_data.get("progress"), (int, float)):
+                            progress_val = task_data["progress"]
+                            task_data["progress"] = {
+                                "scan": progress_val,
+                                "detection": progress_val if task_data["status"] == "completed" else 0,
+                                "overall": progress_val
+                            }
+                        
+                        # Add profiles if not present (use default)
+                        if "profiles" not in task_data:
+                            task_data["profiles"] = ["default_windmill"]
+                        
+                        # Add sessions if not present
+                        if "sessions" not in task_data:
+                            task_data["sessions"] = {
+                                "scan": task_data.get("session_id", f"scan_{task_data['id'][:8]}"),
+                                "detection": f"detection_{task_data['id'][:8]}"
+                            }
+                        
+                        task_dict[task_id] = task_data
                 
             except Exception as e:
                 print(f"Error loading task file {task_file}: {e}")
@@ -56,7 +59,7 @@ def load_existing_tasks() -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"Error accessing tasks directory: {e}")
     
-    return tasks
+    return list(task_dict.values())
 
 def calculate_task_decay(task: Dict[str, Any]) -> float:
     """Calculate decay value based on findings quality and time"""

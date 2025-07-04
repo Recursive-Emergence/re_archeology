@@ -90,11 +90,16 @@ async def restart_task_session(task: Dict[str, Any]):
         task: Task data dictionary containing coordinates, range, and session info
     """
     try:
+        import uuid
+        
         # Extract task parameters
         task_id = task["id"]
-        session_id = task.get("session_id", task_id)  # Use existing session_id or task_id
+        # Always generate a NEW session ID for restarts to avoid conflicts
+        session_id = str(uuid.uuid4())  
         start_coords = task["start_coordinates"]  # [lat, lon]
         range_info = task["range"]  # {"width_km": x, "height_km": y}
+        
+        logger.info(f"🔄 Restarting task {task_id} with NEW session {session_id}")
         
         # Calculate scan parameters
         center_lat = float(start_coords[0])
@@ -157,18 +162,22 @@ async def restart_task_session(task: Dict[str, Any]):
         # Add session to active sessions
         active_sessions[session_id] = session_info
         
+        # Update task data with new session ID
+        await update_task_session_id(task_id, session_id)
+        
         # Send notification about task restart
         await discovery_manager.send_message({
-            "type": "task_resumed",
+            "type": "session_start",
             "session_id": session_id,
             "task_id": task_id,
-            "message": f"Resumed scanning task {task_id} with detection enabled",
+            "message": f"Restarted scanning task {task_id} with detection enabled",
             "config": {
                 "center_lat": center_lat,
                 "center_lon": center_lon,
                 "radius_km": radius_km,
                 "total_tiles": scan_grid_size * scan_grid_size
             },
+            "restart": True,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
         
@@ -184,14 +193,53 @@ async def restart_task_session(task: Dict[str, Any]):
         logger.error(f"❌ Failed to restart task {task['id']}: {e}")
         raise
 
-async def update_task_progress(task_id: str, progress: Optional[float] = None, findings: List[Dict] = None):
+async def update_task_session_id(task_id: str, new_session_id: str):
+    """
+    Update the session_id for a task in its JSON file.
+    
+    Args:
+        task_id: Task ID to update
+        new_session_id: New session ID to assign
+    """
+    try:
+        # Find the task file
+        task_files = glob.glob(str(TASKS_DATA_PATH / f"*{task_id}*.json"))
+        
+        if not task_files:
+            logger.error(f"Task file not found for task {task_id}")
+            return
+            
+        task_file = task_files[0]
+        
+        # Load current task data
+        with open(task_file, 'r') as f:
+            task_data = json.load(f)
+        
+        # Update session ID
+        task_data["session_id"] = new_session_id
+        task_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        # Update sessions dict if it exists
+        if "sessions" in task_data:
+            task_data["sessions"]["scan"] = new_session_id
+        
+        # Save updated task data
+        with open(task_file, 'w') as f:
+            json.dump(task_data, f, indent=2)
+            
+        logger.info(f"✅ Updated task {task_id} with new session ID: {new_session_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to update session ID for task {task_id}: {e}")
+
+async def update_task_progress(task_id: str, progress: Optional[float] = None, findings: Optional[List[Dict]] = None):
     """
     Update progress for a running task and save to JSON file.
     
     Args:
         task_id: Task ID to update
         progress: New progress value (0-100) or None to keep current progress
-        findings: Optional list of new findings to add
+        findings: Optional list of new findings to add (must be a list of dictionaries)
     """
     try:
         # Find the task file
@@ -219,6 +267,10 @@ async def update_task_progress(task_id: str, progress: Optional[float] = None, f
         
         # Add findings if provided
         if findings:
+            if not isinstance(findings, list):
+                logger.warning(f"Expected findings to be a list, got {type(findings)}. Converting to list.")
+                findings = [findings] if findings is not None else []
+            
             if "findings" not in task_data:
                 task_data["findings"] = []
             task_data["findings"].extend(findings)
@@ -227,11 +279,21 @@ async def update_task_progress(task_id: str, progress: Optional[float] = None, f
         # Save updated task data
         with open(task_file, 'w') as f:
             json.dump(task_data, f, indent=2)
-            
+        
+        # Only log progress updates at significant milestones or with findings
         if progress is not None:
-            logger.info(f"📊 Updated task {task_id} progress to {progress}%")
-        if findings:
+            # Log only at whole number percentages or completion
+            if progress >= 100.0:
+                logger.info(f"✅ Task {task_id} completed (100%)")
+            elif progress >= 1.0 and progress % 1.0 == 0:
+                logger.info(f"📊 Task {task_id} progress: {int(progress)}%")
+            elif progress == 0:
+                logger.info(f"🚀 Task {task_id} started")
+        
+        if findings and isinstance(findings, list):
             logger.info(f"🎯 Added {len(findings)} findings to task {task_id}")
+        elif findings:
+            logger.info(f"🎯 Added 1 finding to task {task_id}")
         
     except Exception as e:
         logger.error(f"❌ Failed to update task {task_id}: {e}")

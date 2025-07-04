@@ -402,7 +402,7 @@ class G2StructureDetector:
         # Use profile-driven region extraction for region-based features
         region = self.extract_profile_region(elevation_patch.elevation_data)
         if region is None:
-            logger.warning("Detection region is clipped and allow_clipped_region is False; returning negative detection.")
+            logger.debug("Detection region is clipped and allow_clipped_region is False; returning negative detection.")
             return G2DetectionResult(
                 detected=False,
                 confidence=0.0,

@@ -119,22 +119,36 @@ export function updateAnimationForResolution(app, actualResolution, isHighResolu
 }
 
 export function startScanningAnimation(app, iconType = 'satellite') {
+    // Only stop existing animation if we're not already in the process of starting one
+    if (app.scanningIcon && app.animationState?.isActive) {
+        // Already have an active animation, just update the icon type if needed
+        if (app.animationState.iconType === iconType) {
+            window.Logger?.animation('info', `Scanning animation already active with ${iconType} icon`);
+            return;
+        }
+    }
+    
+    // Stop any existing animation
     stopScanningAnimation(app);
-    window.Logger?.animation('info', `Starting ${iconType} scanning animation`);
-    const scanIcon = document.createElement('div');
-    scanIcon.className = `scanning-icon ${iconType}`;
-    scanIcon.innerHTML = iconType === 'airplane' ? '🚁' : '🛰️';
-    scanIcon.style.cssText = `position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1500; pointer-events: none; font-size: ${iconType === 'airplane' ? '32px' : '28px'}; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(0, 255, 136, 0.6)); transition: all 0.3s ease; opacity: 1; background: transparent; padding: 8px; border-radius: 0; border: none; box-shadow: none;`;
-    app.map.getContainer().appendChild(scanIcon);
-    app.scanningIcon = scanIcon;
-    app.animationState = {
-        tileCount: 0,
-        startTime: Date.now(),
-        isActive: true,
-        iconType: iconType,
-        isProcessingTile: false
-    };
-    startIdleAnimation(app, scanIcon);
+    
+    // Add a small delay to ensure cleanup is complete before starting new animation
+    setTimeout(() => {
+        window.Logger?.animation('info', `Starting ${iconType} scanning animation`);
+        const scanIcon = document.createElement('div');
+        scanIcon.className = `scanning-icon ${iconType}`;
+        scanIcon.innerHTML = iconType === 'airplane' ? '🚁' : '🛰️';
+        scanIcon.style.cssText = `position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1500; pointer-events: none; font-size: ${iconType === 'airplane' ? '32px' : '28px'}; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(0, 255, 136, 0.6)); transition: all 0.3s ease; opacity: 1; background: transparent; padding: 8px; border-radius: 0; border: none; box-shadow: none;`;
+        app.map.getContainer().appendChild(scanIcon);
+        app.scanningIcon = scanIcon;
+        app.animationState = {
+            tileCount: 0,
+            startTime: Date.now(),
+            isActive: true,
+            iconType: iconType,
+            isProcessingTile: false
+        };
+        startIdleAnimation(app, scanIcon);
+    }, 50);
 }
 
 function startIdleAnimation(app, iconElement) {
@@ -158,23 +172,31 @@ function startIdleAnimation(app, iconElement) {
 }
 
 export function stopScanningAnimation(app) {
-    if (app.animationState) app.animationState.isActive = false;
+    if (app.animationState) {
+        app.animationState.isActive = false;
+    }
+    
     if (app.scanningIcon) {
         app.scanningIcon.style.opacity = '0';
         setTimeout(() => {
             if (app.scanningIcon && app.scanningIcon.parentNode) {
                 app.scanningIcon.parentNode.removeChild(app.scanningIcon);
             }
+            app.scanningIcon = null;
         }, 200);
-        app.scanningIcon = null;
     }
+    
+    // Clean up any orphaned icons
     const mapContainer = app.map?.getContainer();
     if (mapContainer) {
         const orphanedIcons = mapContainer.querySelectorAll('.scanning-icon');
         orphanedIcons.forEach(icon => {
-            if (icon.parentNode) icon.parentNode.removeChild(icon);
+            if (icon.parentNode) {
+                icon.parentNode.removeChild(icon);
+            }
         });
     }
+    
     app.animationState = null;
 }
 

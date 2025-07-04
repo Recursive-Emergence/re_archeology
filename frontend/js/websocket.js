@@ -64,8 +64,9 @@ export function handleWebSocketMessage(app, data) {
     }
     switch (data.type) {
         case 'lidar_tile':
+            console.log('Received lidar_tile websocket message:', data);
             // Start scanning animation if not already started
-            if (!app.isScanning) {
+            if (!app.isScanning && !app.animationState?.isActive) {
                 if (typeof app.startScanningAnimation === 'function') {
                     app.startScanningAnimation('satellite');
                 }
@@ -85,24 +86,120 @@ export function handleWebSocketMessage(app, data) {
             app.completeDetectionAnimation?.();
             break;
         case 'session_stopped':
-            // ...handle session stopped if needed...
+            // Stop animations when session is stopped
+            if (typeof app.stopScanningAnimation === 'function') {
+                app.stopScanningAnimation();
+            }
+            app.isScanning = false;
+            app.currentLidarSession = null;
             break;
         case 'session_failed':
         case 'lidar_error':
-            // ...handle error if needed...
+            // Stop animations when session fails
+            if (typeof app.stopScanningAnimation === 'function') {
+                app.stopScanningAnimation();
+            }
+            app.isScanning = false;
+            app.currentLidarSession = null;
             break;
         case 'task_resumed':
+            console.log('Received task_resumed websocket message:', data);
             // Enable heatmap visualization for resumed task
             if (app.mapVisualization && typeof app.mapVisualization.enableHeatmapMode === 'function') {
                 app.mapVisualization.enableHeatmapMode();
             }
-            // Start scanning animation to show activity
-            if (typeof app.startScanningAnimation === 'function') {
-                app.startScanningAnimation('satellite');
+            // Start scanning animation to show activity (with delay for proper initialization)
+            if (!app.isScanning && !app.animationState?.isActive) {
+                // Stop any existing animation first to prevent duplicates
+                if (typeof app.stopScanningAnimation === 'function') {
+                    app.stopScanningAnimation();
+                }
+                
+                setTimeout(() => {
+                    if (typeof app.startScanningAnimation === 'function' && 
+                        !app.isScanning && !app.animationState?.isActive) {
+                        app.startScanningAnimation('satellite');
+                        app.isScanning = true;
+                        app.currentLidarSession = data.session_id;
+                    }
+                }, 100);
             }
-            // Set app scanning state
-            app.isScanning = true;
-            app.currentLidarSession = data.session_id;
+            
+            // Immediately refresh task list to show updated status
+            if (app.taskList && typeof app.taskList.loadTasks === 'function') {
+                // Clear cache first to ensure fresh data
+                if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
+                    app.taskList.taskService.clearCache();
+                }
+                setTimeout(() => app.taskList.loadTasks(), 150);
+            }
+            break;
+        case 'session_start':
+            console.log('Received session_start websocket message:', data);
+            // Handle session start, especially for restarted tasks
+            if (data.restart) {
+                // This is a restarted session, ensure satellite animation starts properly
+                if (!app.isScanning && !app.animationState?.isActive) {
+                    // Stop any existing animation first
+                    if (typeof app.stopScanningAnimation === 'function') {
+                        app.stopScanningAnimation();
+                    }
+                    
+                    setTimeout(() => {
+                        if (typeof app.startScanningAnimation === 'function' && 
+                            !app.isScanning && !app.animationState?.isActive) {
+                            app.startScanningAnimation('satellite');
+                            app.isScanning = true;
+                            app.currentLidarSession = data.session_id;
+                        }
+                    }, 300);
+                }
+                
+                // Immediately refresh task list to show updated status
+                if (app.taskList && typeof app.taskList.loadTasks === 'function') {
+                    // Clear cache first to ensure fresh data
+                    if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
+                        app.taskList.taskService.clearCache();
+                    }
+                    setTimeout(() => app.taskList.loadTasks(), 350);
+                }
+            }
+            break;
+        case 'task_paused':
+            console.log('Received task_paused websocket message:', data);
+            // Stop animations when task is paused
+            if (typeof app.stopScanningAnimation === 'function') {
+                app.stopScanningAnimation();
+            }
+            app.isScanning = false;
+            app.currentLidarSession = null;
+            
+            // Handle task paused notification
+            if (app.taskList && typeof app.taskList.loadTasks === 'function') {
+                // Clear cache first to ensure fresh data
+                if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
+                    app.taskList.taskService.clearCache();
+                }
+                app.taskList.loadTasks();
+            }
+            break;
+        case 'task_aborted':
+            console.log('Received task_aborted websocket message:', data);
+            // Stop animations when task is aborted
+            if (typeof app.stopScanningAnimation === 'function') {
+                app.stopScanningAnimation();
+            }
+            app.isScanning = false;
+            app.currentLidarSession = null;
+            
+            // Handle task aborted notification
+            if (app.taskList && typeof app.taskList.loadTasks === 'function') {
+                // Clear cache first to ensure fresh data
+                if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
+                    app.taskList.taskService.clearCache();
+                }
+                app.taskList.loadTasks();
+            }
             break;
         default:
             break;

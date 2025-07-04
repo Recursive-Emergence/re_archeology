@@ -413,10 +413,15 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                     progress_percent = (session_info["processed_tiles"] / session_info["total_tiles"]) * 100
                     
                     # Update task progress if this is a resumed task
+                    # Only update at reasonable intervals to reduce log spam
                     if session_info.get("task_id"):
                         try:
                             from backend.api.startup_tasks import update_task_progress
-                            await update_task_progress(session_info["task_id"], progress_percent)
+                            # Only update every 10% or at completion
+                            if (progress_percent >= 100.0 or 
+                                int(progress_percent) % 10 == 0 and 
+                                int(progress_percent) != int((session_info["processed_tiles"] - 1) / session_info["total_tiles"] * 100)):
+                                await update_task_progress(session_info["task_id"], progress_percent)
                         except Exception as e:
                             logger.error(f"Failed to update task progress: {e}")
                     
@@ -671,13 +676,14 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
             processed_steps += 1
             if processed_steps % 10 == 0:  # Update every 10 steps to avoid spam
                 detection_progress = (processed_steps / total_steps) * 100
+                findings_count = len(findings) if isinstance(findings, list) else 0
                 await discovery_manager.send_message({
                     'type': 'detection_progress',
                     'session_id': str(session_id),
                     'processed_steps': processed_steps,
                     'total_steps': total_steps,
                     'progress_percent': detection_progress,
-                    'findings_count': len(findings),
+                    'findings_count': findings_count,
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 })
             
@@ -692,7 +698,11 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
             # Don't change progress here - detection doesn't affect scan progress
             # Just add the findings
             await update_task_progress(task_id, None, findings)
-            logger.info(f"✅ Added {len(findings)} findings to task {task_id}")
+            # Safe logging with type checking
+            if isinstance(findings, list):
+                logger.info(f"✅ Added {len(findings)} findings to task {task_id}")
+            else:
+                logger.info(f"✅ Added findings to task {task_id}")
         except Exception as e:
             logger.error(f"Failed to update task findings: {e}")
     

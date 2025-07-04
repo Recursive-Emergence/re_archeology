@@ -126,6 +126,12 @@ export class REArchaeologyApp {
     async init() {
         try {
             window.Logger?.app('info', 'Starting application initialization...');
+            
+            // Clear any existing session state to start fresh
+            if (window.TaskList && typeof window.TaskList.manageScanningSession === 'function') {
+                window.TaskList.manageScanningSession(null, 'clear');
+            }
+            
             await this.waitForDOM();
             setupMap(this);
             setupLayers(this);
@@ -149,6 +155,9 @@ export class REArchaeologyApp {
             
             // Initialize task list
             this.initializeTaskList();
+            
+            // Start periodic task refresh to ensure ground truth synchronization
+            this.startPeriodicTaskRefresh();
             
             await this.initializeAuth?.();
             window.Logger?.app('info', 'Application initialized successfully');
@@ -727,5 +736,21 @@ export class REArchaeologyApp {
                 });
             }
         }
+    }
+
+    startPeriodicTaskRefresh() {
+        // Start periodic task refresh every 15 seconds to ensure ground truth
+        setInterval(() => {
+            if (this.taskList && typeof this.taskList.loadTasks === 'function') {
+                // Clear cache to ensure fresh data
+                if (this.taskList.taskService && typeof this.taskList.taskService.clearCache === 'function') {
+                    this.taskList.taskService.clearCache();
+                }
+                this.taskList.loadTasks();
+                window.Logger?.app('debug', 'Periodic task refresh completed');
+            }
+        }, 15000); // Every 15 seconds
+        
+        window.Logger?.app('info', 'Periodic task refresh started (15s intervals)');
     }
 } // End of class

@@ -22,15 +22,56 @@ class TaskList {
     async loadTasks() {
         try {
             this.showLoadingState();
+            
+            // Keep track of previous running tasks
+            const previousRunningTasks = this.tasks ? this.tasks.filter(task => task.status === 'running') : [];
+            
             this.tasks = await this.taskService.getTasks({ minDecay: 0.1 });
             this.renderTaskRectangles();
             this.renderTaskList();
+            
+            // Check for newly running tasks and trigger appropriate actions
+            const currentRunningTasks = this.tasks.filter(task => task.status === 'running');
             
             // Auto-navigate to running task if this is the first load
             if (this.isFirstLoad) {
                 this.isFirstLoad = false;
                 await this.checkAndNavigateToRunningTask();
+            } else {
+                // Check for newly running tasks (tasks that weren't running before but are now)
+                const newlyRunningTasks = currentRunningTasks.filter(currentTask => 
+                    !previousRunningTasks.some(prevTask => prevTask.id === currentTask.id)
+                );
+                
+                if (newlyRunningTasks.length > 0) {
+                    console.log('Detected newly running tasks:', newlyRunningTasks.map(t => t.id));
+                    
+                    // Navigate to the first newly running task
+                    const newlyRunningTask = newlyRunningTasks[0];
+                    await this.navigateToTaskSmoothly(newlyRunningTask.id);
+                    
+                    // Trigger scanning visualization if not already active
+                    if (window.reArchaeologyApp && !window.reArchaeologyApp.isScanning) {
+                        // Stop any existing animation first to prevent duplicates
+                        if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
+                            window.reArchaeologyApp.stopScanningAnimation();
+                        }
+                        
+                        // Start new animation after a short delay
+                        setTimeout(() => {
+                            if (typeof window.reArchaeologyApp.startScanningAnimation === 'function') {
+                                window.reArchaeologyApp.startScanningAnimation('satellite');
+                                window.reArchaeologyApp.isScanning = true;
+                                console.log('Started scanning animation for newly running task');
+                            }
+                        }, 100);
+                    }
+                }
             }
+            
+            // Always check and trigger visualization for running tasks
+            // This ensures visualization works even if websocket messages are missed
+            this.triggerVisualizationForRunningTasks();
         } catch (error) {
             console.error('Failed to load tasks:', error);
             this.showErrorState();
@@ -369,6 +410,49 @@ class TaskList {
             console.log('No running tasks found');
             if (window.reArchaeologyApp && typeof window.reArchaeologyApp.fitToDiscoveredSitesIfNeeded === 'function') {
                 setTimeout(() => window.reArchaeologyApp.fitToDiscoveredSitesIfNeeded(), 1500);
+            }
+        }
+    }
+
+    /**
+     * Check and trigger visualization for running tasks
+     * This ensures that even if websocket messages are missed, running tasks get proper visualization
+     */
+    triggerVisualizationForRunningTasks() {
+        const runningTasks = this.tasks.filter(task => task.status === 'running');
+        
+        if (runningTasks.length > 0 && window.reArchaeologyApp) {
+            console.log('Triggering visualization for running tasks:', runningTasks.map(t => t.id));
+            
+            // Enable heatmap mode for running tasks
+            if (window.reArchaeologyApp.mapVisualization && 
+                typeof window.reArchaeologyApp.mapVisualization.enableHeatmapMode === 'function') {
+                window.reArchaeologyApp.mapVisualization.enableHeatmapMode();
+            }
+            
+            // Start scanning animation if not already active
+            if (!window.reArchaeologyApp.isScanning) {
+                // Stop any existing animation first to prevent duplicates
+                if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
+                    window.reArchaeologyApp.stopScanningAnimation();
+                }
+                
+                // Start new animation after a short delay
+                setTimeout(() => {
+                    if (typeof window.reArchaeologyApp.startScanningAnimation === 'function' && 
+                        !window.reArchaeologyApp.isScanning) {
+                        window.reArchaeologyApp.startScanningAnimation('satellite');
+                        window.reArchaeologyApp.isScanning = true;
+                        console.log('Started scanning animation for running tasks');
+                    }
+                }, 150);
+            }
+            
+            // Set session info
+            const runningTask = runningTasks[0];
+            if (runningTask.session_id || runningTask.sessions?.scan) {
+                window.reArchaeologyApp.currentLidarSession = runningTask.session_id || runningTask.sessions.scan;
+                console.log('Set current LiDAR session:', window.reArchaeologyApp.currentLidarSession);
             }
         }
     }
