@@ -51,11 +51,7 @@ export function setupLayers(app) {
 }
 
 export function setupMapEvents(app) {
-    app.map.on('click', (e) => {
-        if (e.originalEvent.ctrlKey && !app.isScanning) {
-            selectScanArea(app, e.latlng.lat, e.latlng.lng);
-        }
-    });
+    // Removed scan area selection - using task list for navigation
 }
 
 // Fetch real resolution from backend for a given area

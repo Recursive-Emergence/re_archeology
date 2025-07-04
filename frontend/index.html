@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="css/status-enhancements.css">
     <link rel="stylesheet" href="css/visualization-enhancements.css">
     <link rel="stylesheet" href="css/main-styles.css">
+    <link rel="stylesheet" href="css/task-list.css">
     
     <!-- Detection Animation Styles -->
     <style>
@@ -135,35 +136,16 @@
             </div>
         </div>
         
-        <!-- Discovery Panel (Floating Left) -->
-        <div class="discovery-panel">
-            <div class="discovery-header">
-                <h1>🛰️ LiDAR Scan</h1>
-                <p>Real-time elevation scanning and structure detection</p>
+        <!-- Task Panel (Floating Left) -->
+        <div class="task-panel">
+            <div class="task-header">
+                <h1>� Task History</h1>
+                <p>Archaeological survey tasks and findings</p>
             </div>
             
-            <div class="discovery-controls">
-                <!-- LiDAR Scan Controls -->
-                <div class="control-group">
-                    <div class="control-content">
-                        <div class="button-grid">
-                            <button class="btn btn-primary" id="startLidarScanBtn">Scan</button>
-                            <button class="btn btn-stop" id="stopLidarScanBtn" disabled>Stop</button>
-                        </div>
-                        <div class="input-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="enableDetection" class="checkbox-input" checked>
-                                <span class="checkbox-text">Enable Detection</span>
-                            </label>
-                        </div>
-                        <div class="input-group">
-                            <label>Structure Type</label>
-                            <select id="structureType">
-                                <option value="windmill" selected>Loading structure types...</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
+            <div class="task-list-container" id="taskListContainer">
+                <!-- Task list will be populated by JavaScript -->
+                <div class="task-list-loading">Loading tasks...</div>
             </div>
         </div>
         
@@ -250,6 +232,10 @@
     
     <!-- Map Visualization for LiDAR support -->
     <script src="js/map-visualization.js"></script>
+    
+    <!-- Task Management -->
+    <script src="js/task-service.js"></script>
+    <script src="js/task-list.js"></script>
     
     <!-- Main Application (modular) -->
     <script type="module" src="js/main.js"></script>

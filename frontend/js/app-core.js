@@ -1,5 +1,5 @@
 // Core application logic and main class
-import { setupMap, setupLayers, setupMapEvents, selectScanArea, zoomToScanArea, updateScanAreaLabel, calculateScanParameters } from './map.js';
+import { setupMap, setupLayers } from './map.js';
 import { setupUI, updateScanButtonText, updateLidarScanButtonStates, updateButtonStates, startScanUI, cleanupAfterStop, updateResolutionDisplay, updateAnimationForResolution, startScanningAnimation, stopScanningAnimation, updateAnimationProgress, showResolutionBadge, hideResolutionBadge } from './ui.js';
 import { startDetectionAnimation, stopDetectionAnimation, handlePatchResult, createDetectionLens, ensureDetectionLensReady, updateLensVisualFeedback, completeDetectionAnimation, updateDetectionProfileText } from './detection.js';
 import { connectWebSocket, handleWebSocketMessage } from './websocket.js';
@@ -12,9 +12,6 @@ export class REArchaeologyApp {
         this.mapVisualization = null;
         this.websocket = null;
         // Scan state
-        this.scanAreaRectangle = null;
-        this.scanAreaLabel = null;
-        this.selectedArea = null;
         this.isScanning = false;
         // Session management
         this.currentLidarSession = null;
@@ -38,6 +35,10 @@ export class REArchaeologyApp {
         this.detections = [];
         // Add a layer group for discovered sites
         this.discoveredSitesLayer = null;
+        
+        // Task management
+        this.taskList = null;
+        
         window.Logger?.app('info', 'RE-Archaeology App initialized');
     }
 
@@ -130,13 +131,6 @@ export class REArchaeologyApp {
             setupMap(this);
             setupLayers(this);
             this.setupMapUrlSync();
-            const params = new URLSearchParams(window.location.search);
-            const hasUrlCoords = params.has('lat') && params.has('lon');
-            if (hasUrlCoords) {
-                this.handleUrlCoordinates();
-            } else {
-                this.setupDefaultScanArea();
-            }
             await this.loadAvailableStructureTypes?.();
             await this.loadDiscoveredSites();
             setupUI(this);
@@ -144,6 +138,10 @@ export class REArchaeologyApp {
             updateScanButtonText(this, enableDetection);
             this.initializeDetectionOverlay?.();
             connectWebSocket(this);
+            
+            // Initialize task list
+            this.initializeTaskList();
+            
             await this.initializeAuth?.();
             window.Logger?.app('info', 'Application initialized successfully');
         } catch (error) {
@@ -161,137 +159,39 @@ export class REArchaeologyApp {
         });
     }
 
-    setupDefaultScanArea() {
-        // Use map's minZoom for broad view
-        const minZoom = this.map ? this.map.getMinZoom() : 4;
-        const params = new URLSearchParams(window.location.search);
-        const hasUrlCoords = params.has('lat') && params.has('lon');
-        const zoom = hasUrlCoords ? (params.has('zoom') ? parseInt(params.get('zoom')) : (this.map ? this.map.getMaxZoom() : 18)) : minZoom;
-        if (!hasUrlCoords) {
-            // Set default to Amazon area and broad view
-            selectScanArea(this, -2.284550660236957, -66.35742187500001, 1.0);
-            if (this.map) {
-                this.map.setView([-2.284550660236957, -66.35742187500001], zoom, { animate: true });
-                // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
-            }
-        }
-    }
-
-    handleUrlCoordinates() {
-        const params = new URLSearchParams(window.location.search);
-        const lat = parseFloat(params.get('lat'));
-        const lon = parseFloat(params.get('lon'));
-        const zoom = params.has('zoom') ? parseInt(params.get('zoom')) : (this.map ? this.map.getMaxZoom() : 18);
-        const valid = !isNaN(lat) && !isNaN(lon);
-        const setViewWithTilesReady = () => {
-            if (this.map && this.map._layers) {
-                // Find the first tile layer
-                const tileLayer = Object.values(this.map._layers).find(l => l instanceof window.L.TileLayer);
-                if (tileLayer && !tileLayer._tilesToLoad) {
-                    selectScanArea(this, lat, lon, 1.0);
-                    this.map.setView([lat, lon], zoom, { animate: true });
-                    // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
-                } else if (tileLayer) {
-                    tileLayer.once('load', () => {
-                        selectScanArea(this, lat, lon, 1.0);
-                        this.map.setView([lat, lon], zoom, { animate: true });
-                        // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
-                    });
-                } else {
-                    // No tile layer yet, try again shortly
-                    setTimeout(setViewWithTilesReady, 100);
-                }
-            } else {
-                setTimeout(setViewWithTilesReady, 100);
-            }
-        };
-        if (valid) {
-            setViewWithTilesReady();
-        }
-        window.addEventListener('popstate', () => {
-            const params = new URLSearchParams(window.location.search);
-            const lat = parseFloat(params.get('lat'));
-            const lon = parseFloat(params.get('lon'));
-            const zoom = params.has('zoom') ? parseInt(params.get('zoom')) : (this.map ? this.map.getMaxZoom() : 18);
-            if (!isNaN(lat) && !isNaN(lon)) {
-                selectScanArea(this, lat, lon, 1.0);
-                this.map.setView([lat, lon], zoom, { animate: true });
-                // console.log('Requested zoom:', zoom, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
-            }
-        });
-    }
-
     updateUrlWithCoordinates(lat, lon, zoom) {
-        const url = new URL(window.location.href);
-        url.searchParams.set('lat', lat);
-        url.searchParams.set('lon', lon);
-        if (zoom) url.searchParams.set('zoom', zoom);
-        window.history.pushState({}, '', url);
+        if (isNaN(lat) || isNaN(lon)) return;
+        const url = new URL(window.location);
+        url.searchParams.set('lat', lat.toFixed(6));
+        url.searchParams.set('lon', lon.toFixed(6));
+        url.searchParams.set('zoom', Math.round(zoom));
+        window.history.replaceState({}, '', url);
     }
 
-    navigateToCoordinates(lat, lon, zoom = 13, updateHistory = true) {
-        const latNum = parseFloat(lat);
-        const lonNum = parseFloat(lon);
-        const zoomNum = parseInt(zoom);
-        if (isNaN(latNum) || isNaN(lonNum)) {
-            // console.warn('Invalid coordinates provided:', lat, lon); // Suppressed for clean UI
-            return false;
+    initializeTaskList() {
+        if (this.map && window.TaskList) {
+            try {
+                this.taskList = new TaskList(this.map);
+                window.Logger?.app('info', 'Task list initialized successfully');
+            } catch (error) {
+                window.Logger?.app('error', 'Failed to initialize task list:', error);
+            }
+        } else {
+            window.Logger?.app('warn', 'Cannot initialize task list - map or TaskList class not available');
         }
-        selectScanArea(this, latNum, lonNum, 1.0);
-        if (updateHistory) {
-            this.updateUrlWithCoordinates(latNum, lonNum, zoomNum);
-        }
-        // Set the view and zoom only here, after scan area is set
-        if (this.map) {
-            this.map.setView([latNum, lonNum], zoomNum, { animate: true });
-            // console.log('Requested zoom:', zoomNum, 'Actual zoom:', this.map.getZoom()); // Suppressed for clean UI
-        }
-        return true;
     }
+
+    // Removed scan area selection functionality - now using task list for navigation
 
     async startLidarScan() {
-        window.Logger?.lidar('info', 'Starting LiDAR scan...');
-        if (!this.selectedArea) {
-            window.Logger?.lidar('warn', 'No scan area selected');
-            alert('Please select a scan area first by Ctrl+clicking on the map.');
-            return;
-        }
-        const enableDetection = document.getElementById('enableDetection')?.checked || false;
-        const structureType = document.getElementById('structureType')?.value || 'windmill';
-        window.Logger?.lidar('info', 'Scan configuration', { enableDetection, structureType, selectedArea: this.selectedArea });
-        try {
-            this.zoomToScanArea();
-            setTimeout(async () => {
-                const config = this.buildScanConfig?.(enableDetection, structureType) || {};
-                this.startScanUI?.();
-                if (this.startBackendScan) {
-                    const result = await this.startBackendScan(config);
-                    this.currentLidarSession = result.session_id;
-                    if (result.actual_resolution) {
-                        this.updateResolutionDisplay?.(result.actual_resolution);
-                        this.updateAnimationForResolution?.(result.actual_resolution, result.is_high_resolution);
-                    }
-                }
-                if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
-                    this.connectWebSocket?.();
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-                window.Logger?.lidar('info', 'LiDAR scan started successfully');
-            }, 500);
-        } catch (error) {
-            // console.error('❌ Failed to start LiDAR scan:', error); // Suppressed for clean UI
-            alert('Failed to start LiDAR scan: ' + error.message);
-            this.cleanupAfterStop?.();
-        }
+        window.Logger?.lidar('info', 'LiDAR scan functionality disabled - use task list for navigation');
+        alert('LiDAR scan functionality has been disabled. Use the task list to navigate to existing scan areas.');
+        return;
     }
 
-    // --- Add missing methods as passthroughs to preserve modular wiring ---
+    // --- Removed scan area related methods ---
     zoomToScanArea() {
-        if (typeof zoomToScanArea === 'function') {
-            zoomToScanArea(this);
-        } else {
-            // console.warn('zoomToScanArea is not defined'); // Suppressed for clean UI
-        }
+        window.Logger?.lidar('warn', 'Scan area functionality disabled');
     }
 
     buildScanConfig(enableDetection, structureType) {
@@ -387,11 +287,7 @@ export class REArchaeologyApp {
 
     // --- Map and scan area helpers ---
     initializeMapVisualization() { if (typeof window.MapVisualization === 'function' && this.map) this.mapVisualization = new window.MapVisualization(this.map); }
-    calculateScanParameters() { if (typeof calculateScanParameters === 'function') return calculateScanParameters(this); return {}; }
-    calculateAreaBounds(lat, lon, radiusKm) { if (typeof calculateAreaBounds === 'function') return calculateAreaBounds(lat, lon, radiusKm); return []; }
     calculateOptimalBorderWeight() { return this.map ? (this.map.getZoom() >= 16 ? 3 : this.map.getZoom() >= 14 ? 2.5 : this.map.getZoom() >= 12 ? 2 : 1.5) : 2; }
-    selectScanArea(lat, lon, radiusKm = 1) { if (typeof selectScanArea === 'function') selectScanArea(this, lat, lon, radiusKm); }
-    updateScanAreaLabel(resolution = null) { if (typeof updateScanAreaLabel === 'function') updateScanAreaLabel(this, resolution); }
 
     // --- Scan control ---
     async stopLidarScan() {
@@ -607,5 +503,18 @@ export class REArchaeologyApp {
             'generic': 'Generic Structures'
         };
         return typeMap[structureType] || structureType.replace(/[_-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    initializeTaskList() {
+        if (this.map && window.TaskList) {
+            try {
+                this.taskList = new TaskList(this.map);
+                window.Logger?.app('info', 'Task list initialized successfully');
+            } catch (error) {
+                window.Logger?.app('error', 'Failed to initialize task list:', error);
+            }
+        } else {
+            window.Logger?.app('warn', 'Cannot initialize task list - map or TaskList class not available');
+        }
     }
 } // End of class

@@ -1,0 +1,332 @@
+/* Task Panel Styles - Positioned to avoid default zoom controls (top-left) */
+.task-panel {
+    position: fixed;
+    top: 90px;
+    left: 80px;
+    width: 240px;
+    max-height: calc(100vh - 120px);
+    background: rgba(0, 0, 0, 0.9);
+    border-radius: 8px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.task-header {
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.task-header h1 {
+    margin: 0;
+    color: var(--accent-color, #00ff88);
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+.task-header p {
+    margin: 0.2rem 0 0 0;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8em;
+}
+
+/* Task List Styles - Compact */
+.task-list-container {
+    flex: 1;
+    padding: 0.5rem 1rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.task-list-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.task-list-container::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.task-list-container::-webkit-scrollbar-thumb {
+    background: var(--accent-color, #00ff88);
+    border-radius: 3px;
+}
+
+.task-item {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    padding: 0.6rem;
+    margin-bottom: 0.4rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-left: 3px solid transparent;
+}
+
+.task-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateX(3px);
+}
+
+.task-item.selected {
+    background: rgba(0, 255, 136, 0.15);
+    border-left-color: var(--accent-color, #00ff88) !important;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.3);
+}
+
+.task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.3rem;
+}
+
+.task-id {
+    font-family: 'Courier New', monospace;
+    font-size: 0.7em;
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+}
+
+.task-status {
+    font-size: 0.7em;
+    font-weight: bold;
+    text-transform: uppercase;
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.task-details {
+    font-size: 0.75em;
+    color: rgba(255, 255, 255, 0.9);
+    line-height: 1.2;
+}
+
+.task-details > div {
+    margin: 0.1rem 0;
+}
+
+.task-location,
+.task-range,
+.task-findings,
+.task-time {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.task-progress {
+    margin-top: 0.4rem;
+    padding-top: 0.3rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.progress-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 0.2rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-color, #00ff88), #00cc6a);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.progress-details {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.65em;
+    text-align: center;
+}
+
+.task-count-header {
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.task-count {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9em;
+    margin: 0;
+}
+
+.task-list-scroll {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.task-item {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-left: 4px solid transparent;
+}
+
+.task-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateX(5px);
+}
+
+.task-item.selected {
+    background: rgba(0, 255, 136, 0.15);
+    border-left-color: var(--accent-color, #00ff88) !important;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+}
+
+/* Task Rectangle Styling - Sharp rectangular appearance */
+.task-rectangle {
+    border-radius: 0 !important;
+    stroke-width: 1;
+    stroke-dasharray: none;
+}
+
+.task-rectangle.highlighted {
+    animation: taskHighlight 2s ease-in-out infinite;
+    stroke-width: 2;
+}
+
+@keyframes taskHighlight {
+    0%, 100% {
+        opacity: 0.7;
+        stroke-width: 2;
+    }
+    50% {
+        opacity: 1;
+        stroke-width: 3;
+    }
+}
+
+.task-rectangle.pulse {
+    animation: taskPulse 2s ease-in-out infinite;
+}
+
+@keyframes taskPulse {
+    0%, 100% {
+        opacity: 0.6;
+        stroke-width: 1;
+    }
+    50% {
+        opacity: 1;
+        stroke-width: 2;
+    }
+}
+
+/* Task Status Colors */
+.task-item.running {
+    border-left-color: #4CAF50;
+}
+
+.task-item.completed {
+    border-left-color: #2196F3;
+}
+
+.task-item.paused {
+    border-left-color: #FF9800;
+}
+
+.task-item.aborted {
+    border-left-color: #F44336;
+}
+
+.task-item.stopped {
+    border-left-color: #9E9E9E;
+}
+
+.task-item.pending {
+    border-left-color: #FFEB3B;
+}
+
+/* Task Tooltip */
+.task-tooltip {
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8em;
+    line-height: 1.3;
+    border: 1px solid var(--accent-color, #00ff88);
+}
+
+.task-tooltip strong {
+    color: var(--accent-color, #00ff88);
+}
+
+/* Responsive Design - Avoid zoom controls */
+@media (max-width: 768px) {
+    .task-panel {
+        width: 220px;
+        max-height: calc(100vh - 100px);
+        top: 80px;
+        left: 70px;
+    }
+    
+    .task-item {
+        padding: 0.5rem;
+    }
+    
+    .task-details {
+        font-size: 0.7em;
+    }
+}
+
+/* Reset zoom controls to default Leaflet positioning */
+.leaflet-control-zoom {
+    z-index: 1000 !important;
+}
+
+/* Don't override default zoom control positioning */
+.leaflet-top.leaflet-left {
+    top: 10px !important;
+    left: 10px !important;
+}
+
+.leaflet-control-container .leaflet-top .leaflet-control {
+    margin-top: 10px !important;
+    margin-left: 10px !important;
+}
+
+/* Loading State */
+.task-list-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.task-list-loading::after {
+    content: '...';
+    animation: loadingDots 1.5s infinite;
+}
+
+@keyframes loadingDots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+/* Empty State */
+.task-list-empty {
+    text-align: center;
+    padding: 2rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.task-list-empty h4 {
+    color: var(--accent-color, #00ff88);
+    margin-bottom: 0.5rem;
+}

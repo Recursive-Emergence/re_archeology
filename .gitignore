@@ -208,3 +208,5 @@ sage*.json
 .env.cloudrun.yaml
 g2_validation_results/
 kernel/tests/*
+data/ 
+users/
