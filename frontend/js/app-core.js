@@ -39,6 +39,10 @@ export class REArchaeologyApp {
         // Task management
         this.taskList = null;
         
+        // Bitmap cache for progressive loading
+        this.loadedBitmapCaches = new Set();
+        this.cachedBitmapOverlay = null;
+        
         window.Logger?.app('info', 'RE-Archaeology App initialized');
     }
 
@@ -150,7 +154,10 @@ export class REArchaeologyApp {
             
             // Enable heatmap mode by default to be ready for resumed tasks
             if (this.mapVisualization && typeof this.mapVisualization.enableHeatmapMode === 'function') {
+                console.log('🔥 Enabling heatmap mode for resumed tasks');
                 this.mapVisualization.enableHeatmapMode();
+            } else {
+                console.warn('❌ Cannot enable heatmap mode - mapVisualization not ready');
             }
             
             // Initialize task list
@@ -214,10 +221,9 @@ export class REArchaeologyApp {
     buildScanConfig(enableDetection, structureType) {
         if (typeof calculateScanParameters === 'function') {
             const scanParams = calculateScanParameters(this);
-            return {
+            const config = {
                 center_lat: this.selectedArea.lat,
                 center_lon: this.selectedArea.lon,
-                radius_km: this.selectedArea.radius,
                 tile_size_m: scanParams.tileSize,
                 heatmap_mode: true,
                 streaming_mode: true,
@@ -225,6 +231,18 @@ export class REArchaeologyApp {
                 enable_detection: enableDetection,
                 structure_type: structureType
             };
+            
+            // Support both rectangular and circular scan areas
+            if (this.selectedArea.width_km && this.selectedArea.height_km) {
+                // Rectangular scan area
+                config.width_km = this.selectedArea.width_km;
+                config.height_km = this.selectedArea.height_km;
+            } else if (this.selectedArea.radius) {
+                // Circular scan area (legacy)
+                config.radius_km = this.selectedArea.radius;
+            }
+            
+            return config;
         } else {
             return {};
         }
@@ -296,12 +314,15 @@ export class REArchaeologyApp {
     // --- WebSocket and backend event passthroughs ---
     handleWebSocketMessage(data) { if (typeof handleWebSocketMessage === 'function') handleWebSocketMessage(this, data); }
     handleLidarTileUpdate(data) { 
-        // Don't auto-navigate on LiDAR tiles - use task-based navigation instead
-        // The task list will handle navigation to running tasks
+        // Store global resolution from first tile received
+        if (data.actual_resolution && !this.currentResolution) {
+            this.currentResolution = data.actual_resolution;
+        }
         
-        if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') {
+        if (this.mapVisualization && typeof this.mapVisualization.addLidarHeatmapTile === 'function') {
             this.mapVisualization.addLidarHeatmapTile(data);
         }
+        
         this.updateAnimationProgress?.(data); 
     }
     handleLidarHeatmapTileUpdate(data) { if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') this.mapVisualization.addLidarHeatmapTile(data.tile_data); this.updateAnimationProgress?.(data.tile_data); }
@@ -311,7 +332,18 @@ export class REArchaeologyApp {
     handleSessionFailed(data) { /* implement as needed */ }
 
     // --- Map and scan area helpers ---
-    initializeMapVisualization() { if (typeof window.MapVisualization === 'function' && this.map) this.mapVisualization = new window.MapVisualization(this.map); }
+    initializeMapVisualization() { 
+        console.log('🗺️ Initializing map visualization...');
+        console.log('   - window.MapVisualization:', typeof window.MapVisualization);
+        console.log('   - this.map:', !!this.map);
+        
+        if (typeof window.MapVisualization === 'function' && this.map) {
+            this.mapVisualization = new window.MapVisualization(this.map);
+            console.log('✅ MapVisualization initialized');
+        } else {
+            console.warn('❌ MapVisualization initialization failed');
+        }
+    }
     calculateOptimalBorderWeight() { return this.map ? (this.map.getZoom() >= 16 ? 3 : this.map.getZoom() >= 14 ? 2.5 : this.map.getZoom() >= 12 ? 2 : 1.5) : 2; }
 
     // --- Scan control ---
@@ -353,12 +385,177 @@ export class REArchaeologyApp {
         Object.values(this.layers).forEach(layer => layer?.clearLayers?.());
         this.patches.clear();
         this.currentLidarSession = null;
+        
+        // Reset resolution update flag
+        this.resolutionUpdated = false;
+        
+        // Clear current resolution
+        this.currentResolution = null;
+        
+        // Clear cached bitmaps
+        this.clearCachedBitmaps();
+        
         // Remove discovered sites layer from map
         if (this.discoveredSitesLayer && this.map) {
             this.map.removeLayer(this.discoveredSitesLayer);
             this.discoveredSitesLayer = null;
         }
         this.updateScanAreaLabel?.();
+    }
+
+    // --- Bitmap Cache Functionality ---
+    async loadCachedBitmapForTask(taskId) {
+        /**
+         * Load cached bitmap for a task to show previous scanning progress.
+         * 
+         * @param {string} taskId - Task identifier
+         */
+        try {
+            // Skip if already loaded this bitmap for this task
+            if (this.loadedBitmapCaches.has(taskId)) {
+                window.Logger?.app('debug', `Bitmap cache already loaded for task ${taskId}`);
+                return;
+            }
+            
+            window.Logger?.app('info', `🗺️ Loading cached bitmap for task ${taskId}...`);
+            
+            // Fetch bitmap info from server
+            const response = await fetch(`${window.AppConfig.apiBase}/bitmap-cache/task/${taskId}/info`);
+            
+            if (!response.ok) {
+                window.Logger?.app('warn', `Failed to fetch bitmap info for task ${taskId}: ${response.statusText}`);
+                return false;
+            }
+            
+            const data = await response.json();
+            
+            if (data.cached && data.bitmap_info) {
+                // Enable heatmap mode if not already enabled
+                if (this.mapVisualization && !this.mapVisualization.heatmapMode) {
+                    this.mapVisualization.enableHeatmapMode();
+                }
+                
+                // Display cached bitmap
+                await this.displayCachedBitmap(data.bitmap_info);
+                
+                // Show notification about loaded cache
+                this.showBitmapCacheNotification(data.bitmap_info.tiles_added);
+                
+                // Mark as loaded
+                this.loadedBitmapCaches.add(taskId);
+                
+                window.Logger?.app('success', `✅ Loaded bitmap cache for task ${taskId} (${data.bitmap_info.tiles_added} tiles)`);
+                return true;
+            } else {
+                // No cache available yet - this is normal for resumed tasks
+                window.Logger?.app('debug', `No cached bitmap available yet for task ${taskId} - will load as tiles arrive`);
+                
+                // Still enable heatmap mode to be ready for incoming tiles
+                if (this.mapVisualization && !this.mapVisualization.heatmapMode) {
+                    this.mapVisualization.enableHeatmapMode();
+                    window.Logger?.app('debug', `Enabled heatmap mode for task ${taskId}`);
+                }
+                
+                return false;
+            }
+            
+        } catch (error) {
+            window.Logger?.app('error', `❌ Error loading cached bitmap for task ${taskId}:`, error);
+            return false;
+        }
+    }
+    
+    async displayCachedBitmap(bitmapInfo) {
+        /**
+         * Display cached bitmap on the map as an image overlay.
+         */
+        try {
+            if (!this.map || !bitmapInfo.bounds) {
+                window.Logger?.app('warn', 'Cannot display bitmap: missing map or bounds');
+                return;
+            }
+            
+            // Create bounds for Leaflet
+            const bounds = L.latLngBounds(
+                [bitmapInfo.bounds.south, bitmapInfo.bounds.west],
+                [bitmapInfo.bounds.north, bitmapInfo.bounds.east]
+            );
+            
+            // Remove existing cached bitmap overlay if present
+            if (this.cachedBitmapOverlay) {
+                this.map.removeLayer(this.cachedBitmapOverlay);
+            }
+            
+            // Create image overlay
+            this.cachedBitmapOverlay = L.imageOverlay(bitmapInfo.bitmap_url, bounds, {
+                opacity: 0.7,
+                className: 'cached-bitmap-overlay',
+                interactive: false,
+                crossOrigin: true,
+                attribution: `Cached LiDAR data (${bitmapInfo.resolution_level})`
+            });
+            
+            // Add to map
+            this.cachedBitmapOverlay.addTo(this.map);
+            
+            // Set Z-index to be below live tiles but above base map
+            const overlayElement = this.cachedBitmapOverlay.getElement();
+            if (overlayElement) {
+                overlayElement.style.zIndex = '100';
+            }
+            
+            window.Logger?.app('debug', `Displayed cached bitmap: ${bitmapInfo.dimensions.width}x${bitmapInfo.dimensions.height} at ${bitmapInfo.resolution_level} resolution`);
+            
+        } catch (error) {
+            window.Logger?.app('error', 'Error displaying cached bitmap:', error);
+        }
+    }
+    
+    showBitmapCacheNotification(tilesCount) {
+        /**
+         * Show user notification about loaded bitmap cache.
+         */
+        try {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = 'bitmap-cache-notification';
+            notification.innerHTML = `
+                <div class="bitmap-cache-icon">🗺️</div>
+                <div class="bitmap-cache-text">
+                    <div class="bitmap-cache-title">Cached Progress Loaded</div>
+                    <div class="bitmap-cache-details">${tilesCount} tiles accumulated</div>
+                </div>
+            `;
+            
+            // Add to map container
+            if (this.map) {
+                const mapContainer = this.map.getContainer();
+                mapContainer.appendChild(notification);
+                
+                // Auto-remove after 4 seconds
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 4000);
+            }
+            
+        } catch (error) {
+            window.Logger?.app('error', 'Error showing bitmap cache notification:', error);
+        }
+    }
+    
+    clearCachedBitmaps() {
+        /**
+         * Clear all cached bitmap overlays and reset cache tracking.
+         */
+        if (this.cachedBitmapOverlay && this.map) {
+            this.map.removeLayer(this.cachedBitmapOverlay);
+            this.cachedBitmapOverlay = null;
+        }
+        
+        this.loadedBitmapCaches.clear();
+        window.Logger?.app('debug', 'Cleared cached bitmap overlays');
     }
 
     // --- Chat and Auth functionality ---
@@ -526,7 +723,7 @@ export class REArchaeologyApp {
         
         const avatar = document.createElement('div');
         avatar.className = 'message-avatar';
-        avatar.textContent = '🤖';
+        avatar.textContent = '💬';
         
         const content_div = document.createElement('div');
         content_div.className = 'message-content typing-animation';
@@ -752,5 +949,49 @@ export class REArchaeologyApp {
         }, 15000); // Every 15 seconds
         
         window.Logger?.app('info', 'Periodic task refresh started (15s intervals)');
+    }
+
+    clearCachedBitmaps() {
+        /**
+         * Clear all cached bitmap overlays from the map.
+         */
+        if (this.cachedBitmapOverlays) {
+            this.cachedBitmapOverlays.forEach((overlay, taskId) => {
+                if (this.map && overlay) {
+                    this.map.removeLayer(overlay);
+                }
+            });
+            this.cachedBitmapOverlays.clear();
+        }
+        this.loadedBitmapCaches.clear();
+        window.Logger?.app('debug', 'Cleared all cached bitmap overlays');
+    }
+
+    showBitmapCacheNotification(bitmapInfo) {
+        /**
+         * Show a brief notification that cached progress was loaded.
+         */
+        const notification = document.createElement('div');
+        notification.className = 'bitmap-cache-notification';
+        notification.innerHTML = `
+            <div class="notification-content">
+                <div class="notification-icon">📊</div>
+                <div class="notification-text">
+                    <strong>Progress Loaded</strong><br>
+                    Showing ${bitmapInfo.tiles_added} previously scanned tiles
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Show notification
+        setTimeout(() => notification.classList.add('visible'), 100);
+        
+        // Auto-hide after 4 seconds
+        setTimeout(() => {
+            notification.classList.remove('visible');
+            setTimeout(() => notification.remove(), 300);
+        }, 4000);
     }
 } // End of class

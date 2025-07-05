@@ -6,6 +6,7 @@ Handles resuming LiDAR scanning and detection for tasks that were interrupted.
 import json
 import logging
 import asyncio
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from .routers.discovery_sessions import active_sessions
 from .routers.discovery_connections import discovery_manager
 from .routers.discovery_lidar import run_lidar_scan_async
 from .routers.discovery_utils import get_available_structure_types
+from .cache.simple_bitmap_cache import get_simple_bitmap_cache
 
 logger = logging.getLogger(__name__)
 
@@ -61,17 +63,20 @@ async def load_running_tasks() -> List[Dict[str, Any]]:
     try:
         # Find all JSON files in tasks directory
         task_files = glob.glob(str(TASKS_DATA_PATH / "*.json"))
+        logger.info(f"Found {len(task_files)} task files in {TASKS_DATA_PATH}")
         
         for task_file in task_files:
             try:
                 with open(task_file, 'r') as f:
                     task_data = json.load(f)
+                    task_status = task_data.get("status", "unknown")
+                    logger.info(f"Task {task_data.get('id', 'unknown')[:8]}: status={task_status}")
                     
-                # Check if task is running and has progress > 0
-                if (task_data.get("status") == "running" and 
-                    isinstance(task_data.get("progress"), (int, float)) and 
-                    task_data.get("progress") > 0):
+                # Check if task is running
+                if task_data.get("status") == "running":
                     running_tasks.append(task_data)
+                    logger.info(f"Found running task: {task_data['id']} at {task_data.get('start_coordinates')}")
+                    
                     
             except Exception as e:
                 logger.error(f"Error loading task file {task_file}: {e}")
@@ -92,6 +97,12 @@ async def restart_task_session(task: Dict[str, Any]):
     try:
         import uuid
         
+        # Remove any old sessions for this task from active_sessions
+        old_sessions = [sid for sid, s in active_sessions.items() if s.get("task_id") == task["id"]]
+        for sid in old_sessions:
+            del active_sessions[sid]
+            logger.info(f"Removed old session {sid} for task {task['id']} before restart.")
+        
         # Extract task parameters
         task_id = task["id"]
         # Always generate a NEW session ID for restarts to avoid conflicts
@@ -101,64 +112,68 @@ async def restart_task_session(task: Dict[str, Any]):
         
         logger.info(f"🔄 Restarting task {task_id} with NEW session {session_id}")
         
-        # Calculate scan parameters
+        # Calculate scan parameters - preserve rectangular dimensions
         center_lat = float(start_coords[0])
         center_lon = float(start_coords[1])
         
-        # Use the larger dimension for radius (converting rectangular range to circular)
-        radius_km = max(range_info["width_km"], range_info["height_km"]) / 2
+        # Use rectangular dimensions from the task
+        width_km = range_info["width_km"]
+        height_km = range_info["height_km"]
         
         # Get app root and available structure types
         app_root = get_app_root()
         available_types, default_type = get_available_structure_types(app_root, logger)
         
-        # Create scan configuration
+        # Create scan configuration with rectangular dimensions
         config = {
             "center_lat": center_lat,
             "center_lon": center_lon,
-            "radius_km": radius_km,
+            "width_km": width_km,
+            "height_km": height_km,
             "data_type": "DSM",
             "streaming_mode": True,
             "enable_detection": True,  # Enable detection for restarted tasks
             "structure_type": default_type,
-            "prefer_high_resolution": radius_km <= 1.0,  # Use high res for small areas
+            "prefer_high_resolution": min(width_km, height_km) <= 1.0,  # Use high res for small areas
             "task_id": task_id,  # Add task_id for tracking
             "resumed": True  # Mark as resumed task
         }
         
-        # Set preferred resolution based on area size
-        if radius_km <= 1.0:
+        # Set preferred resolution based on minimum dimension
+        min_dimension_km = min(width_km, height_km)
+        if min_dimension_km <= 1.0:
             preferred_resolution = 0.5
-        elif radius_km <= 5.0:
+        elif min_dimension_km <= 5.0:
             preferred_resolution = 1.0
         else:
             preferred_resolution = 2.0
             
         # Create session info
         tile_size_m = 40
-        radius_m = radius_km * 1000
-        scan_grid_size = int(2 * radius_m / tile_size_m)
+        area_width_m = width_km * 1000
+        area_height_m = height_km * 1000
+        tiles_x = max(1, int(np.ceil(area_width_m / tile_size_m)))
+        tiles_y = max(1, int(np.ceil(area_height_m / tile_size_m)))
+        total_tiles = tiles_x * tiles_y
         
         session_info = {
             "session_id": session_id,
             "type": "lidar_scan",
-            "status": "running",
+            "status": "started",  # Use 'started' for consistency with scan endpoint
             "config": config,
             "preferred_resolution": preferred_resolution,
             "enable_detection": True,
             "structure_type": default_type,
             "start_time": datetime.now(timezone.utc).isoformat(),
-            "total_tiles": scan_grid_size * scan_grid_size,
+            "total_tiles": total_tiles,
             "processed_tiles": 0,
             "streaming_mode": True,
             "tile_size_m": tile_size_m,
             "is_paused": False,
             "tile_queue": [],
             "current_tile_index": 0,
-            "task_id": task_id,  # Link to original task
-            "resumed": True  # Mark as resumed
+            "task_id": task_id  # Critical: link the session to the task
         }
-        
         # Add session to active sessions
         active_sessions[session_id] = session_info
         
@@ -174,8 +189,9 @@ async def restart_task_session(task: Dict[str, Any]):
             "config": {
                 "center_lat": center_lat,
                 "center_lon": center_lon,
-                "radius_km": radius_km,
-                "total_tiles": scan_grid_size * scan_grid_size
+                "width_km": width_km,
+                "height_km": height_km,
+                "total_tiles": total_tiles
             },
             "restart": True,
             "timestamp": datetime.now(timezone.utc).isoformat()
@@ -186,8 +202,8 @@ async def restart_task_session(task: Dict[str, Any]):
         
         logger.info(f"✅ Restarted task {task_id} with session {session_id}")
         logger.info(f"   📍 Center: {center_lat:.4f}, {center_lon:.4f}")
-        logger.info(f"   🔍 Radius: {radius_km:.1f} km")
-        logger.info(f"   🎯 Total tiles: {scan_grid_size * scan_grid_size}")
+        logger.info(f"   � Area: {width_km}×{height_km} km")
+        logger.info(f"   🎯 Total tiles: {total_tiles}")
         
     except Exception as e:
         logger.error(f"❌ Failed to restart task {task['id']}: {e}")
@@ -219,9 +235,8 @@ async def update_task_session_id(task_id: str, new_session_id: str):
         task_data["session_id"] = new_session_id
         task_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         
-        # Update sessions dict if it exists
-        if "sessions" in task_data:
-            task_data["sessions"]["scan"] = new_session_id
+        # Update sessions dict: reset to only the new scan session
+        task_data["sessions"] = {"scan": new_session_id}
         
         # Save updated task data
         with open(task_file, 'w') as f:
@@ -232,7 +247,28 @@ async def update_task_session_id(task_id: str, new_session_id: str):
     except Exception as e:
         logger.error(f"❌ Failed to update session ID for task {task_id}: {e}")
 
-async def update_task_progress(task_id: str, progress: Optional[float] = None, findings: Optional[List[Dict]] = None):
+async def update_bitmap_cache_for_task(task_id: str, tile_data: Optional[Dict] = None):
+    """
+    Update bitmap cache when a task receives new tile data.
+    
+    Args:
+        task_id: Task ID to update cache for
+        tile_data: Optional tile data to add to cache
+    """
+    try:
+        if tile_data:
+            bitmap_cache = get_simple_bitmap_cache()
+            success = await bitmap_cache.add_tile(task_id, tile_data)
+            
+            if success:
+                logger.debug(f"📊 Updated bitmap cache for task {task_id}")
+            else:
+                logger.warning(f"⚠️ Failed to update bitmap cache for task {task_id}")
+                
+    except Exception as e:
+        logger.error(f"❌ Error updating bitmap cache for task {task_id}: {e}")
+
+async def update_task_progress(task_id: str, progress: Optional[float] = None, findings: Optional[List[Dict]] = None, tile_data: Optional[Dict] = None):
     """
     Update progress for a running task and save to JSON file.
     
@@ -240,6 +276,7 @@ async def update_task_progress(task_id: str, progress: Optional[float] = None, f
         task_id: Task ID to update
         progress: New progress value (0-100) or None to keep current progress
         findings: Optional list of new findings to add (must be a list of dictionaries)
+        tile_data: Optional tile data to add to bitmap cache
     """
     try:
         # Find the task file
@@ -279,6 +316,9 @@ async def update_task_progress(task_id: str, progress: Optional[float] = None, f
         # Save updated task data
         with open(task_file, 'w') as f:
             json.dump(task_data, f, indent=2)
+        
+        # Update bitmap cache with new tile data if available
+        await update_bitmap_cache_for_task(task_id, tile_data)
         
         # Only log progress updates at significant milestones or with findings
         if progress is not None:

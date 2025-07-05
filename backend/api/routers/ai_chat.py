@@ -779,6 +779,40 @@ def execute_task_command(command: TaskCommand, user_email: str) -> TaskResponse:
                     message=f"Failed to resume task {command.task_id}"
                 )
         
+        elif command.action == "resume":
+            if not command.task_id:
+                return TaskResponse(success=False, message="Task ID required for resume")
+            
+            if update_task_status(command.task_id, "running"):
+                # Actually resume the underlying sessions
+                try:
+                    asyncio.create_task(resume_task_sessions(command.task_id))
+                    logger.info(f"Resumed sessions for task {command.task_id}")
+                except Exception as e:
+                    logger.error(f"Failed to resume sessions: {e}")
+                
+                # Send websocket notification
+                try:
+                    asyncio.create_task(discovery_manager.send_message({
+                        "type": "task_resumed",
+                        "task_id": command.task_id,
+                        "message": f"Task {command.task_id[:8]} resumed by administrator"
+                    }))
+                except Exception as e:
+                    logger.error(f"Failed to send websocket notification: {e}")
+                
+                add_broadcast(f"▶️ Task {command.task_id[:8]} resumed by administrator")
+                return TaskResponse(
+                    success=True,
+                    message=f"Task {command.task_id} resumed successfully",
+                    task_id=command.task_id
+                )
+            else:
+                return TaskResponse(
+                    success=False,
+                    message=f"Failed to resume task {command.task_id}"
+                )
+        
         elif command.action == "abort":
             if not command.task_id:
                 return TaskResponse(success=False, message="Task ID required for abort")
@@ -902,314 +936,154 @@ def execute_task_command(command: TaskCommand, user_email: str) -> TaskResponse:
             message=f"Error executing command: {str(e)}"
         )
 
-def parse_task_command(message: str) -> Optional[TaskCommand]:
-    """Parse natural language message for task commands"""
-    message_lower = message.lower()
-    
-    # Start task patterns
-    if any(phrase in message_lower for phrase in ['start task', 'new task', 'begin scan', 'start scan']):
-        # Try to extract coordinates and range
-        coordinates = None
-        range_km = {"width": 5, "height": 5}  # Default
-        
-        # Look for coordinate patterns
-        import re
-        coord_pattern = r'(?:coordinates?|coords?|at)\s*(?:lat|latitude)?[:\s]*(-?\d+\.?\d*)[,\s]+(?:lon|longitude)?[:\s]*(-?\d+\.?\d*)'
-        coord_match = re.search(coord_pattern, message_lower)
-        
-        if coord_match:
-            coordinates = [float(coord_match.group(1)), float(coord_match.group(2))]
-        
-        # Look for range patterns
-        range_pattern = r'(?:range|area|size)\s*(?:of\s*)?(\d+)(?:\s*x\s*(\d+))?\s*km'
-        range_match = re.search(range_pattern, message_lower)
-        
-        if range_match:
-            width = int(range_match.group(1))
-            height = int(range_match.group(2)) if range_match.group(2) else width
-            range_km = {"width": width, "height": height}
-        
-        return TaskCommand(
-            action="start",
-            coordinates=coordinates,
-            range_km=range_km,
-            profiles=["default_windmill"]
-        )
-    
-    # Pause task patterns
-    elif any(phrase in message_lower for phrase in ['pause task', 'pause current', 'pause running', 'pause the', 'halt task', 'suspend task']):
-        task_id = extract_task_id(message) or get_running_task_id()
-        return TaskCommand(action="pause", task_id=task_id)
-    
-    # Resume task patterns
-    elif any(phrase in message_lower for phrase in ['resume task', 'continue task', 'resume current', 'continue current']):
-        task_id = extract_task_id(message) or get_paused_task_id()
-        return TaskCommand(action="resume", task_id=task_id)
-    
-    # Abort task patterns (including "stop")
-    elif any(phrase in message_lower for phrase in ['abort task', 'cancel task', 'kill task', 'stop task', 'stop current', 'abort current', 'cancel current']):
-        task_id = extract_task_id(message) or get_running_task_id()
-        return TaskCommand(action="abort", task_id=task_id)
-    
-    # Restart task patterns
-    elif any(phrase in message_lower for phrase in ['restart task', 'reset task', 'restart current', 'reset current']):
-        task_id = extract_task_id(message) or get_any_task_id()
-        return TaskCommand(action="restart", task_id=task_id)
-    
-    # Status patterns
-    elif any(phrase in message_lower for phrase in ['task status', 'check task', 'show tasks', 'list tasks']):
-        task_id = extract_task_id(message)
-        return TaskCommand(action="status", task_id=task_id)
-    
-    return None
-
-def extract_task_id(message: str) -> Optional[str]:
-    """Extract task ID from message"""
-    import re
-    # Look for UUID patterns
-    uuid_pattern = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-    match = re.search(uuid_pattern, message.lower())
-    if match:
-        return match.group(0)
-    
-    # Look for "task" followed by partial ID
-    task_pattern = r'task\s+([a-f0-9]{8})'
-    match = re.search(task_pattern, message.lower())
-    if match:
-        # Find full task ID starting with this prefix
-        prefix = match.group(1)
-        all_tasks = get_all_tasks()
-        for task in all_tasks:
-            if task['id'].startswith(prefix):
-                return task['id']
-    
-    return None
-
-# Session Management Functions for Task Control
 async def pause_task_sessions(task_id: str):
-    """Pause all scanning and detection sessions for a task"""
-    try:
-        from .discovery_sessions import active_sessions, _active_detection_tasks
-        
-        # Find sessions associated with this task
-        sessions_to_pause = []
-        for session_id, session_data in active_sessions.items():
-            if isinstance(session_data, dict) and session_data.get("task_id") == task_id:
-                sessions_to_pause.append(session_id)
-        
-        # Pause each session
-        for session_id in sessions_to_pause:
-            if session_id in active_sessions:
-                session_data = active_sessions[session_id]
-                if isinstance(session_data, dict):
-                    session_data["is_paused"] = True
-                    session_data["status"] = "paused"
-                    logger.info(f"🔄 Paused scanning session {session_id} for task {task_id}")
-        
-        # Cancel any active detection tasks
-        detection_tasks_to_cancel = [
-            task_key for task_key in _active_detection_tasks.keys() 
-            if task_key in sessions_to_pause
-        ]
-        
-        for task_key in detection_tasks_to_cancel:
-            if task_key in _active_detection_tasks:
-                _active_detection_tasks[task_key].cancel()
-                del _active_detection_tasks[task_key]
-                logger.info(f"🛑 Cancelled detection task {task_key} for task {task_id}")
-        
-        logger.info(f"✅ Paused {len(sessions_to_pause)} sessions for task {task_id}")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to pause sessions for task {task_id}: {e}")
-
-async def resume_task_sessions(task_id: str):
-    """Resume all scanning and detection sessions for a task"""
+    """
+    Pause all active sessions related to a task
+    
+    Args:
+        task_id: Task ID to pause sessions for
+    """
     try:
         from .discovery_sessions import active_sessions
         
-        # Find paused sessions for this task
+        # Find sessions that belong to this task
+        sessions_to_pause = []
+        for session_id, session_info in active_sessions.items():
+            if session_info.get("task_id") == task_id:
+                sessions_to_pause.append(session_id)
+        
+        if not sessions_to_pause:
+            logger.info(f"No active sessions found for task {task_id}")
+            return
+        
+        # Pause each session
+        for session_id in sessions_to_pause:
+            session_info = active_sessions[session_id]
+            session_info["status"] = "paused"
+            session_info["is_paused"] = True
+            logger.info(f"Paused session {session_id} for task {task_id}")
+            
+            # Send websocket notification about session pause
+            try:
+                from .discovery_connections import discovery_manager
+                await discovery_manager.send_message({
+                    "type": "session_paused",
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "message": f"Scanning session paused for task {task_id[:8]}",
+                    "timestamp": datetime.now().isoformat()
+                })
+            except Exception as e:
+                logger.error(f"Failed to send session pause notification: {e}")
+        
+        logger.info(f"Successfully paused {len(sessions_to_pause)} sessions for task {task_id}")
+        
+    except Exception as e:
+        logger.error(f"Error pausing sessions for task {task_id}: {e}")
+
+async def resume_task_sessions(task_id: str):
+    """
+    Resume all paused sessions related to a task
+    
+    Args:
+        task_id: Task ID to resume sessions for
+    """
+    try:
+        from .discovery_sessions import active_sessions
+        
+        # Find sessions that belong to this task
         sessions_to_resume = []
-        for session_id, session_data in active_sessions.items():
-            if (isinstance(session_data, dict) and 
-                session_data.get("task_id") == task_id and 
-                session_data.get("is_paused") == True):
+        for session_id, session_info in active_sessions.items():
+            if session_info.get("task_id") == task_id and session_info.get("is_paused", False):
                 sessions_to_resume.append(session_id)
+        
+        if not sessions_to_resume:
+            logger.info(f"No paused sessions found for task {task_id}")
+            return
         
         # Resume each session
         for session_id in sessions_to_resume:
-            if session_id in active_sessions:
-                session_data = active_sessions[session_id]
-                if isinstance(session_data, dict):
-                    session_data["is_paused"] = False
-                    session_data["status"] = "running"
-                    logger.info(f"▶️ Resumed scanning session {session_id} for task {task_id}")
+            session_info = active_sessions[session_id]
+            session_info["status"] = "running"
+            session_info["is_paused"] = False
+            logger.info(f"Resumed session {session_id} for task {task_id}")
+            
+            # Send websocket notification about session resume
+            try:
+                from .discovery_connections import discovery_manager
+                await discovery_manager.send_message({
+                    "type": "session_resumed",
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "message": f"Scanning session resumed for task {task_id[:8]}",
+                    "timestamp": datetime.now().isoformat()
+                })
+            except Exception as e:
+                logger.error(f"Failed to send session resume notification: {e}")
         
-        logger.info(f"✅ Resumed {len(sessions_to_resume)} sessions for task {task_id}")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to resume sessions for task {task_id}: {e}")
-
-async def stop_task_sessions(task_id: str):
-    """Stop and cleanup all scanning and detection sessions for a task"""
-    try:
-        from .discovery_sessions import active_sessions, _active_detection_tasks, _session_tile_data
-        
-        # Find sessions associated with this task (by task_id OR session_id matching task_id)
-        sessions_to_stop = []
-        for session_id, session_data in active_sessions.items():
-            if isinstance(session_data, dict):
-                # Check both task_id field and session_id matching task_id
-                if (session_data.get("task_id") == task_id or 
-                    session_id == task_id or 
-                    session_id.startswith(task_id)):
-                    sessions_to_stop.append(session_id)
-        
-        # Also check for any session that might be linked to this task_id pattern
-        # (in case there are orphaned sessions)
-        task_id_short = task_id[:8] if len(task_id) > 8 else task_id
-        for session_id, session_data in list(active_sessions.items()):
-            if isinstance(session_data, dict):
-                config = session_data.get("config", {})
-                if config.get("task_id") == task_id:
-                    if session_id not in sessions_to_stop:
-                        sessions_to_stop.append(session_id)
-        
-        logger.info(f"🔍 Found {len(sessions_to_stop)} sessions to stop for task {task_id}: {sessions_to_stop}")
-        
-        # Stop each session
-        for session_id in sessions_to_stop:
-            if session_id in active_sessions:
-                session_data = active_sessions[session_id]
-                if isinstance(session_data, dict):
-                    session_data["status"] = "stopped"
-                    logger.info(f"🛑 Stopped scanning session {session_id} for task {task_id}")
-                
-                # Remove from active sessions
-                del active_sessions[session_id]
-        
-        # Cancel and cleanup detection tasks
-        detection_tasks_to_cancel = [
-            task_key for task_key in _active_detection_tasks.keys() 
-            if task_key in sessions_to_stop
-        ]
-        
-        for task_key in detection_tasks_to_cancel:
-            if task_key in _active_detection_tasks:
-                _active_detection_tasks[task_key].cancel()
-                del _active_detection_tasks[task_key]
-                logger.info(f"🛑 Cancelled and cleaned detection task {task_key} for task {task_id}")
-        
-        # Cleanup tile data
-        for session_id in sessions_to_stop:
-            if session_id in _session_tile_data:
-                del _session_tile_data[session_id]
-                logger.info(f"🧹 Cleaned tile data for session {session_id}")
-        
-        logger.info(f"✅ Stopped and cleaned {len(sessions_to_stop)} sessions for task {task_id}")
+        logger.info(f"Successfully resumed {len(sessions_to_resume)} sessions for task {task_id}")
         
     except Exception as e:
-        logger.error(f"❌ Failed to stop sessions for task {task_id}: {e}")
+        logger.error(f"Error resuming sessions for task {task_id}: {e}")
 
 async def restart_task_sessions(task_id: str):
-    """Restart scanning and detection sessions for a task"""
+    """
+    Restart all sessions related to a task by creating new scanning sessions
+    
+    Args:
+        task_id: Task ID to restart sessions for
+    """
     try:
-        logger.info(f"🔄 Starting session restart for task {task_id}")
+        from .discovery_sessions import active_sessions
+        from ..startup_tasks import restart_task_session
         
-        # First stop any existing sessions
-        await stop_task_sessions(task_id)
+        # First, stop any existing sessions for this task
+        sessions_to_remove = []
+        for session_id, session_info in active_sessions.items():
+            if session_info.get("task_id") == task_id:
+                sessions_to_remove.append(session_id)
         
-        # Load task data
+        # Remove existing sessions
+        for session_id in sessions_to_remove:
+            active_sessions.pop(session_id, None)
+            logger.info(f"Removed existing session {session_id} for task {task_id}")
+        
+        # Load task data to restart with original parameters
         task_data = load_task_data(task_id)
         if not task_data:
-            logger.error(f"❌ Cannot restart sessions - task {task_id} not found")
+            logger.error(f"Task {task_id} not found for restart")
             return
         
-        logger.info(f"📋 Task data loaded for restart: status={task_data.get('status')}, coordinates={task_data.get('start_coordinates')}")
-        
-        # Use the restart logic from startup_tasks
-        from backend.api.startup_tasks import restart_task_session
-        logger.info(f"📡 Calling restart_task_session for task {task_id}")
+        # Use the startup_tasks module to restart the task
         await restart_task_session(task_data)
         
-        logger.info(f"✅ Completed session restart for task {task_id}")
+        logger.info(f"Successfully restarted sessions for task {task_id}")
         
     except Exception as e:
-        logger.error(f"❌ Failed to restart sessions for task {task_id}: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Error restarting sessions for task {task_id}: {e}")
 
-# Task monitoring background thread
-def task_monitor_loop():
-    """Background loop to monitor tasks and generate broadcasts"""
-    global task_monitor_active, active_tasks_cache, broadcast_queue
-    
-    while task_monitor_active:
-        try:
-            # Update active tasks cache
-            all_tasks = get_all_tasks()
-            running_tasks = [t for t in all_tasks if t['status'] == 'running']
-            
-            # Update cache
-            active_tasks_cache.clear()
-            for task in running_tasks:
-                active_tasks_cache[task['id']] = task
-            
-            # Generate summary for broadcast
-            if running_tasks:
-                summary = f"System Update: {len(running_tasks)} active scanning tasks in progress"
-                for task in running_tasks[:3]:  # Show top 3
-                    progress_raw = task.get('progress', 0)
-                    # Ensure progress is a number
-                    if isinstance(progress_raw, (int, float)):
-                        progress = progress_raw
-                    else:
-                        progress = 0
-                    
-                    findings_data = task.get('findings', [])
-                    # Ensure findings is a list before getting length
-                    if isinstance(findings_data, list):
-                        findings_count = len(findings_data)
-                    else:
-                        findings_count = 1 if findings_data else 0
-                    summary += f"\n• Task {task['id'][:8]}: {progress:.1f}% complete, {findings_count} findings"
-                
-                # Add to broadcast queue
-                add_broadcast(summary)
-            
-            # Clean old broadcasts (keep last 10)
-            if len(broadcast_queue) > 10:
-                broadcast_queue = broadcast_queue[-10:]
-            
-            # Wait before next check
-            time.sleep(30)  # Check every 30 seconds
-            
-        except Exception as e:
-            logger.error(f"Error in task monitor loop: {e}")
-            time.sleep(60)  # Wait longer on error
-
-def start_task_monitor():
-    """Start the task monitoring background thread"""
-    global task_monitor_active, task_monitor_thread
-    
-    if not task_monitor_active:
-        task_monitor_active = True
-        task_monitor_thread = threading.Thread(target=task_monitor_loop, daemon=True)
-        task_monitor_thread.start()
-        logger.info("Task monitor started")
-
-def stop_task_monitor():
-    """Stop the task monitoring background thread"""
-    global task_monitor_active, task_monitor_thread
-    
-    if task_monitor_active:
-        task_monitor_active = False
-        if task_monitor_thread:
-            task_monitor_thread.join(timeout=5)
-        logger.info("Task monitor stopped")
-
-# Start task monitor when module loads
-start_task_monitor()
+async def stop_task_sessions(task_id: str):
+    """
+    Stop all active sessions related to a task (cascade stop for abort/cancel).
+    Args:
+        task_id: Task ID to stop sessions for
+    """
+    try:
+        from .discovery import stop_discovery_session
+        task_data = load_task_data(task_id)
+        if not task_data:
+            logger.warning(f"No task data found for {task_id} when stopping sessions.")
+            return
+        sessions = task_data.get("sessions", {})
+        for session_type, session_id in sessions.items():
+            try:
+                logger.info(f"Stopping session {session_id} (type: {session_type}) for task {task_id}")
+                await stop_discovery_session(session_id)
+            except Exception as e:
+                logger.error(f"Failed to stop session {session_id} for task {task_id}: {e}")
+        logger.info(f"Cascade stop: all sessions for task {task_id} requested to stop.")
+    except Exception as e:
+        logger.error(f"Cascade stop failed for task {task_id}: {e}")
 
 def get_running_task_id() -> Optional[str]:
     """Get the ID of the first running task"""
@@ -1274,11 +1148,20 @@ Available commands:
 - restart: Reset and restart a task
 - status: Get status information
 
+For start commands, extract coordinates and rectangular dimensions carefully:
+- Look for patterns like: start_coordinates": [ -7.5, -65.0 ]
+- Look for patterns like: "width_km": 1000, "height_km": 500
+- Preserve exact width and height values as separate dimensions
+
 Examples:
 User: "pause the running task" → {{"action": "pause", "task_id": "auto"}}
 User: "start scanning at coordinates 36.9, 67.5 with 5km range" → {{"action": "start", "coordinates": [36.9, 67.5], "range_km": {{"width": 5, "height": 5}}}}
+User: "start_coordinates: [ -7.5, -65.0 ], range: {{ width_km: 1000, height_km: 500 }}" → {{"action": "start", "coordinates": [-7.5, -65.0], "range_km": {{"width": 1000, "height": 500}}}}
+User: "create new task at coordinates -7.5, -65.0 with width 1000km height 500km" → {{"action": "start", "coordinates": [-7.5, -65.0], "range_km": {{"width": 1000, "height": 500}}}}
 User: "what's the status?" → {{"action": "status"}}
 User: "hello" → NO_COMMAND
+
+Important: Always preserve exact width and height values as separate dimensions, never convert to square areas.
 
 Analyze this message: "{message}"
 """
@@ -1466,3 +1349,115 @@ def cleanup_duplicate_task_files():
     except Exception as e:
         logger.error(f"Error during task file cleanup: {e}")
         return 0
+
+def create_new_task(coordinates: List[float], range_km: Dict[str, float], profiles: List[str], user_email: str) -> Dict[str, Any]:
+    """Create a new scanning task with rectangular dimensions"""
+    try:
+        task_id = str(uuid.uuid4())
+        
+        # Extract rectangular dimensions from range_km
+        width_km = range_km.get('width', range_km.get('width_km', 5))
+        height_km = range_km.get('height', range_km.get('height_km', 5))
+        
+        # Create task data
+        task_data = {
+            "id": task_id,
+            "type": "scan",
+            "status": "running",  # Start as running, not pending
+            "start_coordinates": coordinates,
+            "range": {
+                "width_km": width_km,
+                "height_km": height_km
+            },
+            "user_id": user_email,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": None,
+            "progress": 0,
+            "findings": 0,
+            "error_message": "",
+            "estimated_completion": None,
+            "session_id": str(uuid.uuid4()),
+            "restart_count": 0,
+            "decay_value": 1.0,
+            "profiles": profiles,
+            "sessions": {
+                "scan": str(uuid.uuid4()),
+                "detection": f"detection_{task_id[:8]}"
+            }
+        }
+        
+        logger.info(f"✅ Created new task {task_id} with rectangular dimensions: {width_km}×{height_km}km at {coordinates}")
+        
+        # Start the actual scanning session asynchronously
+        asyncio.create_task(start_task_scanning_session(task_data))
+        
+        return task_data
+        
+    except Exception as e:
+        logger.error(f"Error creating new task: {e}")
+        raise e
+
+async def start_task_scanning_session(task_data: Dict[str, Any]):
+    """Start the actual LiDAR scanning session for a task"""
+    try:
+        # Import within the function to avoid circular imports
+        from backend.api.routers.discovery_lidar import start_lidar_scan
+        from backend.api.routers.discovery_sessions import active_sessions
+        
+        task_id = task_data['id']
+        coordinates = task_data['start_coordinates']
+        range_data = task_data['range']
+        
+        # Build scan configuration with rectangular dimensions
+        config = {
+            'center_lat': coordinates[0],
+            'center_lon': coordinates[1],
+            'width_km': range_data['width_km'],
+            'height_km': range_data['height_km'],
+            'tile_size_m': 40,
+            'heatmap_mode': True,
+            'streaming_mode': True,
+            'prefer_high_resolution': False,
+            'enable_detection': True,
+            'structure_type': 'dutch_windmill',
+            'task_id': task_id  # Critical: link the scan to the task
+        }
+        
+        logger.info(f"🚀 Starting scanning session for task {task_id} with config: {config}")
+        
+        # Call the LiDAR scan endpoint directly
+        response = await start_lidar_scan(config)
+        
+        if response.get('status') == 'started':
+            session_id = response.get('session_id')
+            logger.info(f"✅ Started scanning session {session_id} for task {task_id}")
+            
+            # Update the task with the actual session ID
+            task_data['session_id'] = session_id
+            task_data['sessions']['scan'] = session_id
+            
+            # Ensure the session is linked to the task in active_sessions
+            if session_id in active_sessions:
+                session_data = active_sessions[session_id]
+                if isinstance(session_data, dict):
+                    session_data['task_id'] = task_id
+                    if 'config' in session_data:
+                        session_data['config']['task_id'] = task_id
+                    logger.info(f"🔗 Linked session {session_id} to task {task_id}")
+            
+            # Save the updated task data
+            save_task_data(task_data)
+        else:
+            logger.error(f"❌ Failed to start scanning session for task {task_id}: {response}")
+            # Update task status to error
+            task_data['status'] = 'failed'
+            task_data['error_message'] = f"Failed to start scanning session: {response.get('message', 'Unknown error')}"
+            save_task_data(task_data)
+            
+    except Exception as e:
+        logger.error(f"❌ Error starting scanning session for task {task_id}: {e}")
+        # Update task status to error
+        task_data['status'] = 'failed'
+        task_data['error_message'] = f"Error starting scanning session: {str(e)}"
+        save_task_data(task_data)

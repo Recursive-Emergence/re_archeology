@@ -55,23 +55,38 @@ export function setupMapEvents(app) {
 }
 
 // Fetch real resolution from backend for a given area
-async function fetchResolutionForArea(lat, lon, radiusKm) {
+export async function fetchResolutionForArea(lat, lon, radiusKm) {
     try {
-        // Adjust the URL and params as needed for your backend API
-        const response = await fetch(`/api/resolution?lat=${lat}&lon=${lon}&radius_km=${radiusKm}`);
-        if (!response.ok) throw new Error('Failed to fetch resolution');
-        const data = await response.json();
-        return data.resolution || null;
+        // For now, return a static resolution based on area size
+        // TODO: Implement proper resolution endpoint in backend
+        if (radiusKm <= 0.5) return '0.25m (High Resolution)';
+        else if (radiusKm <= 2) return '0.5m (Medium Resolution)';
+        else return '1.0m (Standard Resolution)';
     } catch (err) {
         return null;
     }
 }
 
-export async function selectScanArea(app, lat, lon, radiusKm = 1) {
+export async function selectScanArea(app, lat, lon, radiusKm = 1, width_km = null, height_km = null) {
     if (app.scanAreaRectangle) app.map.removeLayer(app.scanAreaRectangle);
     if (app.scanAreaLabel) app.map.removeLayer(app.scanAreaLabel);
-    const bounds = calculateAreaBounds(lat, lon, radiusKm);
-    const radiusInDegreesLat = radiusKm / 111.32;
+    
+    const bounds = calculateAreaBounds(lat, lon, radiusKm, width_km, height_km);
+    
+    // Calculate label position based on area type
+    let labelLat, labelText;
+    if (width_km !== null && height_km !== null) {
+        // Rectangular area
+        const halfHeightDeg = height_km / 2 / 111.32;
+        labelLat = lat - halfHeightDeg;
+        labelText = `📡 Scan Area (${width_km}×${height_km}km)`;
+    } else {
+        // Circular/square area
+        const radiusInDegreesLat = radiusKm / 111.32;
+        labelLat = lat - radiusInDegreesLat;
+        labelText = `📡 Scan Area (${radiusKm}km)`;
+    }
+    
     app.scanAreaRectangle = L.rectangle(bounds, {
         color: '#00ff88',
         weight: calculateOptimalBorderWeight(app),
@@ -80,13 +95,13 @@ export async function selectScanArea(app, lat, lon, radiusKm = 1) {
         opacity: 0.9,
         interactive: false
     }).addTo(app.map);
-    const bottomRimLat = lat - radiusInDegreesLat;
-    const scanLabel = L.marker([bottomRimLat, lon], {
+    
+    const scanLabel = L.marker([labelLat, lon], {
         icon: L.divIcon({
             className: 'scan-area-label',
-            html: `<div id="scan-area-label-text" style="background: rgba(0, 0, 0, 0.85); color: #00ff88; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid #00ff88; backdrop-filter: blur(6px); white-space: nowrap; transform: translateY(100%); text-align: center; box-shadow: 0 2px 8px rgba(0, 255, 136, 0.3); min-width: 120px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">📡 Scan Area (${radiusKm}km)</div>`,
-            iconSize: [200, 30],
-            iconAnchor: [100, 0]
+            html: `<div id="scan-area-label-text" style="background: rgba(0, 0, 0, 0.85); color: #00ff88; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid #00ff88; backdrop-filter: blur(6px); white-space: nowrap; transform: translateY(100%); text-align: center; box-shadow: 0 2px 8px rgba(0, 255, 136, 0.3); min-width: 120px; max-width: 250px; overflow: hidden; text-overflow: ellipsis;">${labelText}</div>`,
+            iconSize: [250, 30],
+            iconAnchor: [125, 0]
         }),
         interactive: false
     }).addTo(app.map);
@@ -103,7 +118,14 @@ export async function selectScanArea(app, lat, lon, radiusKm = 1) {
     app.map.off('zoomend', app.updateScanAreaBorder);
     app.map.on('zoomend', updateBorder);
     app.updateScanAreaBorder = updateBorder;
-    app.selectedArea = { lat, lon, radius: radiusKm, bounds };
+    
+    // Store selected area with proper dimensions
+    if (width_km !== null && height_km !== null) {
+        app.selectedArea = { lat, lon, width_km, height_km, bounds };
+    } else {
+        app.selectedArea = { lat, lon, radius: radiusKm, bounds };
+    }
+    
     if (app.updateButtonStates) app.updateButtonStates();
     // Only update URL with zoom if not present in URL
     const urlParams = new URLSearchParams(window.location.search);
@@ -112,10 +134,10 @@ export async function selectScanArea(app, lat, lon, radiusKm = 1) {
     } else if (app.updateUrlWithCoordinates) {
         app.updateUrlWithCoordinates(lat, lon, urlParams.get('zoom'));
     }
-    // Fetch and update real resolution
+    // Fetch and update real resolution for area size determination
+    const areaSize = width_km !== null && height_km !== null ? Math.min(width_km, height_km) : radiusKm;
     updateScanAreaLabel(app, 'Determining...');
-    const realResolution = await fetchResolutionForArea(lat, lon, radiusKm);
-    updateScanAreaLabel(app, realResolution);
+    // Resolution will be updated when actual tiles arrive with resolution data
 }
 
 export function zoomToScanArea(app) {
@@ -135,10 +157,22 @@ export function zoomToScanArea(app) {
 
 export function updateScanAreaLabel(app, resolution = null) {
     if (!app.scanAreaLabel) return;
-    const radiusKm = app.selectedArea?.radius || 1;
-    let labelText = `📡 Scan Area (${radiusKm}km)`;
-    if (resolution && resolution !== 'Determining...') {
-        labelText += ` • Res: ${resolution} `;
+    
+    // Use provided resolution or fall back to app's current resolution
+    const actualResolution = resolution || app.currentResolution;
+    
+    let labelText;
+    if (app.selectedArea?.width_km && app.selectedArea?.height_km) {
+        // Rectangular area
+        labelText = `📡 Scan Area (${app.selectedArea.width_km}×${app.selectedArea.height_km}km)`;
+    } else {
+        // Circular/square area
+        const radiusKm = app.selectedArea?.radius || 1;
+        labelText = `📡 Scan Area (${radiusKm}km)`;
+    }
+    
+    if (actualResolution && actualResolution !== 'Determining...') {
+        labelText += ` • Res: ${actualResolution}`;
     }
     const labelElement = document.getElementById('scan-area-label-text');
     if (labelElement) labelElement.innerHTML = labelText;
@@ -146,7 +180,16 @@ export function updateScanAreaLabel(app, resolution = null) {
 
 export function calculateScanParameters(app) {
     const zoomLevel = app.map.getZoom();
-    const areaKm = app.selectedArea.radius;
+    
+    // Determine area size for parameter calculation
+    let areaKm;
+    if (app.selectedArea?.width_km && app.selectedArea?.height_km) {
+        // For rectangular areas, use the minimum dimension
+        areaKm = Math.min(app.selectedArea.width_km, app.selectedArea.height_km);
+    } else {
+        areaKm = app.selectedArea?.radius || 1;
+    }
+    
     if (zoomLevel >= 16 || areaKm <= 0.5) {
         return { tileSize: 32, requestHighRes: true };
     } else if (zoomLevel >= 14 || areaKm <= 2) {

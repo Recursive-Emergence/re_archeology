@@ -841,3 +841,36 @@ async def get_earth_engine_status():
         "available": is_earth_engine_available(),
         "timestamp": datetime.now().isoformat()
     }
+
+@router.get("/resolution")
+async def get_resolution_for_area(lat: float, lon: float, radius_km: float):
+    """Get available resolution for a given area"""
+    try:
+        # Simple resolution estimation based on location and area size
+        # This is a placeholder - you could integrate with actual data source APIs
+        
+        # Check if coordinates are in Netherlands (high-res AHN data available)
+        if 50.5 <= lat <= 53.7 and 3.2 <= lon <= 7.3:
+            if radius_km <= 1.0:
+                resolution = "0.5m (AHN4)"
+            elif radius_km <= 5.0:
+                resolution = "1.0m (AHN4)"
+            else:
+                resolution = "5.0m (AHN3)"
+        else:
+            # Other locations - use SRTM or other global datasets
+            if radius_km <= 10.0:
+                resolution = "30m (SRTM)"
+            else:
+                resolution = "90m (SRTM)"
+        
+        return {
+            "resolution": resolution,
+            "lat": lat,
+            "lon": lon,
+            "radius_km": radius_km,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get resolution for area: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -43,17 +43,16 @@ export function connectWebSocket(app) {
 }
 
 export function handleWebSocketMessage(app, data) {
-    if (window.Logger) {
+    if (window.Logger && data.type !== 'lidar_tile') {
         window.Logger.websocket('debug', `Message received: ${data.type}`, { keys: Object.keys(data) });
-        if (data.type === 'lidar_tile') {
-            // Fetch and update real resolution only on first lidar_tile
-            if (!lidarResolutionFetched && app.selectedArea) {
-                lidarResolutionFetched = true;
-                import('../js/map.js').then(({ fetchResolutionForArea, updateScanAreaLabel }) => {
-                    fetchResolutionForArea(data.center_lat, data.center_lon, app.selectedArea.radius)
-                        .then(res => updateScanAreaLabel(app, res));
-                });
-            }
+    }
+    if (data.type === 'lidar_tile') {
+        // Update resolution from actual tile data when first tile arrives
+        if (!lidarResolutionFetched && data.actual_resolution) {
+            lidarResolutionFetched = true;
+            import('./map.js').then(({ updateScanAreaLabel }) => {
+                updateScanAreaLabel(app, data.actual_resolution);
+            }).catch(err => console.warn('Failed to import map functions:', err));
         }
     }
     if (data.type === 'patch_result') {
@@ -64,7 +63,6 @@ export function handleWebSocketMessage(app, data) {
     }
     switch (data.type) {
         case 'lidar_tile':
-            console.log('Received lidar_tile websocket message:', data);
             // Start scanning animation if not already started
             if (!app.isScanning && !app.animationState?.isActive) {
                 if (typeof app.startScanningAnimation === 'function') {
@@ -103,7 +101,6 @@ export function handleWebSocketMessage(app, data) {
             app.currentLidarSession = null;
             break;
         case 'task_resumed':
-            console.log('Received task_resumed websocket message:', data);
             // Enable heatmap visualization for resumed task
             if (app.mapVisualization && typeof app.mapVisualization.enableHeatmapMode === 'function') {
                 app.mapVisualization.enableHeatmapMode();
@@ -135,7 +132,6 @@ export function handleWebSocketMessage(app, data) {
             }
             break;
         case 'session_start':
-            console.log('Received session_start websocket message:', data);
             // Handle session start, especially for restarted tasks
             if (data.restart) {
                 // This is a restarted session, ensure satellite animation starts properly
@@ -166,7 +162,6 @@ export function handleWebSocketMessage(app, data) {
             }
             break;
         case 'task_paused':
-            console.log('Received task_paused websocket message:', data);
             // Stop animations when task is paused
             if (typeof app.stopScanningAnimation === 'function') {
                 app.stopScanningAnimation();
@@ -184,7 +179,6 @@ export function handleWebSocketMessage(app, data) {
             }
             break;
         case 'task_aborted':
-            console.log('Received task_aborted websocket message:', data);
             // Stop animations when task is aborted
             if (typeof app.stopScanningAnimation === 'function') {
                 app.stopScanningAnimation();

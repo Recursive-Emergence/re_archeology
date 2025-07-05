@@ -225,116 +225,78 @@
     }
 }
 
-/* Task Status Colors */
+/* Task Status Colors - Clean Running Task Styling */
 .task-item.running {
-    border-left-color: #00ff88;
-    background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 255, 136, 0.1));
-    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
-    animation: runningTaskPulse 2s ease-in-out infinite;
+    background: #f6fff9 !important; /* Very light, solid background */
+    border: 2px solid #00ff88 !important;
+    border-left-width: 6px !important;
+    color: #003c1a !important;
+    box-shadow: none !important;
     position: relative;
+    z-index: 100;
+    transform: none !important;
+    border-radius: 8px;
+    opacity: 1 !important; /* Remove any opacity */
 }
 
-.task-item.running::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border: 1px solid rgba(0, 255, 136, 0.6);
-    border-radius: 6px;
-    animation: runningTaskBorder 3s linear infinite;
+.task-item.running * {
+    color: #003c1a !important;
+    opacity: 1 !important;
 }
 
 .task-item.running .task-status {
-    background: linear-gradient(90deg, #00ff88, #00cc6a);
-    color: #000;
+    background: none !important;
+    color: #00b86b !important;
     font-weight: bold;
-    animation: statusGlow 1.5s ease-in-out infinite alternate;
+    border-radius: 6px;
+    padding: 0.2rem 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: none !important;
+    opacity: 1 !important;
 }
 
 .task-item.running .progress-fill {
-    background: linear-gradient(90deg, #00ff88, #00cc6a, #00ff88);
-    background-size: 200% 100%;
-    animation: progressShimmer 2s linear infinite;
+    background: linear-gradient(90deg, #00ff88, #00ffcc) !important;
+    box-shadow: none !important;
+    animation: none !important;
+    opacity: 1 !important;
 }
 
 .task-item.running .task-id {
-    background: rgba(0, 255, 136, 0.3);
-    color: #fff;
+    background: #eafff3 !important;
+    color: #00b86b !important;
     font-weight: bold;
+    border: 1px solid #00ff88;
+    opacity: 1 !important;
 }
 
-/* Running indicator animation */
-.running-indicator {
-    display: inline-block;
-    margin-right: 0.3rem;
-    animation: spin 1s linear infinite;
+.task-item.running::before {
+    display: none !important;
 }
 
-/* Running task animations */
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+/* Remove any other .task-item background/opacity that could affect running */
+.task-item {
+    background: #888888 !important; /* very light grey */
+    color: #222 !important;
+    border: 1px solid #e0e0e0;
+    border-left: 4px solid transparent;
+    border-radius: 8px;
+    opacity: 1 !important;
+}
+.task-item * {
+    color: #222 !important;
+    opacity: 1 !important;
 }
 
-@keyframes runningTaskPulse {
-    0%, 100% {
-        box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
-    }
-    50% {
-        box-shadow: 0 0 25px rgba(0, 255, 136, 0.7);
-    }
+.task-item.selected {
+    background: #eafff3 !important;
+    border-left-color: var(--accent-color, #00ff88) !important;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.15);
+    color: #003c1a !important;
 }
-
-@keyframes runningTaskBorder {
-    0% {
-        border-color: rgba(0, 255, 136, 0.6);
-    }
-    50% {
-        border-color: rgba(0, 255, 136, 1);
-    }
-    100% {
-        border-color: rgba(0, 255, 136, 0.6);
-    }
-}
-
-@keyframes statusGlow {
-    0% {
-        text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
-    }
-    100% {
-        text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
-    }
-}
-
-@keyframes progressShimmer {
-    0% {
-        background-position: -200% 0;
-    }
-    100% {
-        background-position: 200% 0;
-    }
-}
-
-.task-item.completed {
-    border-left-color: #2196F3;
-}
-
-.task-item.paused {
-    border-left-color: #FF9800;
-}
-
-.task-item.aborted {
-    border-left-color: #F44336;
-}
-
-.task-item.stopped {
-    border-left-color: #9E9E9E;
-}
-
-.task-item.pending {
-    border-left-color: #FFEB3B;
+.task-item.selected * {
+    color: #003c1a !important;
 }
 
 /* Task Tooltip */

@@ -10,6 +10,8 @@ class TaskList {
         this.refreshInterval = null;
         this.currentlySelectedTask = null;
         this.isFirstLoad = true; // Track if this is the first load for auto-navigation
+        this._rectangleZoomLevel = 3; // For cycling zoom on rectangle click
+        this._rectangleZoomLevels = [3, 5, 7, 9, 11, 13];
         
         this.init();
     }
@@ -44,7 +46,7 @@ class TaskList {
                 );
                 
                 if (newlyRunningTasks.length > 0) {
-                    console.log('Detected newly running tasks:', newlyRunningTasks.map(t => t.id));
+                    // Detected newly running tasks - starting visualization
                     
                     // Navigate to the first newly running task
                     const newlyRunningTask = newlyRunningTasks[0];
@@ -62,7 +64,7 @@ class TaskList {
                             if (typeof window.reArchaeologyApp.startScanningAnimation === 'function') {
                                 window.reArchaeologyApp.startScanningAnimation('satellite');
                                 window.reArchaeologyApp.isScanning = true;
-                                console.log('Started scanning animation for newly running task');
+                                // Started scanning animation for newly running task
                             }
                         }, 100);
                     }
@@ -71,7 +73,7 @@ class TaskList {
             
             // Always check and trigger visualization for running tasks
             // This ensures visualization works even if websocket messages are missed
-            this.triggerVisualizationForRunningTasks();
+            await this.triggerVisualizationForRunningTasks();
         } catch (error) {
             console.error('Failed to load tasks:', error);
             this.showErrorState();
@@ -111,12 +113,27 @@ class TaskList {
             return;
         }
 
+        // Sort tasks: running first, then by updated_at (most recent first)
+        const sortedTasks = [...this.tasks].sort((a, b) => {
+            // Running tasks always come first
+            if (a.status === 'running' && b.status !== 'running') return -1;
+            if (b.status === 'running' && a.status !== 'running') return 1;
+            
+            // If both are running or both are not running, sort by updated_at
+            const aTime = new Date(a.updated_at || a.created_at).getTime();
+            const bTime = new Date(b.updated_at || b.created_at).getTime();
+            return bTime - aTime; // Most recent first
+        });
+
+        const runningCount = sortedTasks.filter(task => task.status === 'running').length;
+        const statusText = runningCount > 0 ? ` (${runningCount} running)` : '';
+
         container.innerHTML = `
             <div class="task-count-header">
-                <span class="task-count">${this.tasks.length} tasks available</span>
+                <span class="task-count">${this.tasks.length} tasks available${statusText}</span>
             </div>
             <div class="task-list-scroll">
-                ${this.tasks.map(task => this.createTaskListItem(task)).join('')}
+                ${sortedTasks.map(task => this.createTaskListItem(task)).join('')}
             </div>
         `;
 
@@ -136,18 +153,17 @@ class TaskList {
         const findingsCount = task.findings ? task.findings.length : 0;
         const opacityValue = Math.max(0.3, task.decay_value);
         
-        // Add running indicator for active tasks
-        const runningIndicator = task.status === 'running' ? 
-            '<span class="running-indicator">🔄</span>' : '';
+        // Clean styling for running tasks - let CSS handle the visual indicators
+        const runningClass = task.status === 'running' ? ' running' : '';
 
         return `
-            <div class="task-item ${task.status}" 
+            <div class="task-item ${task.status}${runningClass}" 
                  data-task-id="${task.id}" 
                  style="border-left-color: ${statusColor}; opacity: ${opacityValue};">
                 <div class="task-header">
                     <span class="task-id">${task.id.slice(0, 6)}</span>
                     <span class="task-status" style="color: ${statusColor};">
-                        ${runningIndicator}${statusText}
+                        ${statusText}
                     </span>
                 </div>
                 <div class="task-details">
@@ -200,7 +216,7 @@ class TaskList {
             }
         });
 
-        console.log(`Rendered ${this.taskRectangles.size} task rectangles`);
+        // No verbose logging - tasks are being rendered silently
     }
 
     createTaskRectangle(task) {
@@ -209,16 +225,14 @@ class TaskList {
         const [lat, lon] = task.start_coordinates;
         const { width_km, height_km } = task.range;
         
-        // For running tasks, show the actual LiDAR scanning boundary
-        // Backend converts rectangular task to square scanning area using max dimension as radius
+        // For running tasks, show actual scanning area
+        // Backend now supports both rectangular and circular scan areas
         let actualWidth, actualHeight;
         if (task.status === 'running') {
-            // Backend uses: radius_km = max(width_km, height_km) / 2
-            // Then creates square: area_width_m = area_height_m = 2 * radius_m
-            const radius_km = Math.max(width_km, height_km) / 2;
-            const scanning_dimension = radius_km * 2; // This is the actual square size being scanned
-            actualWidth = scanning_dimension;
-            actualHeight = scanning_dimension;
+            // If the task was started with rectangular parameters, the backend will
+            // respect those dimensions. Otherwise, it uses circular logic.
+            actualWidth = width_km;
+            actualHeight = height_km;
         } else {
             // For non-running tasks, show original requested dimensions
             actualWidth = width_km;
@@ -256,7 +270,18 @@ class TaskList {
         // Add click handler for navigation
         rectangle.on('click', (e) => {
             L.DomEvent.stopPropagation(e);
-            this.navigateToTask(task.id);
+            // --- Custom: Cycle zoom on rectangle click ---
+            if (this.map) {
+                // Get center of rectangle
+                const bounds = rectangle.getBounds();
+                const center = bounds.getCenter();
+                // Cycle zoom level
+                let idx = this._rectangleZoomLevels.indexOf(this._rectangleZoomLevel);
+                idx = (idx + 1) % this._rectangleZoomLevels.length;
+                this._rectangleZoomLevel = this._rectangleZoomLevels[idx];
+                this.map.setView(center, this._rectangleZoomLevel, { animate: true });
+            }
+            // Do NOT call navigateToTask here to avoid conflicting map animations
         });
 
         // Add tooltip
@@ -294,6 +319,11 @@ class TaskList {
 
                 // Highlight the selected task
                 this.highlightTask(taskId);
+                
+                // Load cached bitmap for this task
+                if (window.reArchaeologyApp && typeof window.reArchaeologyApp.loadCachedBitmapForTask === 'function') {
+                    await window.reArchaeologyApp.loadCachedBitmapForTask(taskId);
+                }
             }
         } catch (error) {
             console.error('Failed to navigate to task:', error);
@@ -330,9 +360,58 @@ class TaskList {
                 });
 
                 // Highlight the selected task after navigation completes
-                setTimeout(() => {
+                setTimeout(async () => {
                     this.highlightTask(taskId);
+                    
+                    // Set up scan area with task's rectangular dimensions
+                    const task = this.tasks.find(t => t.id === taskId);
+                    if (task && window.reArchaeologyApp) {
+                        const { width_km, height_km } = task.range;
+                        const [lat, lon] = task.start_coordinates;
+                        
+                        // Import the selectScanArea function dynamically
+                        const { selectScanArea, updateScanAreaLabel } = await import('./map.js');
+                        if (selectScanArea && typeof selectScanArea === 'function') {
+                            await selectScanArea(window.reArchaeologyApp, lat, lon, null, width_km, height_km);
+                            
+                            // Update scan area label with current resolution if available
+                            if (updateScanAreaLabel && window.reArchaeologyApp.currentResolution) {
+                                updateScanAreaLabel(window.reArchaeologyApp);
+                            }
+                        }
+                    }
+                    
+                    // Load cached bitmap for this task
+                    if (window.reArchaeologyApp && typeof window.reArchaeologyApp.loadCachedBitmapForTask === 'function') {
+                        await window.reArchaeologyApp.loadCachedBitmapForTask(taskId);
+                    }
                 }, 2100);
+                
+                // Load cached bitmap for this task immediately
+                if (window.reArchaeologyApp && typeof window.reArchaeologyApp.loadCachedBitmapForTask === 'function') {
+                    // Load after navigation starts
+                    setTimeout(async () => {
+                        // Set up scan area first
+                        const task = this.tasks.find(t => t.id === taskId);
+                        if (task) {
+                            const { width_km, height_km } = task.range;
+                            const [lat, lon] = task.start_coordinates;
+                            
+                            // Import the selectScanArea function dynamically
+                            const { selectScanArea, updateScanAreaLabel } = await import('./map.js');
+                            if (selectScanArea && typeof selectScanArea === 'function') {
+                                await selectScanArea(window.reArchaeologyApp, lat, lon, null, width_km, height_km);
+                                
+                                // Update scan area label with current resolution if available
+                                if (updateScanAreaLabel && window.reArchaeologyApp.currentResolution) {
+                                    updateScanAreaLabel(window.reArchaeologyApp);
+                                }
+                            }
+                        }
+                        
+                        await window.reArchaeologyApp.loadCachedBitmapForTask(taskId);
+                    }, 500);
+                }
             }
         } catch (error) {
             console.error('Failed to navigate to task smoothly:', error);
@@ -401,9 +480,17 @@ class TaskList {
             const runningTask = runningTasks[0];
             console.log('Auto-navigating to running task:', runningTask.id);
             
+            // Enable heatmap mode immediately for running tasks
+            if (window.reArchaeologyApp?.mapVisualization?.enableHeatmapMode) {
+                window.reArchaeologyApp.mapVisualization.enableHeatmapMode();
+            }
+            
             // Wait for map to be fully ready and any other initializations to complete
             setTimeout(async () => {
                 await this.navigateToTaskSmoothly(runningTask.id);
+                
+                // Ensure visualization is triggered for running task
+                await this.triggerVisualizationForRunningTasks();
             }, 1500);
         } else {
             // No running tasks, let the app decide whether to show discovered sites
@@ -418,16 +505,37 @@ class TaskList {
      * Check and trigger visualization for running tasks
      * This ensures that even if websocket messages are missed, running tasks get proper visualization
      */
-    triggerVisualizationForRunningTasks() {
+    async triggerVisualizationForRunningTasks() {
         const runningTasks = this.tasks.filter(task => task.status === 'running');
         
         if (runningTasks.length > 0 && window.reArchaeologyApp) {
-            console.log('Triggering visualization for running tasks:', runningTasks.map(t => t.id));
+            // Only log when we first detect running tasks, not every time
+            const taskIds = runningTasks.map(t => t.id);
+            if (!this.lastRunningTaskIds || JSON.stringify(taskIds) !== JSON.stringify(this.lastRunningTaskIds)) {
+                // Auto-navigating to running task (silent)
+                this.lastRunningTaskIds = taskIds;
+            }
             
             // Enable heatmap mode for running tasks
             if (window.reArchaeologyApp.mapVisualization && 
                 typeof window.reArchaeologyApp.mapVisualization.enableHeatmapMode === 'function') {
                 window.reArchaeologyApp.mapVisualization.enableHeatmapMode();
+            }
+            
+            // Load cached bitmap for the first running task
+            const runningTask = runningTasks[0];
+            if (typeof window.reArchaeologyApp.loadCachedBitmapForTask === 'function') {
+                try {
+                    await window.reArchaeologyApp.loadCachedBitmapForTask(runningTask.id);
+                    // Only log success if we haven't seen this task before
+                    if (!this.loadedBitmapTasks?.has(runningTask.id)) {
+                        // Loaded cached bitmap for running task (silent)
+                        this.loadedBitmapTasks = this.loadedBitmapTasks || new Set();
+                        this.loadedBitmapTasks.add(runningTask.id);
+                    }
+                } catch (error) {
+                    console.warn('Failed to load cached bitmap for running task:', error);
+                }
             }
             
             // Start scanning animation if not already active
@@ -443,16 +551,19 @@ class TaskList {
                         !window.reArchaeologyApp.isScanning) {
                         window.reArchaeologyApp.startScanningAnimation('satellite');
                         window.reArchaeologyApp.isScanning = true;
-                        console.log('Started scanning animation for running tasks');
+                        // Started scanning animation for running tasks (silent)
                     }
                 }, 150);
             }
             
             // Set session info
-            const runningTask = runningTasks[0];
             if (runningTask.session_id || runningTask.sessions?.scan) {
-                window.reArchaeologyApp.currentLidarSession = runningTask.session_id || runningTask.sessions.scan;
-                console.log('Set current LiDAR session:', window.reArchaeologyApp.currentLidarSession);
+                const newSessionId = runningTask.session_id || runningTask.sessions.scan;
+                // Only log when session changes to avoid spam
+                if (window.reArchaeologyApp.currentLidarSession !== newSessionId) {
+                    window.reArchaeologyApp.currentLidarSession = newSessionId;
+                    // Set current LiDAR session (silent)
+                }
             }
         }
     }

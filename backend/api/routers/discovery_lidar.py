@@ -15,6 +15,7 @@ from backend.api.routers.discovery_utils import get_available_structure_types, g
 from backend.api.routers.discovery_models import SessionIdRequest
 from backend.api.routers.discovery_sessions import active_sessions, _active_detection_tasks, _session_tile_data
 from backend.api.routers.discovery_connections import discovery_manager
+from backend.api.cache.simple_bitmap_cache import get_simple_bitmap_cache
 from lidar_factory.factory import LidarMapFactory
 
 router = APIRouter()
@@ -45,10 +46,30 @@ async def start_lidar_scan(
         session_id = str(uuid.uuid4())
         center_lat = float(config.get('center_lat', 52.4751))
         center_lon = float(config.get('center_lon', 4.8156))
-        radius_km = float(config.get('radius_km', 2.0))
         tile_size_m = 40
         prefer_high_resolution = config.get('prefer_high_resolution', False)
         enable_detection = config.get('enable_detection', False)
+        
+        # Calculate scan area and grid size based on config parameters
+        if 'width_km' in config and 'height_km' in config:
+            # Rectangular scan area
+            width_km = float(config.get('width_km'))
+            height_km = float(config.get('height_km'))
+            area_width_m = width_km * 1000
+            area_height_m = height_km * 1000
+            tiles_x = max(1, int(np.ceil(area_width_m / tile_size_m)))
+            tiles_y = max(1, int(np.ceil(area_height_m / tile_size_m)))
+            total_tiles = tiles_x * tiles_y
+            # Use minimum dimension for resolution calculation
+            min_dimension_km = min(width_km, height_km)
+        else:
+            # Circular scan area (legacy)
+            radius_km = float(config.get('radius_km', 2.0))
+            radius_m = radius_km * 1000
+            scan_grid_size = int(2 * radius_m / tile_size_m)
+            total_tiles = scan_grid_size * scan_grid_size
+            min_dimension_km = radius_km
+        
         # Use dynamic app_root
         app_root = get_app_root()
         import logging
@@ -57,12 +78,10 @@ async def start_lidar_scan(
         structure_type = config.get('structure_type', default_type)
         if prefer_high_resolution:
             preferred_resolution = 0.25
-        elif radius_km <= 1.0:
+        elif min_dimension_km <= 1.0:
             preferred_resolution = 0.5
         else:
             preferred_resolution = 1.0
-        radius_m = radius_km * 1000
-        scan_grid_size = int(2 * radius_m / tile_size_m)
         session_info = {
             "session_id": session_id,
             "type": "lidar_scan",
@@ -72,7 +91,7 @@ async def start_lidar_scan(
             "enable_detection": enable_detection,
             "structure_type": structure_type,
             "start_time": datetime.now(timezone.utc).isoformat(),
-            "total_tiles": scan_grid_size * scan_grid_size,
+            "total_tiles": total_tiles,
             "processed_tiles": 0,
             "streaming_mode": True,
             "tile_size_m": tile_size_m,
@@ -89,11 +108,18 @@ async def start_lidar_scan(
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
         asyncio.create_task(run_lidar_scan_async(session_id, session_info))
+        
+        # Create appropriate message for rectangular vs circular scans
+        if 'width_km' in config and 'height_km' in config:
+            scan_description = f"{tiles_x}×{tiles_y} tiles (rectangular: {width_km}×{height_km}km)"
+        else:
+            scan_description = f"{scan_grid_size}×{scan_grid_size} tiles (circular: {radius_km}km radius)"
+        
         return {
             "session_id": session_id,
             "status": "started",
-            "message": f"LiDAR scan started for {scan_grid_size}x{scan_grid_size} tiles" + (" with detection" if enable_detection else ""),
-            "total_tiles": scan_grid_size * scan_grid_size,
+            "message": f"LiDAR scan started for {scan_description}" + (" with detection" if enable_detection else ""),
+            "total_tiles": total_tiles,
             "enable_detection": enable_detection,
             "structure_type": structure_type
         }
@@ -157,17 +183,44 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
         profile_name = get_profile_name_for_structure_type(structure_type, app_root, logger)
         profile = profile_manager.load_profile(profile_name)
         profile_resolution_m = profile.geometry.resolution_m
-        radius_m = radius_km * 1000
-        lat_delta = radius_m / 111320
-        lon_delta = radius_m / (111320 * np.cos(np.radians(center_lat)))
-        north_lat = center_lat + lat_delta
-        south_lat = center_lat - lat_delta
-        east_lon = center_lon + lon_delta
-        west_lon = center_lon - lon_delta
-        area_width_m = 2 * radius_m
-        area_height_m = 2 * radius_m
+        
+        # Log configuration details
+        logger.info(f"📍 Center: ({center_lat:.4f}, {center_lon:.4f})")
+        
+        # Support both radius (circular) and width/height (rectangular) scan areas
+        if 'width_km' in config and 'height_km' in config:
+            # Rectangular scan area
+            width_km = float(config.get('width_km'))
+            height_km = float(config.get('height_km'))
+            area_width_m = width_km * 1000
+            area_height_m = height_km * 1000
+            # Calculate bounds for rectangular area
+            lat_delta_half = (area_height_m / 2) / 111320
+            lon_delta_half = (area_width_m / 2) / (111320 * np.cos(np.radians(center_lat)))
+            north_lat = center_lat + lat_delta_half
+            south_lat = center_lat - lat_delta_half
+            east_lon = center_lon + lon_delta_half
+            west_lon = center_lon - lon_delta_half
+        else:
+            # Circular scan area (legacy)
+            radius_m = radius_km * 1000
+            lat_delta = radius_m / 111320
+            lon_delta = radius_m / (111320 * np.cos(np.radians(center_lat)))
+            north_lat = center_lat + lat_delta
+            south_lat = center_lat - lat_delta
+            east_lon = center_lon + lon_delta
+            west_lon = center_lon - lon_delta
+            area_width_m = 2 * radius_m
+            area_height_m = 2 * radius_m
+        
+        # Calculate grid size
         tiles_x = max(1, int(np.ceil(area_width_m / tile_size_m)))
         tiles_y = max(1, int(np.ceil(area_height_m / tile_size_m)))
+        
+        # Log bounds and grid information
+        logger.info(f"📐 Bounds: N={north_lat:.4f}, S={south_lat:.4f}, E={east_lon:.4f}, W={west_lon:.4f}")
+        logger.info(f"🔢 Grid: {tiles_x}×{tiles_y} tiles")
+        
         session_info["status"] = "running"
         session_info["processed_tiles"] = 0
         session_info["total_tiles"] = tiles_x * tiles_y
@@ -282,6 +335,16 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
                         await discovery_manager.send_message(tile_result)
+                        
+                        # Update bitmap cache with new tile
+                        try:
+                            bitmap_cache = get_simple_bitmap_cache()
+                            task_id = config.get('task_id')  # Get task_id from config if available
+                            if task_id:
+                                await bitmap_cache.add_tile(task_id, tile_result)
+                        except Exception as e:
+                            logger.warning(f"Failed to update bitmap cache: {e}")
+                        
                         # Store tile data for detection
                         if session_id not in _session_tile_data:
                             _session_tile_data[session_id] = {}

@@ -1508,3 +1508,85 @@ html, body {
         transform: translateY(0);
     }
 }
+
+/* ===========================================
+   BITMAP CACHE NOTIFICATION STYLES
+   =========================================== */
+
+.bitmap-cache-notification {
+    position: absolute;
+    top: 80px;
+    right: 20px;
+    background: rgba(26, 26, 26, 0.95);
+    color: var(--text-primary);
+    border: 1px solid var(--accent-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 280px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 16px rgba(0, 255, 136, 0.2);
+    z-index: 1500;
+    animation: bitmap-cache-slide-in 0.3s ease-out;
+}
+
+.bitmap-cache-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.bitmap-cache-text {
+    flex-grow: 1;
+}
+
+.bitmap-cache-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--accent-color);
+    margin-bottom: 2px;
+}
+
+.bitmap-cache-details {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+@keyframes bitmap-cache-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Cached bitmap overlay styles */
+.cached-bitmap-overlay {
+    opacity: 0.7 !important;
+    z-index: 100 !important;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.cached-bitmap-overlay:hover {
+    opacity: 0.5 !important;
+}
+
+/* Progressive loading indicator */
+.bitmap-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(26, 26, 26, 0.9);
+    color: var(--accent-color);
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}

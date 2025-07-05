@@ -21,6 +21,7 @@ from ...models.neo4j_crud import Neo4jCRUD
 from ...utils.config import get_settings
 from ...utils.error_handling import handle_api_error, log_performance
 from .auth import get_current_user
+from backend.api.routers.ai_chat import stop_task_sessions
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -494,7 +495,7 @@ async def cancel_background_task(
     task_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Cancel a running background task"""
+    """Cancel a running background task and cascade stop all sub-sessions"""
     try:
         # Check if task exists and belongs to user
         with Neo4jCRUD() as db:
@@ -517,6 +518,9 @@ async def cancel_background_task(
         task = task_registry.get_task(task_id)
         if task and not task.done():
             task.cancel()
+        
+        # Cascade stop all sub-sessions
+        await stop_task_sessions(task_id)
         
         # Update status in database
         await update_task_status(task_id, TaskStatus.CANCELLED, {"cancelled_at": datetime.utcnow().isoformat()})

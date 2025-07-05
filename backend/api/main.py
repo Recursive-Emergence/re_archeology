@@ -62,6 +62,7 @@ from backend.api.routers import (
     ai_chat,  # Re-enabled for chat functionality
     tasks     # New tasks management endpoint
 )
+from backend.api.cache import bitmap_router  # Progressive bitmap cache
 
 # Core routers
 app.include_router(users.router, prefix=settings.API_V1_STR, tags=["users"])
@@ -77,6 +78,7 @@ app.include_router(spatial_analysis.router, prefix=settings.API_V1_STR, tags=["s
 app.include_router(earth_engine_service.router, prefix=settings.API_V1_STR, tags=["earth-engine"])
 app.include_router(discovery.router, prefix=settings.API_V1_STR, tags=["discovery"])
 app.include_router(tasks.router, prefix=settings.API_V1_STR, tags=["tasks"])  # New tasks management
+app.include_router(bitmap_router, prefix=settings.API_V1_STR, tags=["bitmap-cache"])  # Progressive bitmap cache
 app.include_router(websocket.router, tags=["websockets"])
 
 # Explicit homepage route for the discovery interface

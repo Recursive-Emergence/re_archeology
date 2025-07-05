@@ -1,0 +1,90 @@
+/* Progressive Bitmap Cache Styles */
+
+.cached-bitmap-overlay {
+    transition: opacity 0.5s ease-in-out;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.bitmap-cache-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    border-radius: 8px;
+    padding: 0;
+    z-index: 10000;
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.3s ease-out;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-width: 300px;
+    min-width: 250px;
+}
+
+.bitmap-cache-notification.visible {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.notification-content {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    gap: 12px;
+}
+
+.notification-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.notification-text {
+    flex: 1;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.notification-text strong {
+    color: #00ff88;
+    font-weight: 600;
+}
+
+/* Cached bitmap overlay identifier for debugging */
+.cached-bitmap-overlay[title*="cached"] {
+    border: 2px solid rgba(0, 255, 136, 0.5);
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .bitmap-cache-notification {
+        background: rgba(20, 20, 20, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .bitmap-cache-notification {
+        right: 10px;
+        top: 10px;
+        max-width: calc(100vw - 20px);
+        min-width: unset;
+    }
+    
+    .notification-content {
+        padding: 12px;
+        gap: 8px;
+    }
+    
+    .notification-icon {
+        font-size: 20px;
+    }
+    
+    .notification-text {
+        font-size: 13px;
+    }
+}
