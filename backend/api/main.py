@@ -60,7 +60,7 @@ from backend.api.routers import (
     users, hypotheses, sites, websocket,
     auth, discussion_threads, background_tasks, spatial_analysis, earth_engine_service, discovery,
     ai_chat,  # Re-enabled for chat functionality
-    tasks     # New tasks management endpoint
+    tasks,    # New tasks management endpoint
 )
 from backend.api.cache import bitmap_router  # Progressive bitmap cache
 
@@ -156,6 +156,9 @@ else:
             app.mount("/services", StaticFiles(directory=str(frontend_path / "services")), name="services")
             app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
             break
+
+# Serve static files from the project root for demo html/js
+app.mount("/", StaticFiles(directory=str(pathlib.Path(__file__).parent.parent.parent)), name="static-root")
 
 # Startup event
 @app.on_event("startup")

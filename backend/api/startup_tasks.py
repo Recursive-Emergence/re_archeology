@@ -10,18 +10,21 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
-import glob
+import os
 
 from .routers.discovery_sessions import active_sessions
 from .routers.discovery_connections import discovery_manager
 from .routers.discovery_lidar import run_lidar_scan_async
 from .routers.discovery_utils import get_available_structure_types
 from .cache.simple_bitmap_cache import get_simple_bitmap_cache
+from backend.utils import gcs_utils
+from backend.api.routers.tasks import load_running_tasks_from_gcs
 
 logger = logging.getLogger(__name__)
 
-# Path to existing tasks data
-TASKS_DATA_PATH = Path(__file__).parent.parent.parent / "data" / "tasks"
+# GCS bucket and prefix for tasks data
+GCS_BUCKET_NAME = os.getenv('GCS_TASKS_BUCKET', 're_archaeology')
+GCS_TASKS_PREFIX = 'tasks/'
 
 def get_app_root():
     """Get the application root directory"""
@@ -57,35 +60,8 @@ async def check_and_restart_running_tasks():
         logger.error(f"❌ Error in startup task check: {e}")
 
 async def load_running_tasks() -> List[Dict[str, Any]]:
-    """Load all tasks with 'running' status from JSON files"""
-    running_tasks = []
-    
-    try:
-        # Find all JSON files in tasks directory
-        task_files = glob.glob(str(TASKS_DATA_PATH / "*.json"))
-        logger.info(f"Found {len(task_files)} task files in {TASKS_DATA_PATH}")
-        
-        for task_file in task_files:
-            try:
-                with open(task_file, 'r') as f:
-                    task_data = json.load(f)
-                    task_status = task_data.get("status", "unknown")
-                    logger.info(f"Task {task_data.get('id', 'unknown')[:8]}: status={task_status}")
-                    
-                # Check if task is running
-                if task_data.get("status") == "running":
-                    running_tasks.append(task_data)
-                    logger.info(f"Found running task: {task_data['id']} at {task_data.get('start_coordinates')}")
-                    
-                    
-            except Exception as e:
-                logger.error(f"Error loading task file {task_file}: {e}")
-                continue
-                
-    except Exception as e:
-        logger.error(f"Error accessing tasks directory: {e}")
-    
-    return running_tasks
+    """Load all tasks with 'running' status from GCS task JSONs (centralized logic)."""
+    return load_running_tasks_from_gcs()
 
 async def restart_task_session(task: Dict[str, Any]):
     """
@@ -211,39 +187,31 @@ async def restart_task_session(task: Dict[str, Any]):
 
 async def update_task_session_id(task_id: str, new_session_id: str):
     """
-    Update the session_id for a task in its JSON file.
+    Update the session_id for a task in its JSON file in GCS.
     
     Args:
         task_id: Task ID to update
         new_session_id: New session ID to assign
     """
     try:
-        # Find the task file
-        task_files = glob.glob(str(TASKS_DATA_PATH / f"*{task_id}*.json"))
-        
-        if not task_files:
-            logger.error(f"Task file not found for task {task_id}")
+        from backend.utils import gcs_utils
+        import os
+        GCS_BUCKET_NAME = os.getenv('GCS_TASKS_BUCKET', 're_archaeology')
+        GCS_TASKS_PREFIX = 'tasks/'
+        client = gcs_utils.get_gcs_client()
+        bucket = gcs_utils.get_gcs_bucket(GCS_BUCKET_NAME, client)
+        blob_name = f"{GCS_TASKS_PREFIX}{task_id}.json"
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            logger.error(f"Task file not found for task {task_id} in GCS")
             return
-            
-        task_file = task_files[0]
-        
-        # Load current task data
-        with open(task_file, 'r') as f:
-            task_data = json.load(f)
-        
-        # Update session ID
+        data_bytes = blob.download_as_bytes()
+        task_data = json.loads(data_bytes.decode('utf-8'))
         task_data["session_id"] = new_session_id
         task_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        
-        # Update sessions dict: reset to only the new scan session
         task_data["sessions"] = {"scan": new_session_id}
-        
-        # Save updated task data
-        with open(task_file, 'w') as f:
-            json.dump(task_data, f, indent=2)
-            
+        blob.upload_from_string(json.dumps(task_data, indent=2), content_type='application/json')
         logger.info(f"✅ Updated task {task_id} with new session ID: {new_session_id}")
-        
     except Exception as e:
         logger.error(f"❌ Failed to update session ID for task {task_id}: {e}")
 
@@ -270,7 +238,7 @@ async def update_bitmap_cache_for_task(task_id: str, tile_data: Optional[Dict] =
 
 async def update_task_progress(task_id: str, progress: Optional[float] = None, findings: Optional[List[Dict]] = None, tile_data: Optional[Dict] = None):
     """
-    Update progress for a running task and save to JSON file.
+    Update progress for a running task and save to JSON file in GCS.
     
     Args:
         task_id: Task ID to update
@@ -279,61 +247,45 @@ async def update_task_progress(task_id: str, progress: Optional[float] = None, f
         tile_data: Optional tile data to add to bitmap cache
     """
     try:
-        # Find the task file
-        task_files = glob.glob(str(TASKS_DATA_PATH / f"*{task_id}*.json"))
-        
-        if not task_files:
-            logger.error(f"Task file not found for task {task_id}")
+        from backend.utils import gcs_utils
+        import os
+        GCS_BUCKET_NAME = os.getenv('GCS_TASKS_BUCKET', 're_archaeology')
+        GCS_TASKS_PREFIX = 'tasks/'
+        client = gcs_utils.get_gcs_client()
+        bucket = gcs_utils.get_gcs_bucket(GCS_BUCKET_NAME, client)
+        blob_name = f"{GCS_TASKS_PREFIX}{task_id}.json"
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            logger.error(f"Task file not found for task {task_id} in GCS")
             return
-            
-        task_file = task_files[0]
-        
-        # Load current task data
-        with open(task_file, 'r') as f:
-            task_data = json.load(f)
-        
-        # Update progress if provided
+        data_bytes = blob.download_as_bytes()
+        task_data = json.loads(data_bytes.decode('utf-8'))
         if progress is not None:
             task_data["progress"] = progress
             task_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-            
-            # Mark as completed if progress is 100%
             if progress >= 100.0:
                 task_data["status"] = "completed"
                 task_data["completed_at"] = datetime.now(timezone.utc).isoformat()
-        
-        # Add findings if provided
         if findings:
             if not isinstance(findings, list):
                 logger.warning(f"Expected findings to be a list, got {type(findings)}. Converting to list.")
                 findings = [findings] if findings is not None else []
-            
             if "findings" not in task_data:
                 task_data["findings"] = []
             task_data["findings"].extend(findings)
             task_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        
-        # Save updated task data
-        with open(task_file, 'w') as f:
-            json.dump(task_data, f, indent=2)
-        
-        # Update bitmap cache with new tile data if available
+        blob.upload_from_string(json.dumps(task_data, indent=2), content_type='application/json')
         await update_bitmap_cache_for_task(task_id, tile_data)
-        
-        # Only log progress updates at significant milestones or with findings
         if progress is not None:
-            # Log only at whole number percentages or completion
             if progress >= 100.0:
                 logger.info(f"✅ Task {task_id} completed (100%)")
             elif progress >= 1.0 and progress % 1.0 == 0:
                 logger.info(f"📊 Task {task_id} progress: {int(progress)}%")
             elif progress == 0:
                 logger.info(f"🚀 Task {task_id} started")
-        
         if findings and isinstance(findings, list):
             logger.info(f"🎯 Added {len(findings)} findings to task {task_id}")
         elif findings:
             logger.info(f"🎯 Added 1 finding to task {task_id}")
-        
     except Exception as e:
         logger.error(f"❌ Failed to update task {task_id}: {e}")

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GCS Task Tiles Demo</title>
+  <style>
+    body { font-family: sans-serif; }
+    .tile { display: inline-block; width: 60px; height: 60px; border: 1px solid #ccc; margin: 2px; text-align: center; vertical-align: top; }
+    .tile span { font-size: 10px; }
+  </style>
+</head>
+<body>
+  <h2>GCS Task Tiles Demo</h2>
+  <label>Task ID: <input id="taskId" value="demo-task-5kmx10km"></label>
+  <label>Level: <input id="level" value="0" size="2"></label>
+  <label>Rows: <input id="rows" value="4" size="2"></label>
+  <label>Cols: <input id="cols" value="4" size="2"></label>
+  <button onclick="loadTiles()">Load Tiles</button>
+  <div id="tiles"></div>
+  <script>
+    const TILE_URL_PATTERN = "https://storage.googleapis.com/re_archaeology/task_tiles/{task_id}/level_{level}/tile_{row}_{col}/subtile_0_0.json";
+    async function loadTiles() {
+      const taskId = document.getElementById('taskId').value;
+      const level = document.getElementById('level').value;
+      const rows = parseInt(document.getElementById('rows').value);
+      const cols = parseInt(document.getElementById('cols').value);
+      const tilesDiv = document.getElementById('tiles');
+      tilesDiv.innerHTML = '';
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const url = TILE_URL_PATTERN
+            .replace('{task_id}', taskId)
+            .replace('{level}', level)
+            .replace('{row}', row)
+            .replace('{col}', col);
+          const tileDiv = document.createElement('div');
+          tileDiv.className = 'tile';
+          tileDiv.innerHTML = `<span>Loading<br>${row},${col}</span>`;
+          tilesDiv.appendChild(tileDiv);
+          fetch(url)
+            .then(r => r.ok ? r.json() : {color:'#888', elevation:'N/A'})
+            .then(data => {
+              tileDiv.style.background = data.color || '#eee';
+              tileDiv.innerHTML = `<span>${row},${col}<br>${data.elevation}</span>`;
+            })
+            .catch(() => {
+              tileDiv.style.background = '#eee';
+              tileDiv.innerHTML = `<span>${row},${col}<br>ERR</span>`;
+            });
+        }
+        tilesDiv.appendChild(document.createElement('br'));
+      }
+    }
+  </script>
+</body>
+</html>

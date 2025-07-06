@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Iteration 0 Demo: Progressive LiDAR Tiles (WebSocket)</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f8f8f8; margin: 0; padding: 0; }
+    #container { max-width: 800px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #ccc; padding: 24px; }
+    h2 { color: #2a4d69; }
+    #tile-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; margin-top: 18px; }
+    .tile { width: 100%; aspect-ratio: 1/1; background: #eee; border: none; display: flex; align-items: center; justify-content: center; font-size: 0.9em; color: #888; overflow: hidden; box-sizing: border-box; padding: 0; margin: 0; }
+    #progress-bar { width: 100%; background: #eee; border-radius: 4px; margin: 16px 0; height: 12px; overflow: hidden; }
+    #progress-bar-inner { width: 0; height: 100%; background: #4caf50; transition: width 2s linear; }
+    #refresh-btn { margin-top: 18px; padding: 8px 18px; background: #2a4d69; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    #refresh-btn:hover { background: #1e3550; }
+    .subtile-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(1, 1fr); grid-template-rows: repeat(1, 1fr); min-width: 0; min-height: 0; gap: 0; }
+    .subtile { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.8em; border: none; transition: background 0.3s ease, opacity 0.3s ease; box-sizing: border-box; padding: 0; margin: 0; }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <h2>Iteration 0 Demo: Progressive LiDAR Tiles (WebSocket)</h2>
+    <div id="progress-bar"><div id="progress-bar-inner"></div></div>
+    <div style="position:relative;">
+      <img id="snapshot-bg" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;display:none;" />
+      <div id="tile-grid" style="position:relative;z-index:1;"></div>
+    </div>
+    <button id="refresh-btn">Restart Demo</button>
+    <p style="color:#888; font-size:0.95em;">Tiles are streamed from the backend via WebSocket, simulating progressive LiDAR scanning. Each tile appears as soon as it is received.</p>
+    <div id="error-message" style="color:red; font-weight:bold; margin-top:10px;"></div>
+    <button id="gcs-toggle" style="margin-left:12px;">Use Direct GCS Tiles</button>
+  </div>
+  <script>
+    let gridRows = 10, gridCols = 5; // Will be set dynamically from backend
+    let ws;
+    let totalTiles = 0;
+    let tilesReceived = 0;
+    let snapshotLoaded = false;
+    let useGcsDirect = true; // Default to direct GCS access
+
+    // --- Dynamic elevation stats and bounds per level ---
+    const elevationStats = {}; // { level: [values] }
+    const elevationBounds = {}; // { level: [min, max] }
+
+    function computeElevationRange(values) {
+      if (!values || values.length < 5) return [5000, 9000];
+      const sorted = values.slice().sort((a, b) => a - b);
+      const min = sorted[Math.floor(sorted.length * 0.02)];
+      const max = sorted[Math.ceil(sorted.length * 0.98)];
+      return [min, max];
+    }
+
+    function showError(msg) {
+      document.getElementById('error-message').textContent = msg;
+    }
+    function setupGrid() {
+      const grid = document.getElementById('tile-grid');
+      grid.innerHTML = '';
+      grid.style.gridTemplateColumns = `repeat(${gridCols}, 1fr)`;
+      for (let i = 0; i < gridRows * gridCols; i++) {
+        const div = document.createElement('div');
+        div.className = 'tile';
+        div.id = 'tile-' + i;
+        // Each tile will contain a nested grid for subtiles
+        const subtileGrid = document.createElement('div');
+        subtileGrid.className = 'subtile-grid';
+        subtileGrid.style.width = '100%';
+        subtileGrid.style.height = '100%';
+        subtileGrid.style.display = 'grid';
+        subtileGrid.style.gridTemplateColumns = 'repeat(1, 1fr)'; // Start with 1x1
+        subtileGrid.style.gridTemplateRows = 'repeat(1, 1fr)';
+        div.appendChild(subtileGrid);
+        grid.appendChild(div);
+      }
+      showError('');
+    }
+    function animateProgress() {
+      const bar = document.getElementById('progress-bar-inner');
+      bar.style.width = '0';
+      setTimeout(() => { bar.style.width = '100%'; }, 100);
+    }
+    function elevationToColor(elev, level) {
+      const bounds = elevationBounds[level] || [5000, 9000];
+      const [minElev, maxElev] = bounds;
+      const t = Math.max(0, Math.min(1, (elev - minElev) / (maxElev - minElev)));
+      // Blue (low) to Red (high)
+      const r = Math.round(255 * t);
+      const g = Math.round(180 * (1 - t));
+      const b = Math.round(255 * (1 - t));
+      return `rgb(${r},${g},${b})`;
+    }
+    function loadSnapshot(taskId, level) {
+      const img = document.getElementById('snapshot-bg');
+      img.src = `/api/snapshot/${taskId}/${level}`;
+      img.style.display = 'block';
+      img.onload = function() { snapshotLoaded = true; };
+      img.onerror = function() { img.style.display = 'none'; };
+    }
+    function hideSnapshot() {
+      const img = document.getElementById('snapshot-bg');
+      img.style.display = 'none';
+      snapshotLoaded = false;
+    }
+    function getGcsTileUrl(taskId, level, row, col, subtileRow, subtileCol) {
+      return `https://storage.googleapis.com/re_archaeology/tasks/${taskId}/cache/subtile_data/level_${level}/tile_${row}_${col}/subtile_${subtileRow}_${subtileCol}.json`;
+    }
+    function setGcsMode(enabled) {
+      useGcsDirect = enabled;
+      document.getElementById('gcs-toggle').textContent = enabled ? 'Use WebSocket Tiles' : 'Use Direct GCS Tiles';
+    }
+    // Add a toggle button for GCS mode
+    const gcsToggleBtn = document.createElement('button');
+    gcsToggleBtn.id = 'gcs-toggle';
+    gcsToggleBtn.style.marginLeft = '12px';
+    gcsToggleBtn.textContent = useGcsDirect ? 'Use WebSocket Tiles' : 'Use Direct GCS Tiles';
+    gcsToggleBtn.onclick = function() { setGcsMode(!useGcsDirect); };
+    document.getElementById('container').appendChild(gcsToggleBtn);
+    // Patch tile rendering to optionally use GCS
+    function renderTileFromGcs(msg) {
+      const tileIdx = msg.coarse_row !== undefined ? (msg.coarse_row * gridCols + msg.coarse_col) : (msg.row * gridCols + msg.col);
+      const tileDiv = document.getElementById('tile-' + tileIdx);
+      if (!tileDiv) return;
+      let subtileGrid = tileDiv.querySelector('.subtile-grid');
+      if (!subtileGrid) return;
+      let subDivsPerSide = msg.subtiles_per_side || 1;
+      if (subtileGrid.childElementCount !== subDivsPerSide * subDivsPerSide) {
+        subtileGrid.innerHTML = '';
+        subtileGrid.style.gridTemplateColumns = `repeat(${subDivsPerSide}, 1fr)`;
+        subtileGrid.style.gridTemplateRows = `repeat(${subDivsPerSide}, 1fr)`;
+        for (let i = 0; i < subDivsPerSide * subDivsPerSide; i++) {
+          const placeholder = document.createElement('div');
+          placeholder.className = 'subtile';
+          placeholder.style.background = '#ccc';
+          placeholder.style.opacity = '0.3';
+          subtileGrid.appendChild(placeholder);
+        }
+      }
+      const subtileId = `subtile-${msg.level || 0}-${msg.subtile_row || 0}-${msg.subtile_col || 0}`;
+      let subtileDiv = subtileGrid.querySelector(`#${subtileId}`);
+      if (!subtileDiv) {
+        const idx = (msg.subtile_row || 0) * subDivsPerSide + (msg.subtile_col || 0);
+        subtileDiv = subtileGrid.children[idx];
+        if (!subtileDiv) return;
+        subtileDiv.id = subtileId;
+      }
+      // Use task_id from message if available
+      const taskId = msg.task_id || window.currentTaskId || 'demo-task-5kmx10km';
+      const url = getGcsTileUrl(taskId, msg.level || 0, msg.coarse_row ?? msg.row, msg.coarse_col ?? msg.col, msg.subtile_row || 0, msg.subtile_col || 0);
+      fetch(url)
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+          return r.json();
+        })
+        .then(tileObj => {
+          subtileDiv.style.background = elevationToColor(tileObj.elevation, tileObj.level);
+          subtileDiv.title = tileObj.elevation.toFixed(1);
+          subtileDiv.style.color = '#222';
+          subtileDiv.style.opacity = (0.3 + 0.2 * (msg.level || 0)).toString();
+          tilesReceived++;
+          if (snapshotLoaded) hideSnapshot();
+          const bar = document.getElementById('progress-bar-inner');
+          bar.style.width = Math.min(100, (tilesReceived / totalTiles) * 100) + '%';
+        })
+        .catch((err) => {
+          subtileDiv.style.background = '#f99';
+          subtileDiv.title = 'GCS load error';
+          console.error('GCS tile fetch error:', err, url);
+        });
+    }
+    // Patch ws.onmessage to use GCS if enabled
+    ws_onmessage_orig = null;
+    function patchWebSocketForGcs(ws) {
+      if (!ws_onmessage_orig) ws_onmessage_orig = ws.onmessage;
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'grid_info') {
+          window.currentTaskId = msg.task_id || 'demo-task-5kmx10km';
+          gridRows = msg.grid_y;
+          gridCols = msg.grid_x;
+          totalTiles = msg.total_tiles || (gridRows * gridCols * 15);
+          setupGrid();
+          loadSnapshot(window.currentTaskId, 0);
+          return;
+        }
+        if (msg.type === 'heartbeat') return;
+        if (msg.type === 'tile') {
+          if (useGcsDirect) {
+            renderTileFromGcs(msg);
+          } else {
+            const tileIdx = msg.coarse_row !== undefined ? (msg.coarse_row * gridCols + msg.coarse_col) : (msg.row * gridCols + msg.col);
+            const tileDiv = document.getElementById('tile-' + tileIdx);
+            if (tileDiv) {
+              let subtileGrid = tileDiv.querySelector('.subtile-grid');
+              if (!subtileGrid) return;
+              let subDivsPerSide = msg.subtiles_per_side || 1;
+              if (subtileGrid.childElementCount !== subDivsPerSide * subDivsPerSide) {
+                subtileGrid.innerHTML = '';
+                subtileGrid.style.gridTemplateColumns = `repeat(${subDivsPerSide}, 1fr)`;
+                subtileGrid.style.gridTemplateRows = `repeat(${subDivsPerSide}, 1fr)`;
+                for (let i = 0; i < subDivsPerSide * subDivsPerSide; i++) {
+                  const placeholder = document.createElement('div');
+                  placeholder.className = 'subtile';
+                  placeholder.style.background = '#ccc';
+                  placeholder.style.opacity = '0.3';
+                  subtileGrid.appendChild(placeholder);
+                }
+              }
+              const subtileId = `subtile-${msg.level || 0}-${msg.subtile_row || 0}-${msg.subtile_col || 0}`;
+              let subtileDiv = subtileGrid.querySelector(`#${subtileId}`);
+              if (!subtileDiv) {
+                const idx = (msg.subtile_row || 0) * subDivsPerSide + (msg.subtile_col || 0);
+                subtileDiv = subtileGrid.children[idx];
+                if (!subtileDiv) return;
+                subtileDiv.id = subtileId;
+              }
+              // Track elevations per level
+              if (!elevationStats[msg.level]) elevationStats[msg.level] = [];
+              elevationStats[msg.level].push(msg.elevation);
+              // Update bounds every 50 new tiles (or adjust as needed)
+              if (elevationStats[msg.level].length % 50 === 0) {
+                elevationBounds[msg.level] = computeElevationRange(elevationStats[msg.level]);
+                // Optionally, log for debug:
+                console.log(`Updated elevation bounds for level ${msg.level}:`, elevationBounds[msg.level]);
+              }
+              // Use dynamic color for new tiles
+              subtileDiv.style.background = elevationToColor(msg.elevation, msg.level);
+              subtileDiv.title = msg.elevation.toFixed(1);
+              subtileDiv.style.color = '#222';
+              subtileDiv.style.opacity = (0.3 + 0.2 * (msg.level || 0)).toString();
+              tilesReceived++;
+              if (snapshotLoaded) hideSnapshot();
+              const bar = document.getElementById('progress-bar-inner');
+              bar.style.width = Math.min(100, (tilesReceived / totalTiles) * 100) + '%';
+            }
+          }
+        } else if (msg.type === 'done') {
+          document.getElementById('progress-bar-inner').style.background = '#2196f3';
+        } else if (msg.type === 'error') {
+          showError('Backend error: ' + msg.message);
+        }
+      };
+    }
+    // Patch startWebSocket to use the new handler
+    function startWebSocket() {
+      ws = new WebSocket('ws://localhost:8080/ws/demo-tiles?task_id=demo-task-5kmx10km');
+      ws.onopen = () => { animateProgress(); };
+      totalTiles = 0;
+      tilesReceived = 0;
+      patchWebSocketForGcs(ws);
+      ws.onerror = (event) => {
+        showError('WebSocket connection error. Check backend logs and network.');
+      };
+      ws.onclose = (event) => {
+        if (!event.wasClean) {
+          showError('WebSocket closed unexpectedly. Check backend logs.');
+        }
+      };
+    }
+    document.getElementById('refresh-btn').onclick = function() {
+      if (ws) {
+        ws.onclose = null; // Prevent triggering error handler
+        ws.close();
+      }
+      // Reset counters before UI
+      tilesReceived = 0;
+      totalTiles = 0;
+      setupGrid();
+      animateProgress();
+      setTimeout(startWebSocket, 300);
+    };
+    window.onload = function() {
+      setupGrid();
+      startWebSocket();
+      animateProgress();
+      setGcsMode(useGcsDirect); // Ensure toggle reflects default
+    };
+  </script>
+</body>
+</html>

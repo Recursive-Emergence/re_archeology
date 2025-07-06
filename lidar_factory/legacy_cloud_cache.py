@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 class LidarTileCache:
     """Cloud-based tile cache for LIDAR data patches using Google Cloud Storage."""
-     def __init__(self, 
-                 bucket_name: str = "lidar_cache",
+    def __init__(self, 
+                 bucket_name: str = "re_archaeology",
                  credentials_path: Optional[str] = None,
                  project_id: Optional[str] = None):
         """
@@ -317,5 +317,5 @@ def get_cache() -> LidarTileCache:
     """Get or create global cache instance."""
     global _cache_instance
     if _cache_instance is None:
-        _cache_instance = LidarTileCache()
+        _cache_instance = LidarTileCache(bucket_name="re_archaeology")
     return _cache_instance

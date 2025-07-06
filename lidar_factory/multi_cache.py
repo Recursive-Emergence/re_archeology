@@ -49,8 +49,17 @@ class LocalFileCache(LidarCacheStrategy):
     def get(self, cache_key: str) -> Optional[np.ndarray]:
         cache_file = self._cache_path(cache_key)
         if not cache_file.exists():
-            return None
-        
+            # Try .json if .npz not found
+            alt_path = cache_file.with_suffix('.json')
+            if not alt_path.exists():
+                return None
+            # JSON tile
+            import json
+            with open(alt_path, 'r') as f:
+                tile_obj = json.load(f)
+            tile_data = np.array(tile_obj['elevation'])
+            logger.debug(f"✅ Local cache hit (json): {cache_key} | Shape: {tile_data.shape}")
+            return tile_data
         try:
             data = np.load(cache_file, allow_pickle=True)
             tile_data = data['elevation']
@@ -126,7 +135,7 @@ class LocalFileCache(LidarCacheStrategy):
 class GCSCache(LidarCacheStrategy):
     """Google Cloud Storage cache strategy."""
     
-    def __init__(self, bucket_name: str = "lidar_cache", auto_create: bool = False):
+    def __init__(self, bucket_name: str = "re_archaeology", auto_create: bool = False):
         self.bucket_name = bucket_name
         self.auto_create = auto_create
         self.client = None
@@ -195,18 +204,25 @@ class GCSCache(LidarCacheStrategy):
     def get(self, cache_key: str) -> Optional[np.ndarray]:
         if not self._initialized:
             return None
-        
         try:
             blob = self.bucket.blob(self._blob_path(cache_key))
             if not blob.exists():
-                return None
-            
+                # Try .json if .npz not found
+                alt_blob = self.bucket.blob(f"tiles/{cache_key}.json")
+                if not alt_blob.exists():
+                    return None
+                blob_data = alt_blob.download_as_bytes()
+                # JSON tile
+                import json
+                tile_obj = json.loads(blob_data.decode('utf-8'))
+                tile_data = np.array(tile_obj['elevation'])
+                logger.debug(f"✅ GCS cache hit (json): {cache_key} | Shape: {tile_data.shape}")
+                return tile_data
             blob_data = blob.download_as_bytes()
             with io.BytesIO(blob_data) as buffer:
-                data = np.load(buffer)
+                data = np.load(buffer, allow_pickle=True)
                 tile_data = data['elevation']
                 metadata = data['metadata'].item()
-            
             logger.debug(f"✅ GCS cache hit: {cache_key} | Shape: {tile_data.shape}")
             return tile_data
         except Exception as e:

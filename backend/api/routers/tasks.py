@@ -5,61 +5,69 @@ import json
 import os
 import glob
 from pathlib import Path
+from backend.utils import gcs_utils
+from backend.utils.config import settings
 
 router = APIRouter()
 
-# Path to existing tasks data
-TASKS_DATA_PATH = Path(__file__).parent.parent.parent.parent / "data" / "tasks"
+# GCS bucket and prefix for tasks data
+GCS_BUCKET_NAME = os.getenv('GCS_TASKS_BUCKET', 're_archaeology')
+GCS_TASKS_PREFIX = 'tasks/'
+
+def load_all_tasks_from_gcs(status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Load all tasks from GCS. Optionally filter by status.
+    Args:
+        status_filter: If provided, only return tasks with this status.
+    Returns:
+        List of task dicts.
+    """
+    task_dict = {}
+    try:
+        client = gcs_utils.get_gcs_client()
+        bucket = gcs_utils.get_gcs_bucket(GCS_BUCKET_NAME, client)
+        blobs = gcs_utils.list_blobs(bucket, prefix=GCS_TASKS_PREFIX)
+        for blob in blobs:
+            rel_path = blob.name[len(GCS_TASKS_PREFIX):]
+            if not (blob.name.endswith('.json') and '/' not in rel_path):
+                continue
+            try:
+                data_bytes = blob.download_as_bytes()
+                task_data = json.loads(data_bytes.decode('utf-8'))
+                task_id = task_data['id']
+                if status_filter and task_data.get('status') != status_filter:
+                    continue
+                if task_id not in task_dict or task_data['updated_at'] > task_dict[task_id]['updated_at']:
+                    task_data["decay_value"] = calculate_task_decay(task_data)
+                    if isinstance(task_data.get("progress"), (int, float)):
+                        progress_val = task_data["progress"]
+                        task_data["progress"] = {
+                            "scan": progress_val,
+                            "detection": progress_val if task_data["status"] == "completed" else 0,
+                            "overall": progress_val
+                        }
+                    if "profiles" not in task_data:
+                        task_data["profiles"] = ["default_windmill"]
+                    if "sessions" not in task_data:
+                        task_data["sessions"] = {
+                            "scan": task_data.get("session_id", f"scan_{task_data['id'][:8]}"),
+                            "detection": f"detection_{task_data['id'][:8]}"
+                        }
+                    task_dict[task_id] = task_data
+            except Exception as e:
+                print(f"Error loading task blob {blob.name}: {e}")
+                continue
+    except Exception as e:
+        print(f"Error accessing tasks in GCS: {e}")
+    return list(task_dict.values())
 
 def load_existing_tasks() -> List[Dict[str, Any]]:
-    """Load existing tasks from JSON files in data/tasks/ directory (most recent version of each task)"""
-    task_dict = {}  # Use dict to store latest version of each task
-    
-    try:
-        # Find all JSON files in tasks directory
-        task_files = glob.glob(str(TASKS_DATA_PATH / "*.json"))
-        
-        for task_file in task_files:
-            try:
-                with open(task_file, 'r') as f:
-                    task_data = json.load(f)
-                    task_id = task_data['id']
-                    
-                    # Keep only the most recent version of each task
-                    if task_id not in task_dict or task_data['updated_at'] > task_dict[task_id]['updated_at']:
-                        # Calculate decay value for existing tasks
-                        task_data["decay_value"] = calculate_task_decay(task_data)
-                        
-                        # Ensure progress is in the expected format
-                        if isinstance(task_data.get("progress"), (int, float)):
-                            progress_val = task_data["progress"]
-                            task_data["progress"] = {
-                                "scan": progress_val,
-                                "detection": progress_val if task_data["status"] == "completed" else 0,
-                                "overall": progress_val
-                            }
-                        
-                        # Add profiles if not present (use default)
-                        if "profiles" not in task_data:
-                            task_data["profiles"] = ["default_windmill"]
-                        
-                        # Add sessions if not present
-                        if "sessions" not in task_data:
-                            task_data["sessions"] = {
-                                "scan": task_data.get("session_id", f"scan_{task_data['id'][:8]}"),
-                                "detection": f"detection_{task_data['id'][:8]}"
-                            }
-                        
-                        task_dict[task_id] = task_data
-                
-            except Exception as e:
-                print(f"Error loading task file {task_file}: {e}")
-                continue
-                
-    except Exception as e:
-        print(f"Error accessing tasks directory: {e}")
-    
-    return list(task_dict.values())
+    """Legacy alias for API: load all tasks from GCS (no status filter)."""
+    return load_all_tasks_from_gcs()
+
+def load_running_tasks_from_gcs() -> List[Dict[str, Any]]:
+    """Helper for startup: load only running tasks from GCS."""
+    return load_all_tasks_from_gcs(status_filter="running")
 
 def calculate_task_decay(task: Dict[str, Any]) -> float:
     """Calculate decay value based on findings quality and time"""

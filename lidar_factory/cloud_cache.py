@@ -11,13 +11,16 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
 import io
+from backend.utils.gcs_utils import (
+    get_gcs_client, get_gcs_bucket, upload_blob, download_blob, blob_exists, list_blobs, delete_blob
+)
 
 logger = logging.getLogger(__name__)
 
 class LidarTileCache:
     """Cloud-based tile cache for LIDAR data patches using Google Cloud Storage."""
     def __init__(self, 
-                 bucket_name: str = "lidar_cache",
+                 bucket_name: str = "re_archaeology",
                  credentials_path: Optional[str] = None,
                  project_id: Optional[str] = None):
         """
@@ -46,58 +49,12 @@ class LidarTileCache:
         self._initialize_gcs()
     
     def _initialize_gcs(self) -> bool:
-        """Initialize Google Cloud Storage client and bucket."""
+        """Initialize Google Cloud Storage client and bucket using utility."""
         try:
-            from google.cloud import storage
-            from google.oauth2 import service_account
-            from google.api_core import exceptions
-            
-            if os.path.exists(self.credentials_path):
-                credentials = service_account.Credentials.from_service_account_file(
-                    self.credentials_path
-                )
-                self.client = storage.Client(
-                    credentials=credentials,
-                    project=self.project_id
-                )
-            else:
-                # Fallback to default credentials (for Cloud Run)
-                self.client = storage.Client(project=self.project_id)
-            
-            # Get or create bucket
-            try:
-                self.bucket = self.client.bucket(self.bucket_name)
-                
-                # Test if bucket exists
-                if not self.bucket.exists():
-                    if self.auto_create:
-                        logger.info(f"🔨 Creating missing bucket: {self.bucket_name}")
-                        self.bucket = self.client.create_bucket(self.bucket_name, location="US")
-                        logger.info(f"✅ Created bucket: {self.bucket_name}")
-                    else:
-                        raise Exception(f"Bucket {self.bucket_name} does not exist (auto_create=False)")
-                
-                logger.info(f"✅ Connected to GCS bucket: {self.bucket_name}")
-                self._initialized = True
-                return True
-                
-            except exceptions.Conflict:
-                # Bucket already exists but we don't have access
-                logger.info(f"✅ Bucket {self.bucket_name} exists")
-                self.bucket = self.client.bucket(self.bucket_name)
-                self._initialized = True
-                return True
-                
-            except Exception as e:
-                logger.error(f"❌ Cannot access/create bucket {self.bucket_name}: {e}")
-                self._error = str(e)
-                return False
-                logger.info("Cache will operate in pass-through mode")
-                return False
-                
-        except ImportError:
-            logger.warning("google-cloud-storage not available. Cache disabled.")
-            return False
+            self.client = get_gcs_client(self.credentials_path, self.project_id)
+            self.bucket = get_gcs_bucket(self.bucket_name, self.client)
+            self._initialized = True
+            return True
         except Exception as e:
             logger.error(f"Failed to initialize GCS client: {e}")
             return False
@@ -142,10 +99,8 @@ class LidarTileCache:
         """Check if tile exists in cache."""
         if not self._initialized:
             return False
-            
         try:
-            blob = self.bucket.blob(self._blob_path(tile_id))
-            return blob.exists()
+            return blob_exists(self.bucket, self._blob_path(tile_id))
         except Exception as e:
             logger.debug(f"Error checking tile existence: {e}")
             return False
@@ -169,13 +124,10 @@ class LidarTileCache:
         tile_id = self._make_tile_id(lat, lon, size_m, resolution_m, data_type, source)
         
         try:
-            blob = self.bucket.blob(self._blob_path(tile_id))
-            if not blob.exists():
+            blob_data = download_blob(self.bucket, self._blob_path(tile_id))
+            if blob_data is None:
                 logger.debug(f"Cache miss: {tile_id}")
                 return None
-            
-            # Download and deserialize
-            blob_data = blob.download_as_bytes()
             with io.BytesIO(blob_data) as buffer:
                 data = np.load(buffer, allow_pickle=True)
                 tile_data = data['elevation']
@@ -211,7 +163,6 @@ class LidarTileCache:
         tile_id = self._make_tile_id(lat, lon, size_m, resolution_m, data_type, source)
         
         try:
-            # Prepare metadata
             metadata = {
                 "source": source,
                 "data_type": data_type,
@@ -227,8 +178,6 @@ class LidarTileCache:
                     "mean": float(np.nanmean(tile_data))
                 }
             }
-            
-            # Serialize to npz format
             with io.BytesIO() as buffer:
                 np.savez_compressed(
                     buffer,
@@ -237,25 +186,19 @@ class LidarTileCache:
                 )
                 buffer.seek(0)
                 blob_data = buffer.getvalue()
-            
-            # Upload to GCS
-            blob = self.bucket.blob(self._blob_path(tile_id))
-            blob.upload_from_string(
+            upload_blob(
+                self.bucket,
+                self._blob_path(tile_id),
                 blob_data,
-                content_type='application/octet-stream'
+                content_type='application/octet-stream',
+                metadata={
+                    'source': source,
+                    'data_type': data_type,
+                    'cached_at': metadata['timestamp']
+                }
             )
-            
-            # Set metadata
-            blob.metadata = {
-                'source': source,
-                'data_type': data_type,
-                'cached_at': metadata['timestamp']
-            }
-            blob.patch()
-            
             logger.info(f"✅ Cached tile: {tile_id} | Shape: {tile_data.shape} | Size: {len(blob_data)/1024:.1f}KB")
             return True
-            
         except Exception as e:
             logger.error(f"Error caching tile: {e}")
             return False
@@ -267,7 +210,7 @@ class LidarTileCache:
             return {"enabled": False, "error": reason}
             
         try:
-            blobs = list(self.bucket.list_blobs(prefix="tiles/"))
+            blobs = list_blobs(self.bucket, prefix="tiles/")
             total_size = sum(blob.size for blob in blobs if blob.size)
             
             return {
@@ -295,15 +238,14 @@ class LidarTileCache:
             
         try:
             prefix = f"tiles/{source_filter}/" if source_filter else "tiles/"
-            blobs = list(self.bucket.list_blobs(prefix=prefix))
+            blobs = list_blobs(self.bucket, prefix=prefix)
             
             count = 0
             for blob in blobs:
-                blob.delete()
+                delete_blob(self.bucket, blob.name)
                 count += 1
             
-            logger.info(f"Cleared {count} tiles from cache" + 
-                       (f" (source: {source_filter})" if source_filter else ""))
+            logger.info(f"Cleared {count} tiles from cache" + (f" (source: {source_filter})" if source_filter else ""))
             return count
             
         except Exception as e:
@@ -317,5 +259,5 @@ def get_cache() -> LidarTileCache:
     """Get or create global cache instance."""
     global _cache_instance
     if _cache_instance is None:
-        _cache_instance = LidarTileCache()
+        _cache_instance = LidarTileCache(bucket_name="re_archaeology")
     return _cache_instance
