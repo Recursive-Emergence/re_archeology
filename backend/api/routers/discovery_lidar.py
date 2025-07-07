@@ -14,8 +14,7 @@ import json
 from backend.api.routers.discovery_utils import get_available_structure_types, get_profile_name_for_structure_type
 from backend.api.routers.discovery_models import SessionIdRequest
 from backend.api.routers.discovery_sessions import active_sessions, _active_detection_tasks, _session_tile_data
-from backend.api.routers.discovery_connections import discovery_manager
-from backend.api.cache.simple_bitmap_cache import get_simple_bitmap_cache
+from backend.api.routers.messenger_websocket import frontend_backend_messenger
 from lidar_factory.factory import LidarMapFactory
 
 router = APIRouter()
@@ -101,7 +100,7 @@ async def start_lidar_scan(
         }
         active_sessions[session_id] = session_info
         if enable_detection:
-            await discovery_manager.send_message({
+            await frontend_backend_messenger.send_message({
                 "type": "detection_starting",
                 "session_id": session_id,
                 "message": "Starting real-time sliding detection during LiDAR scan",
@@ -334,16 +333,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             },
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
-                        await discovery_manager.send_message(tile_result)
-                        
-                        # Update bitmap cache with new tile
-                        try:
-                            bitmap_cache = get_simple_bitmap_cache()
-                            task_id = config.get('task_id')  # Get task_id from config if available
-                            if task_id:
-                                await bitmap_cache.add_tile(task_id, tile_result)
-                        except Exception as e:
-                            logger.warning(f"Failed to update bitmap cache: {e}")
+                        await frontend_backend_messenger.send_message(tile_result)
                         
                         # Store tile data for detection
                         if session_id not in _session_tile_data:
@@ -412,7 +402,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                                     },
                                     'timestamp': datetime.now(timezone.utc).isoformat()
                                 }
-                                await discovery_manager.send_message(patch_result_msg)
+                                await frontend_backend_messenger.send_message(patch_result_msg)
                                 # Send detection_result if positive
                                 if is_positive:
                                     detection_message = {
@@ -426,9 +416,9 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                                         'patch_id': patch_id,
                                         'timestamp': datetime.now(timezone.utc).isoformat()
                                     }
-                                    await discovery_manager.send_message(detection_message)
+                                    await frontend_backend_messenger.send_message(detection_message)
                                 # Send patch_scanning for frontend lens movement
-                                await discovery_manager.send_message({
+                                await frontend_backend_messenger.send_message({
                                     'type': 'patch_scanning',
                                     'patch_id': patch_id,
                                     'lat': float(tile_lat),
@@ -469,7 +459,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                             "message": "No LiDAR data available",
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
-                        await discovery_manager.send_message(tile_result)
+                        await frontend_backend_messenger.send_message(tile_result)
                     session_info["processed_tiles"] = row * tiles_x + col + 1
                     
                     # Calculate progress percentage
@@ -499,7 +489,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
                         "source_dataset": session_info.get("resolution_metadata", {}).get("source_dataset", "unknown"),
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }
-                    await discovery_manager.send_message(progress_update)
+                    await frontend_backend_messenger.send_message(progress_update)
                     await asyncio.sleep(0.1)
                 except Exception as e:
                     logger.error(f"Error processing tile {row},{col}: {e}")
@@ -522,7 +512,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
             "message": f"LiDAR scan completed. Processed {session_info['processed_tiles']} tiles.",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        await discovery_manager.send_message(completion_message)
+        await frontend_backend_messenger.send_message(completion_message)
         logger.info(f"[DEBUG] At end of scan: enable_detection={session_info.get('config', {}).get('enable_detection', None)} (type: {type(session_info.get('config', {}).get('enable_detection', None))})")
         # Automatically trigger detection if enabled
         try:
@@ -549,7 +539,7 @@ async def run_lidar_scan_async(session_id: str, session_info: Dict[str, Any]):
             "error": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        await discovery_manager.send_message(error_message)
+        await frontend_backend_messenger.send_message(error_message)
 
 # --- Detection and Detector Helpers (restored from legacy) ---
 
@@ -584,7 +574,7 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
     tile_count = len(_session_tile_data[session_id])
     logger.info(f"🎯 [DETECTION START] Starting coordinated detection for session {session_id} with {tile_count} tiles")
     
-    await discovery_manager.send_message({
+    await frontend_backend_messenger.send_message({
         "type": "detection_starting",
         "session_id": session_id,
         "message": "Starting coordinated detection across scanned area",
@@ -699,7 +689,7 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
                     },
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }
-                await discovery_manager.send_message(patch_result_msg)
+                await frontend_backend_messenger.send_message(patch_result_msg)
                 if is_positive:
                     # Add to findings collection
                     finding = {
@@ -723,11 +713,11 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
                         'patch_id': patch_id,
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }
-                    await discovery_manager.send_message(detection_message)
+                    await frontend_backend_messenger.send_message(detection_message)
             
             # Send patch_scanning message for frontend lens movement (legacy-compatible)
             patch_id = f"{session_id}_{i}_{j}"
-            await discovery_manager.send_message({
+            await frontend_backend_messenger.send_message({
                 'type': 'patch_scanning',
                 'patch_id': patch_id,
                 'lat': float(patch_lat),
@@ -740,7 +730,7 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
             if processed_steps % 10 == 0:  # Update every 10 steps to avoid spam
                 detection_progress = (processed_steps / total_steps) * 100
                 findings_count = len(findings) if isinstance(findings, list) else 0
-                await discovery_manager.send_message({
+                await frontend_backend_messenger.send_message({
                     'type': 'detection_progress',
                     'session_id': str(session_id),
                     'processed_steps': processed_steps,
@@ -770,7 +760,7 @@ async def run_coordinated_detection(session_id: str, scan_area: dict, app_root: 
             logger.error(f"Failed to update task findings: {e}")
     
     # At the end, send session_completed (legacy-compatible)
-    await discovery_manager.send_message({
+    await frontend_backend_messenger.send_message({
         'type': 'session_completed',
         'session': {
             'session_id': str(session_id),

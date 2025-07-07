@@ -85,4 +85,4 @@ class EnhancedConnectionManager:
             'average_messages_sent': sum(meta['messages_sent'] for meta in self.connection_metadata.values()) / max(len(self.connection_metadata), 1)
         }
 
-discovery_manager = EnhancedConnectionManager()
+frontend_backend_messenger = EnhancedConnectionManager()

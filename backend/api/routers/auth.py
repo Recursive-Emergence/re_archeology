@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 
 from backend.core.neo4j_database import neo4j_db
 from backend.utils.config import get_settings
+from backend.api.routers.google_jwt_utils import decode_google_jwt
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -91,27 +92,39 @@ def verify_google_token(token: str) -> dict:
         )
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """Get current user from JWT token."""
+    """Get current user from JWT token. Supports Google RS256 JWTs and legacy HS256 tokens."""
     try:
-        payload = jwt.decode(
-            credentials.credentials, 
-            settings.JWT_SECRET_KEY, 
-            algorithms=[settings.JWT_ALGORITHM]
-        )
+        logger.info(f"[DEBUG] Raw JWT token: {getattr(credentials, 'credentials', None)}")
+        token = credentials.credentials
+        # Try RS256 decode (Google)
+        try:
+            payload = decode_google_jwt(token, settings.GOOGLE_CLIENT_ID)
+            logger.info("[DEBUG] Decoded Google RS256 JWT.")
+        except Exception as rs256_exc:
+            logger.info(f"[DEBUG] RS256 decode failed: {rs256_exc}, trying HS256 fallback.")
+            # Fallback to legacy HS256 (internal tokens)
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET_KEY,
+                algorithms=[settings.JWT_ALGORITHM]
+            )
         user_id: str = payload.get("sub")
         if user_id is None:
+            logger.warning("[DEBUG] JWT decode: 'sub' missing in payload")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials"
             )
+        logger.info(f"[DEBUG] Decoded JWT payload: {payload}")
         return {
             "user_id": user_id, 
             "email": payload.get("email"),
             "name": payload.get("name"),
             "picture": payload.get("picture")  # Include picture from JWT
         }
-    except jwt.JWTError:
-        logger.warning("JWT token verification failed")
+    except jwt.JWTError as e:
+        logger.warning(f"JWT token verification failed: {e}")
+        logger.warning(f"[DEBUG] JWT decode error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"

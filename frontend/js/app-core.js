@@ -1,6 +1,6 @@
 // Core application logic and main class
 import { setupMap, setupLayers } from './map.js';
-import { setupUI, updateScanButtonText, updateLidarScanButtonStates, updateButtonStates, startScanUI, cleanupAfterStop, updateResolutionDisplay, updateAnimationForResolution, startScanningAnimation, stopScanningAnimation, updateAnimationProgress, showResolutionBadge, hideResolutionBadge } from './ui.js';
+import { setupUI, updateScanButtonText, updateLidarScanButtonStates, updateButtonStates, startScanUI, cleanupAfterStop, updateResolutionDisplay, updateAnimationForResolution, startScanningAnimation, stopScanningAnimation, updateAnimationProgress, showResolutionBadge, hideResolutionBadge, moveSatelliteAnimationToTile } from './ui.js';
 import { startDetectionAnimation, stopDetectionAnimation, handlePatchResult, createDetectionLens, ensureDetectionLensReady, updateLensVisualFeedback, completeDetectionAnimation, updateDetectionProfileText } from './detection.js';
 import { connectWebSocket, handleWebSocketMessage } from './websocket.js';
 import { calculateAreaBounds } from './utils.js';
@@ -38,10 +38,6 @@ export class REArchaeologyApp {
         
         // Task management
         this.taskList = null;
-        
-        // Bitmap cache for progressive loading
-        this.loadedBitmapCaches = new Set();
-        this.cachedBitmapOverlay = null;
         
         window.Logger?.app('info', 'RE-Archaeology App initialized');
     }
@@ -313,17 +309,65 @@ export class REArchaeologyApp {
 
     // --- WebSocket and backend event passthroughs ---
     handleWebSocketMessage(data) { if (typeof handleWebSocketMessage === 'function') handleWebSocketMessage(this, data); }
-    handleLidarTileUpdate(data) { 
-        // Store global resolution from first tile received
-        if (data.actual_resolution && !this.currentResolution) {
-            this.currentResolution = data.actual_resolution;
+
+    // --- LiDAR tile rendering using direct GCS fetch and progressive subtile grid ---
+    elevationStats = {};
+    elevationBounds = {};
+
+    handleLidarTileUpdate(data) {
+        console.log('[LIDAR] handleLidarTileUpdate called', data);
+        // Accepts backend tile messages: {coarse_row, coarse_col, subtile_row, subtile_col, subtiles_per_side, level, elevation, ...}
+        // Robustly map snake_case to camelCase for frontend rendering
+        if (!this.lidarGridRows || !this.lidarGridCols) {
+            if (data.grid_x && data.grid_y) {
+                this.lidarGridCols = data.grid_x;
+                this.lidarGridRows = data.grid_y;
+            } else {
+                this.lidarGridCols = 5;
+                this.lidarGridRows = 10;
+            }
         }
-        
-        if (this.mapVisualization && typeof this.mapVisualization.addLidarHeatmapTile === 'function') {
-            this.mapVisualization.addLidarHeatmapTile(data);
+        const gridRows = this.lidarGridRows;
+        const gridCols = this.lidarGridCols;
+        // Map backend fields to frontend variables
+        const coarseRow = data.coarse_row ?? data.grid_row ?? data.coarseRow ?? 0;
+        const coarseCol = data.coarse_col ?? data.grid_col ?? data.coarseCol ?? 0;
+        const subtiles = data.subtiles_per_side ?? data.subtiles ?? 1;
+        const subtileRow = data.subtile_row ?? data.subtileRow ?? 0;
+        const subtileCol = data.subtile_col ?? data.subtileCol ?? 0;
+        const level = data.level ?? 0;
+        const elev = data.elevation ?? data.elev ?? 0;
+        // Track elevations per level
+        if (!this.elevationStats[level]) this.elevationStats[level] = [];
+        this.elevationStats[level].push(elev);
+        // Update bounds every 50 new tiles (or adjust as needed)
+        if (this.elevationStats[level].length % 50 === 0) {
+            const sorted = this.elevationStats[level].slice().sort((a, b) => a - b);
+            const min = sorted[Math.floor(sorted.length * 0.02)];
+            const max = sorted[Math.ceil(sorted.length * 0.98)];
+            this.elevationBounds[level] = [min, max];
         }
-        
-        this.updateAnimationProgress?.(data); 
+        // Color mapping
+        const bounds = this.elevationBounds[level] || [5000, 9000];
+        const [minElev, maxElev] = bounds;
+        const t = Math.max(0, Math.min(1, (elev - minElev) / (maxElev - minElev)));
+        const r = Math.round(255 * t);
+        const g = Math.round(180 * (1 - t));
+        const b = Math.round(255 * (1 - t));
+        const color = `rgb(${r},${g},${b})`;
+        // Render subtile in grid
+        if (typeof window.renderLidarSubtile === 'function') {
+            window.renderLidarSubtile({
+                gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol, level, color, elev
+            });
+        }
+        // Move satellite animation to current tile/subtile
+        if (typeof moveSatelliteAnimationToTile === 'function') {
+            moveSatelliteAnimationToTile(this, {
+                gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol
+            });
+        }
+        // Optionally, update progress bar or stats if needed
     }
     handleLidarHeatmapTileUpdate(data) { if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') this.mapVisualization.addLidarHeatmapTile(data.tile_data); this.updateAnimationProgress?.(data.tile_data); }
     handleLidarProgressUpdate(data) { /* implement as needed */ }
@@ -401,161 +445,6 @@ export class REArchaeologyApp {
             this.discoveredSitesLayer = null;
         }
         this.updateScanAreaLabel?.();
-    }
-
-    // --- Bitmap Cache Functionality ---
-    async loadCachedBitmapForTask(taskId) {
-        /**
-         * Load cached bitmap for a task to show previous scanning progress.
-         * 
-         * @param {string} taskId - Task identifier
-         */
-        try {
-            // Skip if already loaded this bitmap for this task
-            if (this.loadedBitmapCaches.has(taskId)) {
-                window.Logger?.app('debug', `Bitmap cache already loaded for task ${taskId}`);
-                return;
-            }
-            
-            window.Logger?.app('info', `🗺️ Loading cached bitmap for task ${taskId}...`);
-            
-            // Fetch bitmap info from server
-            const response = await fetch(`${window.AppConfig.apiBase}/bitmap-cache/task/${taskId}/info`);
-            
-            if (!response.ok) {
-                window.Logger?.app('warn', `Failed to fetch bitmap info for task ${taskId}: ${response.statusText}`);
-                return false;
-            }
-            
-            const data = await response.json();
-            
-            if (data.cached && data.bitmap_info) {
-                // Enable heatmap mode if not already enabled
-                if (this.mapVisualization && !this.mapVisualization.heatmapMode) {
-                    this.mapVisualization.enableHeatmapMode();
-                }
-                
-                // Display cached bitmap
-                await this.displayCachedBitmap(data.bitmap_info);
-                
-                // Show notification about loaded cache
-                this.showBitmapCacheNotification(data.bitmap_info.tiles_added);
-                
-                // Mark as loaded
-                this.loadedBitmapCaches.add(taskId);
-                
-                window.Logger?.app('success', `✅ Loaded bitmap cache for task ${taskId} (${data.bitmap_info.tiles_added} tiles)`);
-                return true;
-            } else {
-                // No cache available yet - this is normal for resumed tasks
-                window.Logger?.app('debug', `No cached bitmap available yet for task ${taskId} - will load as tiles arrive`);
-                
-                // Still enable heatmap mode to be ready for incoming tiles
-                if (this.mapVisualization && !this.mapVisualization.heatmapMode) {
-                    this.mapVisualization.enableHeatmapMode();
-                    window.Logger?.app('debug', `Enabled heatmap mode for task ${taskId}`);
-                }
-                
-                return false;
-            }
-            
-        } catch (error) {
-            window.Logger?.app('error', `❌ Error loading cached bitmap for task ${taskId}:`, error);
-            return false;
-        }
-    }
-    
-    async displayCachedBitmap(bitmapInfo) {
-        /**
-         * Display cached bitmap on the map as an image overlay.
-         */
-        try {
-            if (!this.map || !bitmapInfo.bounds) {
-                window.Logger?.app('warn', 'Cannot display bitmap: missing map or bounds');
-                return;
-            }
-            
-            // Create bounds for Leaflet
-            const bounds = L.latLngBounds(
-                [bitmapInfo.bounds.south, bitmapInfo.bounds.west],
-                [bitmapInfo.bounds.north, bitmapInfo.bounds.east]
-            );
-            
-            // Remove existing cached bitmap overlay if present
-            if (this.cachedBitmapOverlay) {
-                this.map.removeLayer(this.cachedBitmapOverlay);
-            }
-            
-            // Create image overlay
-            this.cachedBitmapOverlay = L.imageOverlay(bitmapInfo.bitmap_url, bounds, {
-                opacity: 0.7,
-                className: 'cached-bitmap-overlay',
-                interactive: false,
-                crossOrigin: true,
-                attribution: `Cached LiDAR data (${bitmapInfo.resolution_level})`
-            });
-            
-            // Add to map
-            this.cachedBitmapOverlay.addTo(this.map);
-            
-            // Set Z-index to be below live tiles but above base map
-            const overlayElement = this.cachedBitmapOverlay.getElement();
-            if (overlayElement) {
-                overlayElement.style.zIndex = '100';
-            }
-            
-            window.Logger?.app('debug', `Displayed cached bitmap: ${bitmapInfo.dimensions.width}x${bitmapInfo.dimensions.height} at ${bitmapInfo.resolution_level} resolution`);
-            
-        } catch (error) {
-            window.Logger?.app('error', 'Error displaying cached bitmap:', error);
-        }
-    }
-    
-    showBitmapCacheNotification(tilesCount) {
-        /**
-         * Show user notification about loaded bitmap cache.
-         */
-        try {
-            // Create notification element
-            const notification = document.createElement('div');
-            notification.className = 'bitmap-cache-notification';
-            notification.innerHTML = `
-                <div class="bitmap-cache-icon">🗺️</div>
-                <div class="bitmap-cache-text">
-                    <div class="bitmap-cache-title">Cached Progress Loaded</div>
-                    <div class="bitmap-cache-details">${tilesCount} tiles accumulated</div>
-                </div>
-            `;
-            
-            // Add to map container
-            if (this.map) {
-                const mapContainer = this.map.getContainer();
-                mapContainer.appendChild(notification);
-                
-                // Auto-remove after 4 seconds
-                setTimeout(() => {
-                    if (notification.parentNode) {
-                        notification.parentNode.removeChild(notification);
-                    }
-                }, 4000);
-            }
-            
-        } catch (error) {
-            window.Logger?.app('error', 'Error showing bitmap cache notification:', error);
-        }
-    }
-    
-    clearCachedBitmaps() {
-        /**
-         * Clear all cached bitmap overlays and reset cache tracking.
-         */
-        if (this.cachedBitmapOverlay && this.map) {
-            this.map.removeLayer(this.cachedBitmapOverlay);
-            this.cachedBitmapOverlay = null;
-        }
-        
-        this.loadedBitmapCaches.clear();
-        window.Logger?.app('debug', 'Cleared cached bitmap overlays');
     }
 
     // --- Chat and Auth functionality ---
@@ -854,6 +743,12 @@ export class REArchaeologyApp {
         try {
             const payload = JSON.parse(atob(token.split('.')[1]));
             if (payload && payload.email) {
+                // Check expiration (exp is in seconds since epoch)
+                const now = Math.floor(Date.now() / 1000);
+                if (payload.exp && payload.exp < now + 300) { // Less than 5 minutes left or expired
+                    window.Logger?.app('warn', 'Google token expired or about to expire, forcing re-login');
+                    return null;
+                }
                 return { name: payload.name, email: payload.email, picture: payload.picture };
             }
         } catch (e) {
@@ -949,49 +844,5 @@ export class REArchaeologyApp {
         }, 15000); // Every 15 seconds
         
         window.Logger?.app('info', 'Periodic task refresh started (15s intervals)');
-    }
-
-    clearCachedBitmaps() {
-        /**
-         * Clear all cached bitmap overlays from the map.
-         */
-        if (this.cachedBitmapOverlays) {
-            this.cachedBitmapOverlays.forEach((overlay, taskId) => {
-                if (this.map && overlay) {
-                    this.map.removeLayer(overlay);
-                }
-            });
-            this.cachedBitmapOverlays.clear();
-        }
-        this.loadedBitmapCaches.clear();
-        window.Logger?.app('debug', 'Cleared all cached bitmap overlays');
-    }
-
-    showBitmapCacheNotification(bitmapInfo) {
-        /**
-         * Show a brief notification that cached progress was loaded.
-         */
-        const notification = document.createElement('div');
-        notification.className = 'bitmap-cache-notification';
-        notification.innerHTML = `
-            <div class="notification-content">
-                <div class="notification-icon">📊</div>
-                <div class="notification-text">
-                    <strong>Progress Loaded</strong><br>
-                    Showing ${bitmapInfo.tiles_added} previously scanned tiles
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(notification);
-        
-        // Show notification
-        setTimeout(() => notification.classList.add('visible'), 100);
-        
-        // Auto-hide after 4 seconds
-        setTimeout(() => {
-            notification.classList.remove('visible');
-            setTimeout(() => notification.remove(), 300);
-        }, 4000);
     }
 } // End of class

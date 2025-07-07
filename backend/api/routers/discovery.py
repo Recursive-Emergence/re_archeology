@@ -44,7 +44,7 @@ from backend.api.routers.discovery_models import (
     ProfilePerformanceConfig,
     CustomProfileRequest,
 )
-from backend.api.routers.discovery_connections import discovery_manager, EnhancedConnectionManager
+from backend.api.routers.messenger_websocket import frontend_backend_messenger, EnhancedConnectionManager
 from backend.api.routers.discovery_sessions import (
     active_sessions,
     session_patches,
@@ -127,7 +127,7 @@ async def websocket_discovery_endpoint(
     logger.info(f"WebSocket connection attempt from {websocket.client}")
     
     try:
-        await discovery_manager.connect(websocket, user_id)
+        await frontend_backend_messenger.connect(websocket, user_id)
         logger.info(f"Discovery WebSocket client connected successfully")
         
         # Main message loop
@@ -140,44 +140,44 @@ async def websocket_discovery_endpoint(
             # Received WebSocket message
             
             # Update message received count
-            if websocket in discovery_manager.connection_metadata:
-                discovery_manager.connection_metadata[websocket]['messages_received'] += 1
-                discovery_manager.connection_metadata[websocket]['last_seen'] = datetime.now()
+            if websocket in frontend_backend_messenger.connection_metadata:
+                frontend_backend_messenger.connection_metadata[websocket]['messages_received'] += 1
+                frontend_backend_messenger.connection_metadata[websocket]['last_seen'] = datetime.now()
             
             # Handle different message types
             if message.get('type') == 'ping':
                 # Handling ping message
-                await discovery_manager.send_to_connection(websocket, {
+                await frontend_backend_messenger.send_to_connection(websocket, {
                     'type': 'pong',
                     'timestamp': datetime.now().isoformat()
                 })
             elif message.get('type') == 'pong':
                 # Received pong message
                 # Update heartbeat timestamp
-                discovery_manager.last_heartbeat[websocket] = time.time()
+                frontend_backend_messenger.last_heartbeat[websocket] = time.time()
             elif message.get('type') == 'get_status':
                 # Handling status request
-                await discovery_manager.send_to_connection(websocket, {
+                await frontend_backend_messenger.send_to_connection(websocket, {
                     'type': 'status_update',
                     'active_sessions': len(active_sessions),
-                    'total_connections': len(discovery_manager.active_connections),
-                    'connection_stats': discovery_manager.get_connection_stats(),
+                    'total_connections': len(frontend_backend_messenger.active_connections),
+                    'connection_stats': frontend_backend_messenger.get_connection_stats(),
                     'timestamp': datetime.now().isoformat()
                 })
             else:
                 logger.warning(f"Unknown WebSocket message type: {message.get('type')}")
-                await discovery_manager.send_to_connection(websocket, {
+                await frontend_backend_messenger.send_to_connection(websocket, {
                     'type': 'error',
                     'message': f'Unknown message type: {message.get("type")}'
                 })
                 
     except WebSocketDisconnect as e:
         logger.info(f"Discovery WebSocket client disconnected: {e}")
-        discovery_manager.disconnect(websocket)
+        frontend_backend_messenger.disconnect(websocket)
     except Exception as e:
         logger.error(f"Discovery WebSocket error: {e}")
         logger.error(f"Exception type: {type(e)}")
-        discovery_manager.disconnect(websocket)
+        frontend_backend_messenger.disconnect(websocket)
 
 # ==============================================================================
 # DISCOVERY SESSION ENDPOINTS
@@ -205,7 +205,7 @@ async def start_discovery_session(config: Dict[str, Any]):
         active_sessions[session_id] = session
         
         # Start discovery in background
-        asyncio.create_task(run_discovery_session(session, discovery_manager))
+        asyncio.create_task(run_discovery_session(session, frontend_backend_messenger))
         
         return {
             'status': 'success',
@@ -253,7 +253,7 @@ async def stop_discovery_session(session_id: str):
                 logger.info(f"🛑 Detection will be cancelled by the task cancellation above")
         
         # Send stopped message first
-        await discovery_manager.send_message({
+        await frontend_backend_messenger.send_message({
             'type': 'session_stopped',
             'session_id': session_id,
             'timestamp': datetime.now().isoformat()
@@ -264,7 +264,7 @@ async def stop_discovery_session(session_id: str):
             logger.info(f"🎯 Starting coordinated detection for stopped session {session_id}")
             
             # Send detection starting message
-            await discovery_manager.send_message({
+            await frontend_backend_messenger.send_message({
                 "type": "detection_starting",
                 "session_id": session_id,
                 "message": "Starting coordinated detection on collected tiles",
@@ -824,8 +824,8 @@ async def get_discovery_status():
             'status': 'healthy',
             'active_sessions': active_count,
             'total_sessions': len(active_sessions),
-            'websocket_connections': len(discovery_manager.active_connections),
-            'connection_stats': discovery_manager.get_connection_stats(),
+            'websocket_connections': len(frontend_backend_messenger.active_connections),
+            'connection_stats': frontend_backend_messenger.get_connection_stats(),
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:

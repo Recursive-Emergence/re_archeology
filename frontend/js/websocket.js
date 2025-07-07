@@ -62,6 +62,12 @@ export function handleWebSocketMessage(app, data) {
         app.handleDetectionResult?.(data);
     }
     switch (data.type) {
+        case 'grid_info':
+            // Always set grid info before any lidar_tile is rendered
+            if (typeof window.setLidarGridInfo === 'function') {
+                window.setLidarGridInfo({ grid_x: data.grid_x, grid_y: data.grid_y });
+            }
+            break;
         case 'lidar_tile':
             // Start scanning animation if not already started
             if (!app.isScanning && !app.animationState?.isActive) {
@@ -194,6 +200,14 @@ export function handleWebSocketMessage(app, data) {
                 }
                 app.taskList.loadTasks();
             }
+            break;
+        case 'done':
+            // Stop animation and reset scan state on backend 'done' message
+            if (typeof app.stopScanningAnimation === 'function') {
+                app.stopScanningAnimation();
+            }
+            app.isScanning = false;
+            app.currentLidarSession = null;
             break;
         default:
             break;

@@ -13,10 +13,9 @@ from datetime import datetime, timezone
 import os
 
 from .routers.discovery_sessions import active_sessions
-from .routers.discovery_connections import discovery_manager
+from .routers.messenger_websocket import frontend_backend_messenger
 from .routers.discovery_lidar import run_lidar_scan_async
 from .routers.discovery_utils import get_available_structure_types
-from .cache.simple_bitmap_cache import get_simple_bitmap_cache
 from backend.utils import gcs_utils
 from backend.api.routers.tasks import load_running_tasks_from_gcs
 
@@ -157,7 +156,7 @@ async def restart_task_session(task: Dict[str, Any]):
         await update_task_session_id(task_id, session_id)
         
         # Send notification about task restart
-        await discovery_manager.send_message({
+        await frontend_backend_messenger.send_message({
             "type": "session_start",
             "session_id": session_id,
             "task_id": task_id,
@@ -215,27 +214,6 @@ async def update_task_session_id(task_id: str, new_session_id: str):
     except Exception as e:
         logger.error(f"❌ Failed to update session ID for task {task_id}: {e}")
 
-async def update_bitmap_cache_for_task(task_id: str, tile_data: Optional[Dict] = None):
-    """
-    Update bitmap cache when a task receives new tile data.
-    
-    Args:
-        task_id: Task ID to update cache for
-        tile_data: Optional tile data to add to cache
-    """
-    try:
-        if tile_data:
-            bitmap_cache = get_simple_bitmap_cache()
-            success = await bitmap_cache.add_tile(task_id, tile_data)
-            
-            if success:
-                logger.debug(f"📊 Updated bitmap cache for task {task_id}")
-            else:
-                logger.warning(f"⚠️ Failed to update bitmap cache for task {task_id}")
-                
-    except Exception as e:
-        logger.error(f"❌ Error updating bitmap cache for task {task_id}: {e}")
-
 async def update_task_progress(task_id: str, progress: Optional[float] = None, findings: Optional[List[Dict]] = None, tile_data: Optional[Dict] = None):
     """
     Update progress for a running task and save to JSON file in GCS.
@@ -275,7 +253,6 @@ async def update_task_progress(task_id: str, progress: Optional[float] = None, f
             task_data["findings"].extend(findings)
             task_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         blob.upload_from_string(json.dumps(task_data, indent=2), content_type='application/json')
-        await update_bitmap_cache_for_task(task_id, tile_data)
         if progress is not None:
             if progress >= 100.0:
                 logger.info(f"✅ Task {task_id} completed (100%)")

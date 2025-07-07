@@ -137,7 +137,7 @@ export function startScanningAnimation(app, iconType = 'satellite') {
         const scanIcon = document.createElement('div');
         scanIcon.className = `scanning-icon ${iconType}`;
         scanIcon.innerHTML = iconType === 'airplane' ? '🚁' : '🛰️';
-        scanIcon.style.cssText = `position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1500; pointer-events: none; font-size: ${iconType === 'airplane' ? '32px' : '28px'}; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(0, 255, 136, 0.6)); transition: all 0.3s ease; opacity: 1; background: transparent; padding: 8px; border-radius: 0; border: none; box-shadow: none;`;
+        scanIcon.style.cssText = `position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 3000; pointer-events: none; font-size: ${iconType === 'airplane' ? '32px' : '28px'}; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(0, 255, 136, 0.6)); transition: all 0.3s ease; opacity: 1; background: transparent; padding: 8px; border-radius: 0; border: none; box-shadow: none;`;
         app.map.getContainer().appendChild(scanIcon);
         app.scanningIcon = scanIcon;
         app.animationState = {
@@ -279,4 +279,39 @@ export function hideResolutionBadge(app) {
         app.resolutionBadge.remove();
         app.resolutionBadge = null;
     }
+}
+
+// Add this function to move the satellite icon to the current tile/subtile
+export function moveSatelliteAnimationToTile(app, tileInfo) {
+    if (!app || !app.map || !app.scanningIcon) return;
+    const bounds = app.selectedArea && app.selectedArea.bounds;
+    if (!bounds) return;
+    // Always treat bounds as [SW, NE] and use min/max for safety
+    const latMin = Math.min(bounds[0][0], bounds[1][0]);
+    const latMax = Math.max(bounds[0][0], bounds[1][0]);
+    const lonMin = Math.min(bounds[0][1], bounds[1][1]);
+    const lonMax = Math.max(bounds[0][1], bounds[1][1]);
+    const gridRows = tileInfo.gridRows || app.lidarGridRows || 10;
+    const gridCols = tileInfo.gridCols || app.lidarGridCols || 5;
+    const coarseRow = tileInfo.coarseRow || 0;
+    const coarseCol = tileInfo.coarseCol || 0;
+    const subtiles = tileInfo.subtiles || 1;
+    const subtileRow = tileInfo.subtileRow || 0;
+    const subtileCol = tileInfo.subtileCol || 0;
+    // Compute tile bounds in scan region
+    const tileLat0 = latMin + (latMax - latMin) * (coarseRow / gridRows);
+    const tileLon0 = lonMin + (lonMax - lonMin) * (coarseCol / gridCols);
+    const tileLat1 = latMin + (latMax - latMin) * ((coarseRow + 1) / gridRows);
+    const tileLon1 = lonMin + (lonMax - lonMin) * ((coarseCol + 1) / gridCols);
+    // Compute subtile center
+    const fracY = (subtileRow + 0.5) / subtiles;
+    const fracX = (subtileCol + 0.5) / subtiles;
+    const lat = tileLat0 + (tileLat1 - tileLat0) * fracY;
+    const lon = tileLon0 + (tileLon1 - tileLon0) * fracX;
+    // Project to container point
+    const pt = app.map.latLngToContainerPoint([lat, lon]);
+    // Move the icon
+    app.scanningIcon.style.left = pt.x + 'px';
+    app.scanningIcon.style.top = pt.y + 'px';
+    app.scanningIcon.style.transform = 'translate(-50%, -50%) scale(1.1)';
 }
