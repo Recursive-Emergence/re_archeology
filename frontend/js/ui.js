@@ -44,7 +44,7 @@ export function updateLidarScanButtonStates(app, isRunning) {
     const startBtn = document.getElementById('startLidarScanBtn');
     const stopBtn = document.getElementById('stopLidarScanBtn');
     if (startBtn && stopBtn) {
-        startBtn.disabled = isRunning || !app.selectedArea;
+        startBtn.disabled = isRunning || !app.currentScanArea;
         stopBtn.disabled = !isRunning;
         if (isRunning) {
             startBtn.textContent = 'Scanning...';
@@ -73,6 +73,8 @@ export function startScanUI(app) {
             interactive: false
         });
     }
+    // Set the current scan area boundary to the active scan area
+    app.currentScanArea = app.scanAreaRectangle ? { bounds: app.scanAreaRectangle.getBounds() } : null;
     app.initializeMapVisualization?.();
     if (app.mapVisualization) {
         app.mapVisualization.enableHeatmapMode?.();
@@ -92,6 +94,8 @@ export function cleanupAfterStop(app) {
             interactive: false
         });
     }
+    // Clear the current scan area boundary when scan stops
+    app.currentScanArea = null;
 }
 
 export function updateResolutionDisplay(app, actualResolution) {
@@ -237,10 +241,15 @@ export function updateAnimationProgress(app, tileData) {
 function drawSatelliteBeam(app, targetLatLng) {
     if (!app.map || !app.scanningIcon || !targetLatLng) return;
     if (app.satelliteBeam) app.map.removeLayer(app.satelliteBeam);
-    const mapContainer = app.map.getContainer();
-    const iconCenterX = mapContainer.offsetWidth / 2 + 10;
-    const iconCenterY = 60;
+
+    // Get the center of the scanning icon in page coordinates
+    const iconRect = app.scanningIcon.getBoundingClientRect();
+    const mapRect = app.map.getContainer().getBoundingClientRect();
+    const iconCenterX = iconRect.left + iconRect.width / 2 - mapRect.left;
+    const iconCenterY = iconRect.top + iconRect.height / 2 - mapRect.top;
+    // Convert to map lat/lng
     const iconLatLng = app.map.containerPointToLatLng([iconCenterX, iconCenterY]);
+
     app.satelliteBeam = L.polyline([iconLatLng, targetLatLng], {
         color: '#ffff88',
         weight: 2,
@@ -284,7 +293,7 @@ export function hideResolutionBadge(app) {
 // Add this function to move the satellite icon to the current tile/subtile
 export function moveSatelliteAnimationToTile(app, tileInfo) {
     if (!app || !app.map || !app.scanningIcon) return;
-    const bounds = app.selectedArea && app.selectedArea.bounds;
+    const bounds = app.currentScanArea && app.currentScanArea.bounds;
     if (!bounds) return;
     // Always treat bounds as [SW, NE] and use min/max for safety
     const latMin = Math.min(bounds[0][0], bounds[1][0]);

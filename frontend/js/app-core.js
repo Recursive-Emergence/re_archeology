@@ -39,6 +39,10 @@ export class REArchaeologyApp {
         // Task management
         this.taskList = null;
         
+        // Grid state for LiDAR tiles
+        this.lidarGridRows = null;
+        this.lidarGridCols = null;
+        
         window.Logger?.app('info', 'RE-Archaeology App initialized');
     }
 
@@ -311,11 +315,18 @@ export class REArchaeologyApp {
     handleWebSocketMessage(data) { if (typeof handleWebSocketMessage === 'function') handleWebSocketMessage(this, data); }
 
     // --- LiDAR tile rendering using direct GCS fetch and progressive subtile grid ---
+    // PROTOCOL: The grid origin (0,0) for both tiles and subtiles is the top-left (northwest) corner of the region.
+    // Rows increase downward (north to south), columns increase rightward (west to east).
+    // All subtile bounds (subtile_lat0, subtile_lat1, subtile_lon0, subtile_lon1) must be provided.
+    // subtile_row=0 is the topmost row, subtile_col=0 is the leftmost column.
+    // The backend must generate and send subtiles in this order, and the frontend must render them as-is.
     elevationStats = {};
     elevationBounds = {};
 
     handleLidarTileUpdate(data) {
-        console.log('[LIDAR] handleLidarTileUpdate called', data);
+        if (window.DEBUG_LIDAR_GRID) {
+            console.log('[LIDAR_TILE] handleLidarTileUpdate received:', JSON.stringify(data));
+        }
         // Accepts backend tile messages: {coarse_row, coarse_col, subtile_row, subtile_col, subtiles_per_side, level, elevation, ...}
         // Robustly map snake_case to camelCase for frontend rendering
         if (!this.lidarGridRows || !this.lidarGridCols) {
@@ -337,6 +348,9 @@ export class REArchaeologyApp {
         const subtileCol = data.subtile_col ?? data.subtileCol ?? 0;
         const level = data.level ?? 0;
         const elev = data.elevation ?? data.elev ?? 0;
+        // No inversion: trust backend protocol, subtileRow=0 is top row
+        const lat = data.lat ?? undefined;
+        const lon = data.lon ?? undefined;
         // Track elevations per level
         if (!this.elevationStats[level]) this.elevationStats[level] = [];
         this.elevationStats[level].push(elev);
@@ -355,11 +369,26 @@ export class REArchaeologyApp {
         const g = Math.round(180 * (1 - t));
         const b = Math.round(255 * (1 - t));
         const color = `rgb(${r},${g},${b})`;
-        // Render subtile in grid
+        // Render subtile in canvas grid
         if (typeof window.renderLidarSubtile === 'function') {
+            const subtile_lat0 = data.subtile_lat0 ?? data.subtileLat0;
+            const subtile_lat1 = data.subtile_lat1 ?? data.subtileLat1;
+            const subtile_lon0 = data.subtile_lon0 ?? data.subtileLon0;
+            const subtile_lon1 = data.subtile_lon1 ?? data.subtileLon1;
+            if (window.DEBUG_LIDAR_GRID) {
+                console.log('[LIDAR_TILE] Rendering subtile:', {
+                    gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol, level, color, elev, lat, lon,
+                    subtile_lat0, subtile_lat1, subtile_lon0, subtile_lon1, dataset: data.dataset, resolution: data.resolution
+                });
+            }
             window.renderLidarSubtile({
-                gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol, level, color, elev
+                gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol, level, color, elev, lat, lon,
+                subtile_lat0, subtile_lat1, subtile_lon0, subtile_lon1
             });
+        } else {
+            if (window.DEBUG_LIDAR_GRID) {
+                console.warn('[LIDAR_TILE] window.renderLidarSubtile is not defined');
+            }
         }
         // Move satellite animation to current tile/subtile
         if (typeof moveSatelliteAnimationToTile === 'function') {
@@ -844,5 +873,66 @@ export class REArchaeologyApp {
         }, 15000); // Every 15 seconds
         
         window.Logger?.app('info', 'Periodic task refresh started (15s intervals)');
+    }
+
+    /**
+     * Load all cached LiDAR tile JSONs for a running task directly from GCS and replay them as if they were live tiles.
+     * This is fault-tolerant and deduplicates with live websocket updates.
+     * @param {string} taskId
+     * @param {object} options - { gcsBaseUrl, gridX, gridY, levels }
+     */
+    async loadCachedTilesForTask(taskId, options = {}) {
+        // Example GCS base URL: 'https://storage.googleapis.com/re_archaeology/tasks/{taskId}/cache/subtile_data/'
+        const gcsBaseUrl = options.gcsBaseUrl || `https://storage.googleapis.com/re_archaeology/tasks/${taskId}/cache/subtile_data/`;
+        const gridX = options.gridX;
+        const gridY = options.gridY;
+        const levels = options.levels || [
+            { res: 8.0, subtiles: 1 },
+            { res: 4.0, subtiles: 2 },
+            { res: 2.0, subtiles: 4 },
+            { res: 1.0, subtiles: 8 }
+        ];
+        // Set to deduplicate tiles (level-coarseRow-coarseCol-subtileRow-subtileCol)
+        const seenTiles = new Set();
+        this.lidarGridRows = gridY;
+        this.lidarGridCols = gridX;
+        console.log('[LIDAR_RESTORE] loadCachedTilesForTask', { taskId, gridX, gridY, levels });
+        for (let levelIdx = 0; levelIdx < levels.length; ++levelIdx) {
+            const subtiles = levels[levelIdx].subtiles;
+            for (let coarseRow = 0; coarseRow < gridY; ++coarseRow) {
+                for (let coarseCol = 0; coarseCol < gridX; ++coarseCol) {
+                    for (let subtileRow = 0; subtileRow < subtiles; ++subtileRow) {
+                        for (let subtileCol = 0; subtileCol < subtiles; ++subtileCol) {
+                            const tileKey = `${levelIdx}-${coarseRow}-${coarseCol}-${subtileRow}-${subtileCol}`;
+                            if (seenTiles.has(tileKey)) continue;
+                            const url = `${gcsBaseUrl}level_${levelIdx}/tile_${coarseRow}_${coarseCol}/subtile_${subtileRow}_${subtileCol}.json`;
+                            console.log('[LIDAR_RESTORE] Fetching tile', url);
+                            try {
+                                const resp = await fetch(url);
+                                if (!resp.ok) continue;
+                                const tileData = await resp.json();
+                                seenTiles.add(tileKey);
+                                console.log('[LIDAR_RESTORE] Restoring tile', tileKey, tileData);
+                                this.handleLidarTileUpdate(tileData);
+                            } catch (e) {
+                                console.warn('[LIDAR_RESTORE] Failed to fetch/restore tile', url, e);
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Store seenTiles for deduplication with websocket
+        this._restoredTileKeys = seenTiles;
+    }
+
+    /**
+     * Call this from your websocket handler to skip tiles already restored from cache
+     */
+    isTileRestored(tileData) {
+        if (!this._restoredTileKeys) return false;
+        const key = `${tileData.level}-${tileData.coarse_row}-${tileData.coarse_col}-${tileData.subtile_row}-${tileData.subtile_col}`;
+        return this._restoredTileKeys.has(key);
     }
 } // End of class

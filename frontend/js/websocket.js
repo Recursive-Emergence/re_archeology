@@ -65,7 +65,22 @@ export function handleWebSocketMessage(app, data) {
         case 'grid_info':
             // Always set grid info before any lidar_tile is rendered
             if (typeof window.setLidarGridInfo === 'function') {
-                window.setLidarGridInfo({ grid_x: data.grid_x, grid_y: data.grid_y });
+                window.setLidarGridInfo(
+                    { grid_x: data.grid_x, grid_y: data.grid_y, bounds: data.bounds },
+                    window.currentTaskId || (window.reArchaeologyApp && window.reArchaeologyApp.currentTaskId)
+                );
+            }
+            // Set currentScanArea from grid/task boundary if available
+            if (data.bounds) {
+                app.currentScanArea = { bounds: data.bounds };
+                if (window.Logger) {
+                    window.Logger.websocket('info', '[grid_info] Received bounds:', data.bounds);
+                } else {
+                    console.log('[grid_info] Received bounds:', data.bounds);
+                }
+            } else {
+                // Optionally: compute bounds from grid origin/size if needed
+                // app.currentScanArea = ...
             }
             break;
         case 'lidar_tile':
@@ -75,6 +90,11 @@ export function handleWebSocketMessage(app, data) {
                     app.startScanningAnimation('satellite');
                 }
                 app.isScanning = true;
+            }
+            // Deduplicate: skip if this tile was already restored from cache
+            if (typeof app.isTileRestored === 'function' && app.isTileRestored(data)) {
+                // Optionally log: console.log('Skipping duplicate websocket tile', data);
+                break;
             }
             app.handleLidarTileUpdate?.(data);
             break;

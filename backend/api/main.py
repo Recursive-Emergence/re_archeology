@@ -205,6 +205,13 @@ def _initialize_neo4j():
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info(f"Shutting down {settings.PROJECT_NAME} API")
+    try:
+        from backend.api.routers.task_lidar_scan import lidar_scan_task_manager
+        if lidar_scan_task_manager is not None:
+            lidar_scan_task_manager.stop_all_scans()
+            logger.info("All lidar scan sessions stopped.")
+    except Exception as e:
+        logger.warning(f"Exception while stopping lidar scan sessions: {e}")
     neo4j_db.close()
 
 # Direct startup for development/testing

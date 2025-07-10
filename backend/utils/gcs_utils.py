@@ -5,6 +5,7 @@ import os
 from typing import Optional
 from google.cloud import storage
 from google.oauth2 import service_account
+from google.api_core.exceptions import NotFound
 
 
 # CDN/GCS public URL pattern for direct client access to task cache
@@ -47,6 +48,28 @@ def download_blob(bucket, blob_path: str) -> Optional[bytes]:
     if not blob.exists():
         return None
     return blob.download_as_bytes()
+
+
+def safe_download_blob(bucket, blob_path: str, logger=None) -> Optional[bytes]:
+    """Download bytes from a GCS blob, handling NotFound (404) gracefully and logging as info.
+    Always use a fresh blob object and do not set generation unless explicitly needed.
+    """
+    # Always use a fresh blob object, and do not set generation
+    blob = bucket.blob(blob_path)
+    try:
+        if not blob.exists():
+            if logger:
+                logger.info(f"[GCS] Blob not found: {blob_path}")
+            return None
+        return blob.download_as_bytes()
+    except NotFound:
+        if logger:
+            logger.info(f"[GCS] Blob not found (NotFound exception): {blob_path}")
+        return None
+    except Exception as e:
+        if logger:
+            logger.error(f"[GCS] Error downloading blob {blob_path}: {e}")
+        raise
 
 
 def blob_exists(bucket, blob_path: str) -> bool:

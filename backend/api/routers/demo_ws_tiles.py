@@ -6,7 +6,7 @@ import numpy as np
 from lidar_factory.factory import LidarMapFactory
 import os
 import json as pyjson
-from backend.utils.gcs_utils import get_gcs_bucket, upload_blob, download_blob, blob_exists
+from backend.utils.gcs_utils import get_gcs_bucket, upload_blob, download_blob, blob_exists, safe_download_blob
 import time
 
 router = APIRouter()
@@ -113,7 +113,7 @@ async def ws_demo_tiles(websocket: WebSocket, task_id: str = Query(...)):
                                 cache_key = f"tasks/{task_id}/cache/subtile_data/level_{level_idx}/tile_{coarse_row}_{coarse_col}/subtile_{subtile_row}_{subtile_col}.json"
                                 # --- GCS cache read ---
                                 if blob_exists(bucket, cache_key):
-                                    cached_bytes = download_blob(bucket, cache_key)
+                                    cached_bytes = safe_download_blob(bucket, cache_key)
                                     try:
                                         cached = pyjson.loads(cached_bytes.decode("utf-8"))
                                     except Exception:

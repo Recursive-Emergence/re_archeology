@@ -10,7 +10,7 @@ from backend.utils.config import settings
 import logging
 import asyncio
 import uuid  # Added missing import
-from backend.api.routers.task_lidar_scan import lidar_scan_task_manager
+from backend.api.routers.task_lidar_scan import LidarScanTaskManager
 
 router = APIRouter()
 
@@ -33,32 +33,46 @@ def load_all_tasks_from_gcs(status_filter: Optional[str] = None) -> List[Dict[st
         blobs = gcs_utils.list_blobs(bucket, prefix=GCS_TASKS_PREFIX)
         for blob in blobs:
             rel_path = blob.name[len(GCS_TASKS_PREFIX):]
+            # Skip archived tasks and any subfolders
+            if blob.name.startswith(f'{GCS_TASKS_PREFIX}archive/'):
+                continue
             if not (blob.name.endswith('.json') and '/' not in rel_path):
                 continue
-            try:
-                data_bytes = blob.download_as_bytes()
-                task_data = json.loads(data_bytes.decode('utf-8'))
-                task_id = task_data['id']
-                if status_filter and task_data.get('status') != status_filter:
-                    continue
-                if task_id not in task_dict or task_data['updated_at'] > task_dict[task_id]['updated_at']:
-                    task_data["decay_value"] = calculate_task_decay(task_data)
-                    if isinstance(task_data.get("progress"), (int, float)):
-                        progress_val = task_data["progress"]
-                        task_data["progress"] = {
-                            "scan": progress_val,
-                            "detection": progress_val if task_data["status"] == "completed" else 0,
-                            "overall": progress_val
-                        }
-                    if "profiles" not in task_data:
-                        task_data["profiles"] = ["default_windmill"]
-                    # Remove session logic
-                    task_dict[task_id] = task_data
-            except Exception as e:
-                print(f"Error loading task blob {blob.name}: {e}")
+            data_bytes = gcs_utils.safe_download_blob(bucket, blob.name, logger=logging.getLogger("backend.api.routers.tasks"))
+            if not data_bytes:
                 continue
+            task_data = json.loads(data_bytes.decode('utf-8'))
+            task_id = task_data['id']
+            if status_filter and task_data.get('status') != status_filter:
+                continue
+            if task_id not in task_dict or task_data['updated_at'] > task_dict[task_id]['updated_at']:
+                task_data["decay_value"] = calculate_task_decay(task_data)
+                if isinstance(task_data.get("progress"), (int, float)):
+                    progress_val = task_data["progress"]
+                    task_data["progress"] = {
+                        "scan": progress_val,
+                        "detection": progress_val if task_data["status"] == "completed" else 0,
+                        "overall": progress_val
+                    }
+                if "profiles" not in task_data:
+                    task_data["profiles"] = ["default_windmill"]
+                # Ensure all values are JSON-serializable (convert numpy types)
+                def to_serializable(val):
+                    import numpy as np
+                    if isinstance(val, (np.generic,)):
+                        return val.item()
+                    if isinstance(val, dict):
+                        return {k: to_serializable(v) for k, v in val.items()}
+                    if isinstance(val, list):
+                        return [to_serializable(v) for v in val]
+                    return val
+                task_data = to_serializable(task_data)
+                # Remove session logic
+                task_dict[task_id] = task_data
     except Exception as e:
-        print(f"Error accessing tasks in GCS: {e}")
+        print(f"[ERROR] Error accessing tasks in GCS: {e}")
+        import traceback
+        traceback.print_exc()
     return list(task_dict.values())
 
 def load_existing_tasks() -> List[Dict[str, Any]]:
@@ -360,6 +374,9 @@ class TaskManager:
     - abort:   {"action": "abort", "task_id": "..."}
       (All three will stop the lidar scan session and set status to 'paused'.)
 
+    - delete:  {"action": "delete", "task_id": "..."}
+      (Archives and deletes the specified task. Admin privileges required.)
+
     - status:  {"action": "status", "task_id": "..."}
     - list:    {"action": "list"}
 
@@ -432,6 +449,11 @@ class TaskManager:
         if not admin_status:
             self.logger.warning(f"[TaskManager] Non-admin attempted to delete task {task_id}")
             return False
+        # Stop any running lidar scan for this task
+        try:
+            lidar_scan_task_manager.stop_scan(task_id)
+        except Exception as e:
+            self.logger.warning(f"[TaskManager] Exception while stopping lidar scan for deleted task {task_id}: {e}")
         # Move the task JSON to archive folder in GCS
         try:
             client = gcs_utils.get_gcs_client()
@@ -540,3 +562,4 @@ class TaskManager:
 
 # Singleton instance for system-wide task management
 system_task_manager = TaskManager()
+lidar_scan_task_manager = LidarScanTaskManager(parent_task_manager=system_task_manager)
