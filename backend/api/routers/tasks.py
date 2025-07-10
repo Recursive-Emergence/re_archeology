@@ -11,6 +11,7 @@ import logging
 import asyncio
 import uuid  # Added missing import
 from backend.api.routers.task_lidar_scan import LidarScanTaskManager
+import threading
 
 router = APIRouter()
 
@@ -460,12 +461,19 @@ class TaskManager:
             bucket = gcs_utils.get_gcs_bucket(GCS_BUCKET_NAME, client)
             src_blob_name = f"{GCS_TASKS_PREFIX}{task_id}.json"
             dst_blob_name = f"{GCS_TASKS_PREFIX}archive/{task_id}.json"
-            src_blob = bucket.blob(src_blob_name)
-            if not src_blob.exists():
-                self.logger.warning(f"[TaskManager] Task {task_id} not found for deletion.")
+            self.logger.info(f"[TaskManager] Attempting to delete/archive task. src_blob_name={src_blob_name}, dst_blob_name={dst_blob_name}")
+            # List all blobs under tasks/ for debug
+            all_blobs = list(bucket.list_blobs(prefix=GCS_TASKS_PREFIX))
+            all_blob_names = [b.name for b in all_blobs]
+            self.logger.info(f"[TaskManager] All blobs under {GCS_TASKS_PREFIX}: {all_blob_names}")
+            # Use get_blob instead of exists for reliability
+            src_blob = bucket.get_blob(src_blob_name)
+            self.logger.info(f"[TaskManager] get_blob result for {src_blob_name}: {src_blob}")
+            if not src_blob:
+                self.logger.warning(f"[TaskManager] Task {task_id} not found for deletion. src_blob_name={src_blob_name}")
                 return False
             bucket.copy_blob(src_blob, bucket, dst_blob_name)
-            src_blob.delete()
+            bucket.delete_blob(src_blob_name)
             self.logger.info(f"[TaskManager] Task {task_id} archived to {dst_blob_name}")
             return True
         except Exception as e:
@@ -482,7 +490,6 @@ class TaskManager:
         # Try to get user info from FastAPI global request state if not provided
         if not user_id:
             try:
-                import threading
                 # Try to get user from thread-local storage (FastAPI request.state)
                 request = getattr(threading.current_thread(), 'request', None)
                 if request and hasattr(request, 'state') and hasattr(request.state, 'user'):
@@ -541,7 +548,12 @@ class TaskManager:
                 if not task:
                     self.logger.warning(f"[TaskManager] {action} failed: Task {task_id} not found.")
                     return {"success": False, "message": f"Task {task_id} not found."}
-                lidar_scan_task_manager.stop_scan(task_id)
+                # --- Patch: Wait for lidar scan to stop before updating status ---
+                scan_stopped = threading.Event()
+                def on_scan_stopped(_):
+                    scan_stopped.set()
+                lidar_scan_task_manager.stop_scan(task_id, on_stopped_callback=on_scan_stopped)
+                scan_stopped.wait(timeout=10)  # Wait up to 10s for scan to stop
                 task.update_status("paused")
                 return {"success": True, "message": f"Task {task_id} paused/stopped and lidar scan session stopped.", "task_id": task_id}
             elif action == "status":

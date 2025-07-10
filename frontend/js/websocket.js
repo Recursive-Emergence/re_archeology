@@ -97,6 +97,10 @@ export function handleWebSocketMessage(app, data) {
                 break;
             }
             app.handleLidarTileUpdate?.(data);
+            // Also render the tile in the lidar grid with animation
+            if (window.renderLidarSubtile) {
+                window.renderLidarSubtile(data);
+            }
             break;
         case 'lidar_heatmap_tile':
             app.handleLidarHeatmapTileUpdate?.(data);
@@ -108,6 +112,11 @@ export function handleWebSocketMessage(app, data) {
         case 'session_complete':
         case 'lidar_completed':
             app.completeDetectionAnimation?.();
+            // Stop satellite animation when scanning completes
+            if (typeof app.stopScanningAnimation === 'function') {
+                app.stopScanningAnimation();
+            }
+            app.isScanning = false;
             break;
         case 'session_stopped':
             // Stop animations when session is stopped

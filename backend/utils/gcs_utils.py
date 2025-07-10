@@ -54,13 +54,13 @@ def safe_download_blob(bucket, blob_path: str, logger=None) -> Optional[bytes]:
     """Download bytes from a GCS blob, handling NotFound (404) gracefully and logging as info.
     Always use a fresh blob object and do not set generation unless explicitly needed.
     """
-    # Always use a fresh blob object, and do not set generation
     blob = bucket.blob(blob_path)
     try:
         if not blob.exists():
             if logger:
                 logger.info(f"[GCS] Blob not found: {blob_path}")
             return None
+        blob.reload()  # Force metadata refresh
         return blob.download_as_bytes()
     except NotFound:
         if logger:

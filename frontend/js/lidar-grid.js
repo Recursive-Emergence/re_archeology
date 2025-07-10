@@ -1,6 +1,7 @@
 // LiDAR subtile grid renderer using canvas overlay for performance
 // Updated: robust map/canvas detection, improved debug, ES module export
 import { getGcsSnapshotUrl } from './gcs-utils.js';
+import { startScanningAnimation, updateAnimationProgress, moveSatelliteAnimationToTile } from './ui.js';
 
 let lidarCanvas = null;
 let lidarSubtiles = [];
@@ -281,6 +282,16 @@ export function setLidarGridInfo(info, taskIdOverride) {
     if (taskId && boundsArr) {
         console.debug('[LIDAR_GRID][DEBUG] Calling showHighestAvailableLidarSnapshot', { taskId, bounds: boundsArr });
         showHighestAvailableLidarSnapshot(taskId, boundsArr);
+        
+        // Set scan area for satellite animation to use
+        const app = window.app || window.App || window.reArchaeologyApp;
+        if (app) {
+            app.currentScanArea = {
+                bounds: boundsArr,
+                taskId: taskId
+            };
+            console.debug('[LIDAR_GRID][DEBUG] Set currentScanArea for satellite animation', app.currentScanArea);
+        }
     } else {
         console.warn('[LIDAR_GRID][DEBUG] setLidarGridInfo: missing taskId or bounds', { taskId, info });
     }
@@ -309,6 +320,49 @@ export function renderLidarSubtile(obj) {
         }
         ensureCanvas();
     }
+    
+    // Get app instance for animation
+    const app = window.app || window.App || window.reArchaeologyApp;
+    if (app) {
+        // Start satellite animation if not already active
+        if (!app.isScanning && !app.animationState?.isActive) {
+            console.log('[LIDAR_GRID] Starting satellite animation for tiling');
+            startScanningAnimation(app, 'satellite');
+            app.isScanning = true;
+        }
+        
+        // Update animation progress and draw beam to current tile
+        const tileData = {
+            center_lat: obj.lat,
+            center_lon: obj.lon,
+            subtile_lat0: obj.subtile_lat0,
+            subtile_lat1: obj.subtile_lat1,
+            subtile_lon0: obj.subtile_lon0,
+            subtile_lon1: obj.subtile_lon1,
+            tile_bounds: obj.subtile_lat0 !== undefined ? {
+                north: obj.subtile_lat1,
+                south: obj.subtile_lat0,
+                east: obj.subtile_lon1,
+                west: obj.subtile_lon0
+            } : null
+        };
+        
+        updateAnimationProgress(app, tileData);
+        
+        // Move satellite to the current tile/subtile being processed
+        if (obj.coarse_row !== undefined && obj.coarse_col !== undefined) {
+            const tileInfo = {
+                gridRows: gridRows,
+                gridCols: gridCols,
+                coarseRow: obj.coarse_row,
+                coarseCol: obj.coarse_col,
+                subtiles: obj.subtiles_per_side || 1,
+                subtileRow: obj.subtile_row || 0,
+                subtileCol: obj.subtile_col || 0
+            };
+            moveSatelliteAnimationToTile(app, tileInfo);
+        }
+    }
     // If bounds are present, use them for seamless rendering
     const subtile = {
         lat: obj.lat,
@@ -333,7 +387,7 @@ export function renderLidarSubtile(obj) {
     }
     lidarSubtiles.push(subtile);
     redrawLidarCanvas();
-    if (lidarSnapshotImg) hideLidarSnapshot();
+    if (lidarSnapshotOverlay) hideLidarSnapshot();
 }
 
 // Listen for map move/zoom and redraw
@@ -380,6 +434,23 @@ tryInitLidarGrid();
 
 window.DEBUG_LIDAR_GRID = false;
 
+// Stop satellite animation when scanning is complete
+export function stopSatelliteAnimationIfComplete(taskId) {
+    const app = window.app || window.App || window.reArchaeologyApp;
+    if (app && app.isScanning && app.animationState?.isActive) {
+        // Check if this is the current scanning task
+        const currentTaskId = window.currentTaskId || (app && app.currentTaskId);
+        if (currentTaskId === taskId) {
+            console.log('[LIDAR_GRID] Stopping satellite animation for completed task:', taskId);
+            if (typeof app.stopScanningAnimation === 'function') {
+                app.stopScanningAnimation();
+            }
+            app.isScanning = false;
+        }
+    }
+}
+
 // For legacy support, attach to window (remove after migration)
 window.setLidarGridInfo = setLidarGridInfo;
 window.renderLidarSubtile = renderLidarSubtile;
+window.stopSatelliteAnimationIfComplete = stopSatelliteAnimationIfComplete;
