@@ -13,7 +13,7 @@ class TaskList {
         this._rectangleZoomLevel = 3; // For cycling zoom on rectangle click
         this._rectangleZoomLevels = [3, 5, 7, 9, 11, 13];
         
-        this.init();b
+        this.init();
     }
 
     init() {
@@ -21,8 +21,10 @@ class TaskList {
         this.startAutoRefresh();
     }
 
-    async loadTasks() {
-        this.showLoadingState();
+    async loadTasks(showLoading = true) {
+        if (showLoading) {
+            this.showLoadingState();
+        }
         try {
             // Clear cache before fetching to always get latest from backend
             this.taskService.clearCache();
@@ -31,11 +33,8 @@ class TaskList {
             // Remove minDecay filter to show all tasks
             this.tasks = await this.taskService.getTasks({ minDecay: 0 });
             
-            // Always clear loading state after successful API call
-            this.clearLoadingState();
-            
             this.renderTaskRectangles();
-            this.renderTaskList();
+            this.renderTaskList(showLoading);
             
             // Check for newly running tasks and trigger appropriate actions
             const currentRunningTasks = this.tasks.filter(task => task.status === 'running');
@@ -127,13 +126,18 @@ class TaskList {
         }
     }
 
-    renderTaskList() {
+    renderTaskList(clearLoading = true) {
         const container = document.getElementById('taskListContainer');
         if (!container) return;
-        // Remove all loading indicators from anywhere in the container
-        container.querySelectorAll('.task-list-loading').forEach(el => el.remove());
+        
+        // Only remove loading indicators if we're supposed to clear them
+        if (clearLoading) {
+            container.querySelectorAll('.task-list-loading').forEach(el => el.remove());
+        }
+        
         let header = container.querySelector('.task-count-header');
         let scrollArea = container.querySelector('.task-list-scroll');
+        
         if (!header) {
             header = document.createElement('div');
             header.className = 'task-count-header';
@@ -153,21 +157,34 @@ class TaskList {
             const bTime = new Date(b.updated_at || b.created_at).getTime();
             return bTime - aTime;
         });
+        
         const runningCount = sortedTasks.filter(task => task.status === 'running').length;
         const statusText = runningCount > 0 ? ` (${runningCount} running)` : '';
-        header.innerHTML = `<span class="task-count">${this.tasks.length} tasks available${statusText}</span>`;
+        const newHeaderContent = `<span class="task-count">${this.tasks.length} tasks available${statusText}</span>`;
+        
+        // Only update header if content changed to avoid flickering
+        if (header.innerHTML !== newHeaderContent) {
+            header.innerHTML = newHeaderContent;
+        }
+        
         if (this.tasks.length === 0) {
             scrollArea.innerHTML = `<div class="task-list-empty"><h4>📋 No Tasks Found</h4><p>No archaeological survey tasks available.</p></div>`;
             return;
         }
-        // Build the list
-        scrollArea.innerHTML = sortedTasks.map(task => this.createTaskListItem(task)).join('');
-        // Add click event listeners
-        scrollArea.querySelectorAll('.task-item').forEach(item => {
-            item.onclick = () => {
-                this.navigateToTask(item.dataset.taskId);
-            };
-        });
+        
+        // Build the new content
+        const newContent = sortedTasks.map(task => this.createTaskListItem(task)).join('');
+        
+        // Only update if content actually changed to prevent unnecessary DOM manipulation
+        if (scrollArea.innerHTML !== newContent) {
+            scrollArea.innerHTML = newContent;
+            // Re-add click event listeners only when content changes
+            scrollArea.querySelectorAll('.task-item').forEach(item => {
+                item.onclick = () => {
+                    this.navigateToTask(item.dataset.taskId);
+                };
+            });
+        }
     }
 
     createTaskListItem(task) {
@@ -514,9 +531,52 @@ class TaskList {
         this.refreshInterval = setInterval(() => {
             // Don't refresh if we're in the middle of initial navigation
             if (!this.isFirstLoad) {
-                this.loadTasks();
+                // Background refresh without any UI updates to prevent flickering
+                this.backgroundRefresh();
             }
         }, 30000);
+    }
+
+    async backgroundRefresh() {
+        try {
+            // Silent refresh - just update the data without any UI loading states
+            this.taskService.clearCache();
+            const previousRunningTasks = this.tasks ? this.tasks.filter(task => task.status === 'running') : [];
+            this.tasks = await this.taskService.getTasks({ minDecay: 0 });
+            
+            // Update rectangles and UI silently
+            this.renderTaskRectangles();
+            this.renderTaskList(false); // Don't clear loading states
+            
+            // Handle running task logic without showing loading
+            const currentRunningTasks = this.tasks.filter(task => task.status === 'running');
+            const newlyRunningTasks = currentRunningTasks.filter(currentTask => 
+                !previousRunningTasks.some(prevTask => prevTask.id === currentTask.id)
+            );
+            
+            if (newlyRunningTasks.length > 0) {
+                const newlyRunningTask = newlyRunningTasks[0];
+                await this.navigateToTaskSmoothly(newlyRunningTask.id);
+                
+                if (window.reArchaeologyApp && !window.reArchaeologyApp.isScanning) {
+                    if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
+                        window.reArchaeologyApp.stopScanningAnimation();
+                    }
+                    
+                    setTimeout(() => {
+                        if (typeof window.reArchaeologyApp.startScanningAnimation === 'function') {
+                            window.reArchaeologyApp.startScanningAnimation('satellite');
+                            window.reArchaeologyApp.isScanning = true;
+                        }
+                    }, 100);
+                }
+            }
+            
+            await this.triggerVisualizationForRunningTasks();
+        } catch (error) {
+            // Silent error handling - don't show error state during background refresh
+            console.warn('Background refresh failed:', error);
+        }
     }
 
     stopAutoRefresh() {

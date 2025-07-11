@@ -284,12 +284,11 @@ export function handleWebSocketMessage(app, data) {
                 }, 200);
             }
             
-            // Immediately refresh task list to show updated status
-            if (app.taskList && typeof app.taskList.loadTasks === 'function') {
-                // Clear cache first to ensure fresh data
-                if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
-                    app.taskList.taskService.clearCache();
-                }
+            // Immediately refresh task list to show updated status (silent refresh)
+            if (app.taskList && typeof app.taskList.backgroundRefresh === 'function') {
+                setTimeout(() => app.taskList.backgroundRefresh(), 150);
+            } else if (app.taskList && typeof app.taskList.loadTasks === 'function') {
+                console.warn('[WEBSOCKET] Falling back to loadTasks for task_resumed');
                 setTimeout(() => app.taskList.loadTasks(), 150);
             }
             break;
@@ -313,13 +312,9 @@ export function handleWebSocketMessage(app, data) {
                     }, 300);
                 }
                 
-                // Immediately refresh task list to show updated status
-                if (app.taskList && typeof app.taskList.loadTasks === 'function') {
-                    // Clear cache first to ensure fresh data
-                    if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
-                        app.taskList.taskService.clearCache();
-                    }
-                    setTimeout(() => app.taskList.loadTasks(), 350);
+                // Immediately refresh task list to show updated status (silent refresh)
+                if (app.taskList && typeof app.taskList.backgroundRefresh === 'function') {
+                    setTimeout(() => app.taskList.backgroundRefresh(), 350);
                 }
             }
             break;
@@ -331,13 +326,9 @@ export function handleWebSocketMessage(app, data) {
             app.isScanning = false;
             app.currentLidarSession = null;
             
-            // Handle task paused notification
-            if (app.taskList && typeof app.taskList.loadTasks === 'function') {
-                // Clear cache first to ensure fresh data
-                if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
-                    app.taskList.taskService.clearCache();
-                }
-                app.taskList.loadTasks();
+            // Handle task paused notification (silent refresh)
+            if (app.taskList && typeof app.taskList.backgroundRefresh === 'function') {
+                app.taskList.backgroundRefresh();
             }
             break;
         case 'task_aborted':
@@ -348,13 +339,9 @@ export function handleWebSocketMessage(app, data) {
             app.isScanning = false;
             app.currentLidarSession = null;
             
-            // Handle task aborted notification
-            if (app.taskList && typeof app.taskList.loadTasks === 'function') {
-                // Clear cache first to ensure fresh data
-                if (app.taskList.taskService && typeof app.taskList.taskService.clearCache === 'function') {
-                    app.taskList.taskService.clearCache();
-                }
-                app.taskList.loadTasks();
+            // Handle task aborted notification (silent refresh)
+            if (app.taskList && typeof app.taskList.backgroundRefresh === 'function') {
+                app.taskList.backgroundRefresh();
             }
             break;
         case 'done':

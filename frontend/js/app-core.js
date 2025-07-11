@@ -879,19 +879,22 @@ export class REArchaeologyApp {
     }
 
     startPeriodicTaskRefresh() {
-        // Start periodic task refresh every 15 seconds to ensure ground truth
+        // Start periodic task refresh every 15 seconds to ensure ground truth (silent refresh)
         setInterval(() => {
-            if (this.taskList && typeof this.taskList.loadTasks === 'function') {
-                // Clear cache to ensure fresh data
+            if (this.taskList && typeof this.taskList.backgroundRefresh === 'function') {
+                this.taskList.backgroundRefresh();
+                window.Logger?.app('debug', 'Periodic task refresh completed (silent)');
+            } else if (this.taskList && typeof this.taskList.loadTasks === 'function') {
+                // Fallback to regular loadTasks if backgroundRefresh doesn't exist
                 if (this.taskList.taskService && typeof this.taskList.taskService.clearCache === 'function') {
                     this.taskList.taskService.clearCache();
                 }
                 this.taskList.loadTasks();
-                window.Logger?.app('debug', 'Periodic task refresh completed');
+                window.Logger?.app('debug', 'Periodic task refresh completed (with loading)');
             }
         }, 15000); // Every 15 seconds
         
-        window.Logger?.app('info', 'Periodic task refresh started (15s intervals)');
+        window.Logger?.app('info', 'Periodic task refresh started (15s intervals, silent mode)');
     }
 
     /**
