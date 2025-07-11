@@ -961,12 +961,12 @@ export class REArchaeologyApp {
      */
     async loadCachedBitmapForTask(taskId) {
         try {
-            console.log('[BITMAP_RESTORE] Loading cached bitmap for task:', taskId);
+            // Loading cached bitmap for task
             
             // Get task data from task list to determine bounds
             const task = this.taskList?.tasks?.find(t => t.id === taskId);
             if (!task) {
-                console.warn('[BITMAP_RESTORE] Task not found in task list:', taskId);
+                // Task not found in task list
                 return;
             }
             
@@ -986,21 +986,17 @@ export class REArchaeologyApp {
             }
             
             if (!bounds) {
-                console.warn('[BITMAP_RESTORE] No bounds available for task:', taskId);
+                // No bounds available for task
                 return;
             }
             
             // Use the existing snapshot loading system
             if (window.showHighestAvailableLidarSnapshot) {
-                console.log('[BITMAP_RESTORE] Calling showHighestAvailableLidarSnapshot for task:', taskId);
                 await window.showHighestAvailableLidarSnapshot(taskId, bounds);
-                console.log('[BITMAP_RESTORE] Successfully loaded cached bitmap for task:', taskId);
-            } else {
-                console.warn('[BITMAP_RESTORE] showHighestAvailableLidarSnapshot not available');
             }
             
         } catch (error) {
-            console.error('[BITMAP_RESTORE] Failed to load cached bitmap for task:', taskId, error);
+            // Failed to load cached bitmap for task
             throw error;
         }
     }
@@ -1010,16 +1006,16 @@ export class REArchaeologyApp {
      */
     clearCachedBitmaps() {
         try {
-            console.log('[BITMAP_RESTORE] Clearing cached bitmap overlays');
+            // Clearing cached bitmap overlays
             
             // Use the existing overlay removal system
             if (window.removeObsoleteLidarSnapshotOverlays) {
                 window.removeObsoleteLidarSnapshotOverlays([]);
             }
             
-            console.log('[BITMAP_RESTORE] Successfully cleared cached bitmap overlays');
+            // Successfully cleared cached bitmap overlays
         } catch (error) {
-            console.error('[BITMAP_RESTORE] Failed to clear cached bitmap overlays:', error);
+            // Failed to clear cached bitmap overlays
         }
     }
 } // End of class

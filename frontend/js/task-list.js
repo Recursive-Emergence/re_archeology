@@ -225,60 +225,87 @@ class TaskList {
         });
         this.taskRectangles.clear();
         // Add new rectangles and show snapshots
+        const currentTaskIds = [];
         for (const task of this.tasks) {
-            let backendBounds = null;
-            if (task.bounds && Array.isArray(task.bounds) && task.bounds.length === 2) {
-                backendBounds = task.bounds;
+            const bounds = this.calculateTaskBounds(task);
+            if (!bounds) {
+                console.warn(`[TASK_LIST] No bounds available for task ${task.id}`);
+                continue;
             }
-            const rectangle = this.createTaskRectangle(task, backendBounds);
+            const rectangle = this.createTaskRectangle(task, bounds);
             if (rectangle && this.map) {
                 try {
                     rectangle.addTo(this.map);
                     this.taskRectangles.set(task.id, rectangle);
-                    
-                    // Get bounds from the rectangle that was actually created
-                    const rectangleBounds = rectangle.getBounds();
-                    const boundsArray = [
-                        [rectangleBounds.getSouth(), rectangleBounds.getWest()], // southwest
-                        [rectangleBounds.getNorth(), rectangleBounds.getEast()]  // northeast
-                    ];
-                    
-                    // Show snapshot using the same bounds as the rectangle
-                    if (window.showHighestAvailableLidarSnapshot) {
-                        window.showHighestAvailableLidarSnapshot(task.id, boundsArray);
-                    }
                 } catch (e) {
-                    console.warn('Failed to add rectangle to map:', e, 'task:', task.id);
+                    // Failed to add rectangle to map; skipping
                 }
             } else if (!rectangle) {
-                // Only log on error now
-                console.warn('[TaskList] Skipped rectangle for task:', task.id, 'status:', task.status, 'start_coordinates:', task.start_coordinates, 'range:', task.range, 'bounds:', task.bounds);
+                // Skipped rectangle for task due to missing or invalid bounds
             }
+            
+            // Show snapshot overlay for all tasks with bounds
+            if (bounds && window.showHighestAvailableLidarSnapshot) {
+                const boundsArray = [
+                    [bounds[0][0], bounds[0][1]], // southwest
+                    [bounds[1][0], bounds[1][1]]  // northeast
+                ];
+                window.showHighestAvailableLidarSnapshot(task.id, boundsArray);
+            }
+            currentTaskIds.push(task.id);
+        }
+        // Remove overlays for tasks that are no longer present
+        if (window.removeObsoleteLidarSnapshotOverlays) {
+            window.removeObsoleteLidarSnapshotOverlays(currentTaskIds);
         }
     }
 
-    createTaskRectangle(task, backendBounds = null) {
-        // Use backend bounds if available, else fallback to center-based calculation
-        let bounds = null;
-        let actualWidth = null, actualHeight = null;
-        if (backendBounds && Array.isArray(backendBounds) && backendBounds.length === 2) {
-            bounds = backendBounds;
-        } else if (task.bounds && Array.isArray(task.bounds) && task.bounds.length === 2) {
-            bounds = task.bounds;
-        } else if (task.start_coordinates && task.range) {
+    /**
+     * Calculate bounds from task coordinates and range.
+     * 
+     * COORDINATE SYSTEM: Based on empirical testing with lidar snapshot alignment:
+     * - Latitude: start_coordinates represents the CENTER of the scan area
+     * - Longitude: start_coordinates represents the WEST EDGE of the scan area
+     * 
+     * This hybrid approach aligns task rectangles with lidar snapshot overlays.
+     */
+    calculateTaskBounds(task) {
+        // Use backend bounds if available
+        if (task.bounds && Array.isArray(task.bounds) && task.bounds.length === 2) {
+            return task.bounds;
+        }
+        
+        // Calculate from start_coordinates and range
+        if (task.start_coordinates && task.range) {
             const [lat, lon] = task.start_coordinates;
             const { width_km, height_km } = task.range;
-            actualWidth = width_km;
-            actualHeight = height_km;
-            const latOffset = actualHeight / 111;
-            const lonOffset = actualWidth / (111 * Math.cos(lat * Math.PI / 180));
-            bounds = [
-                [lat - latOffset / 2, lon - lonOffset / 2], // Southwest
-                [lat + latOffset / 2, lon + lonOffset / 2]  // Northeast
+            
+            // Convert km to approximate degrees
+            const latOffset = height_km / 111;
+            const lonOffset = width_km / (111 * Math.cos(lat * Math.PI / 180));
+            
+            // Hybrid coordinate system: center latitude, west longitude
+            return [
+                [lat - latOffset / 2, lon], // Southwest: center latitude, west longitude
+                [lat + latOffset / 2, lon + lonOffset]  // Northeast: center + offset, west + offset
             ];
-        } else {
-            // If neither bounds nor start_coordinates/range are available, skip
+        }
+        
+        return null;
+    }
+
+    createTaskRectangle(task, providedBounds = null) {
+        // Use provided bounds or calculate from task data
+        const bounds = providedBounds || this.calculateTaskBounds(task);
+        if (!bounds) {
             return null;
+        }
+        
+        // Extract dimensions for tooltip (if available)
+        let actualWidth = null, actualHeight = null;
+        if (task.range) {
+            actualWidth = task.range.width_km;
+            actualHeight = task.range.height_km;
         }
         const statusColor = this.taskService.getStatusColor(task.status);
         const opacity = Math.max(0.3, task.decay_value);
@@ -289,82 +316,47 @@ class TaskList {
             fillColor: statusColor,
             fillOpacity: opacity * 0.2,
             className: `task-rectangle task-${task.status}`,
-            interactive: true,
+            interactive: false,
             bubblingMouseEvents: false
         });
         // Add pulsing animation for running tasks
         if (task.status === 'running') {
             rectangle.getElement()?.classList.add('pulse');
         }
-        // Add click handler for navigation
-        rectangle.on('click', (e) => {
-            L.DomEvent.stopPropagation(e);
-            if (this.map) {
-                const bounds = rectangle.getBounds();
-                const center = bounds.getCenter();
-                let idx = this._rectangleZoomLevels.indexOf(this._rectangleZoomLevel);
-                idx = (idx + 1) % this._rectangleZoomLevels.length;
-                this._rectangleZoomLevel = this._rectangleZoomLevels[idx];
-                this.map.setView(center, this._rectangleZoomLevel, { animate: true });
-            }
-        });
-        // Add tooltip
-        const tooltipContent = `
-            <div class="task-tooltip">
-                <strong>Task ${task.id.slice(0, 8)}</strong><br>
-                Status: ${this.taskService.getStatusText(task.status)}<br>
-                Findings: ${task.findings ? task.findings.length : 0}<br>
-                Requested: ${task.range && task.range.width_km && task.range.height_km ? `${task.range.width_km}×${task.range.height_km} km` : ''}
-                ${task.status === 'running' && actualWidth && actualHeight ? `<br>Scanning: ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)} km` : ''}
-            </div>
-        `;
-        rectangle.bindTooltip(tooltipContent, {
-            sticky: true,
-            direction: 'top'
-        });
         return rectangle;
     }
 
-    async navigateToTask(taskId) {
+    navigateToTask(taskId) {
         window.currentTaskId = taskId;
         if (window.reArchaeologyApp) window.reArchaeologyApp.currentTaskId = taskId;
+        
+        // Find the task in our cached data instead of making API call
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task) {
+            console.error('Task not found in cache:', taskId);
+            return;
+        }
+        
+        if (!this.map) {
+            console.error('Map not available for navigation');
+            return;
+        }
+        
         try {
-            const navData = await this.taskService.getTaskNavigation(taskId);
-            if (this.map) {
-                console.debug('[navigateToTask] navData:', navData);
-                this.map.flyToBounds([
-                    navData.bounds.southwest,
-                    navData.bounds.northeast
-                ], {
-                    padding: [50, 50],
-                    duration: 1.5
-                });
-                this.highlightTask(taskId);
-                if (window.reArchaeologyApp && typeof window.reArchaeologyApp.loadCachedBitmapForTask === 'function') {
-                    console.debug('[navigateToTask] Calling loadCachedBitmapForTask', taskId);
-                    await window.reArchaeologyApp.loadCachedBitmapForTask(taskId);
-                }
-                // Use navData as grid info for setLidarGridInfo
-                const gridInfo = navData;
-                console.debug('[navigateToTask] gridInfo:', gridInfo, 'taskId:', taskId);
-                console.debug('[navigateToTask] typeof window.setLidarGridInfo:', typeof window.setLidarGridInfo);
-                console.debug('[navigateToTask] typeof window.reArchaeologyApp.setLidarGridInfo:', window.reArchaeologyApp && typeof window.reArchaeologyApp.setLidarGridInfo);
-                try {
-                    if (typeof window.setLidarGridInfo === 'function') {
-                        console.debug('[navigateToTask] Calling setLidarGridInfo', gridInfo, taskId);
-                        const result = window.setLidarGridInfo(gridInfo, taskId);
-                        console.debug('[navigateToTask] setLidarGridInfo result:', result);
-                    } else if (window.reArchaeologyApp && typeof window.reArchaeologyApp.setLidarGridInfo === 'function') {
-                        console.debug('[navigateToTask] Calling reArchaeologyApp.setLidarGridInfo', gridInfo, taskId);
-                        const result = window.reArchaeologyApp.setLidarGridInfo(gridInfo, taskId);
-                        console.debug('[navigateToTask] reArchaeologyApp.setLidarGridInfo result:', result);
-                    } else {
-                        console.warn('[navigateToTask] No setLidarGridInfo function found!');
-                    }
-                } catch (err) {
-                    console.error('[navigateToTask] Error calling setLidarGridInfo:', err);
-                }
+            // Use cached task bounds for instant navigation
+            const bounds = this.calculateTaskBounds(task);
+            if (!bounds) {
+                console.error('No bounds available for navigation to task:', task.id);
+                return;
             }
+            
+            // Fast navigation with shorter duration
+            this.map.flyToBounds(bounds, {
+                padding: [50, 50],
+                duration: 0.8  // Reduced from 1.5s
+            });
+            
+            this.highlightTask(taskId);
         } catch (error) {
             console.error('Failed to navigate to task:', error);
         }
