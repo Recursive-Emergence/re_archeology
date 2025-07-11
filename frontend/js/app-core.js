@@ -101,7 +101,7 @@ export class REArchaeologyApp {
                 marker.bindPopup(popupHtml);
                 this.discoveredSitesLayer.addLayer(marker);
                 markerLatLngs.push([site.latitude, site.longitude]);
-                window.Logger?.app('debug', `Added marker for site: ${site.name || site.type || 'Discovered Site'} at [${site.latitude}, ${site.longitude}]`);
+                // Marker added silently
             });
             this.discoveredSitesLayer.addTo(this.map);
             // Store marker bounds for potential later use, but don't automatically fit
