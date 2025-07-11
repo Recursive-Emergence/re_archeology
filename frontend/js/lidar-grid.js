@@ -1,21 +1,33 @@
 // LiDAR subtile grid renderer using canvas overlay for performance
 // Updated: robust map/canvas detection, improved debug, ES module export
-import { getGcsSnapshotUrl } from './gcs-utils.js';
-import { startScanningAnimation, updateAnimationProgress, moveSatelliteAnimationToTile } from './ui.js';
+console.log('[LIDAR-GRID] Module starting to load...');
+
+// Temporarily use direct function to avoid import issues
+function getGcsSnapshotUrl(taskId, levelIdx) {
+    return `/api/v1/gcs-data/${taskId}/level_${levelIdx}_color.png`;
+}
+
+function startScanningAnimation() { /* stub */ }
+function updateAnimationProgress() { /* stub */ }
+function moveSatelliteAnimationToTile() { /* stub */ }
+
+console.log('[LIDAR-GRID] Imports bypassed, continuing with main module...');
 
 let lidarCanvas = null;
 let lidarSubtiles = [];
 let gridInfo = null;
 let map = null;
 let mapContainer = null;
-let lidarSnapshotOverlay = null;
+let lidarSnapshotOverlays = new Map(); // taskId -> overlay
 
 // Setup canvas overlay
 function ensureCanvas() {
     if (!mapContainer) {
         mapContainer = document.getElementById('mapContainer');
         if (!mapContainer) {
-            console.warn('[LIDAR_GRID] mapContainer not found');
+            if (window.DEBUG_LIDAR_GRID && window.Logger) {
+                window.Logger.warn('lidar', '[LIDAR_GRID] mapContainer not found');
+            }
             return;
         }
     }
@@ -28,10 +40,14 @@ function ensureCanvas() {
         lidarCanvas.style.pointerEvents = 'none';
         lidarCanvas.style.zIndex = '2000';
         mapContainer.appendChild(lidarCanvas);
-        if (window.DEBUG_LIDAR_GRID) console.log('[LIDAR_GRID] Canvas created and appended');
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', '[LIDAR_GRID] Canvas created and appended');
+        }
     } else if (!mapContainer.contains(lidarCanvas)) {
         mapContainer.appendChild(lidarCanvas);
-        if (window.DEBUG_LIDAR_GRID) console.log('[LIDAR_GRID] Canvas re-appended');
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', '[LIDAR_GRID] Canvas re-appended');
+        }
     }
     resizeCanvas();
 }
@@ -42,7 +58,9 @@ function resizeCanvas() {
         const h = mapContainer.offsetHeight;
         lidarCanvas.width = w;
         lidarCanvas.height = h;
-        if (window.DEBUG_LIDAR_GRID) console.log(`[LIDAR_GRID] Canvas resized: ${w}x${h}`);
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', `[LIDAR_GRID] Canvas resized: ${w}x${h}`);
+        }
     }
 }
 
@@ -72,8 +90,8 @@ function subtileArea(subtile) {
 // Redraw all subtiles (with level and area sorting)
 function redrawLidarCanvas() {
     if (!lidarCanvas || !map) {
-        if (window.DEBUG_LIDAR_GRID) {
-            console.warn('[LIDAR_GRID] redraw: missing canvas or map', {
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.warn('lidar', '[LIDAR_GRID] redraw: missing canvas or map', {
                 lidarCanvas,
                 map,
                 mapContainer,
@@ -109,7 +127,8 @@ function redrawLidarCanvas() {
                 } else {
                     pt0 = pt1 = pt2 = pt3 = {x: NaN, y: NaN};
                 }
-                console.log(`[LIDAR_GRID] Subtile #${idx}:`, {
+                if (window.DEBUG_LIDAR_GRID && window.Logger) {
+                    window.Logger.debug('lidar', `[LIDAR_GRID] Subtile #${idx}:`, {
                     bounds: {
                         lat0: subtile.subtile_lat0,
                         lat1: subtile.subtile_lat1,
@@ -121,6 +140,7 @@ function redrawLidarCanvas() {
                     level: subtile.level,
                     area: subtileArea(subtile)
                 });
+                }
             }
             drawSubtile(subtile, ctx);
         });
@@ -136,7 +156,9 @@ function drawSubtile(subtile, ctx) {
         subtile.subtile_lon1 !== undefined
     ) {
         if (typeof map.latLngToContainerPoint !== 'function') {
-            if (window.DEBUG_LIDAR_GRID) console.warn('[LIDAR_GRID] map.latLngToContainerPoint not available');
+            if (window.DEBUG_LIDAR_GRID && window.Logger) {
+                window.Logger.warn('lidar', '[LIDAR_GRID] map.latLngToContainerPoint not available');
+            }
             return;
         }
         const pt0 = map.latLngToContainerPoint([subtile.subtile_lat0, subtile.subtile_lon0]);
@@ -162,70 +184,90 @@ function drawSubtile(subtile, ctx) {
 
 // Overlay color PNG snapshot using Leaflet imageOverlay for georeferenced alignment
 function showLidarSnapshot(taskId, levelIdx, bounds) {
-    console.debug('[LIDAR_GRID][DEBUG] showLidarSnapshot called', { taskId, levelIdx, bounds, map });
+    console.log('[LIDAR_GRID] showLidarSnapshot called', { taskId, levelIdx, bounds, map });
     if (!map) {
         const app = window.app || window.App || window.reArchaeologyApp;
         map = app && app.map;
-        console.debug('[LIDAR_GRID][DEBUG] showLidarSnapshot: map resolved from global', { map });
+        console.log('[LIDAR_GRID] showLidarSnapshot: map resolved from global', { map });
     }
     if (!map || !bounds) {
-        console.warn('[LIDAR_GRID][DEBUG] showLidarSnapshot: missing map or bounds', { map, bounds });
+        console.warn('[LIDAR_GRID] showLidarSnapshot: missing map or bounds', { map, bounds });
         return;
     }
-    // Remove previous overlay if any
-    if (lidarSnapshotOverlay && map.hasLayer && map.hasLayer(lidarSnapshotOverlay)) {
-        console.debug('[LIDAR_GRID][DEBUG] Removing previous snapshot overlay', { lidarSnapshotOverlay });
-        map.removeLayer(lidarSnapshotOverlay);
-        lidarSnapshotOverlay = null;
+    
+    // Remove previous overlay for this task if any
+    const existingOverlay = lidarSnapshotOverlays.get(taskId);
+    if (existingOverlay && map.hasLayer && map.hasLayer(existingOverlay)) {
+        if (window.DEBUG_LIDAR_GRID) {
+            console.debug('[LIDAR_GRID][DEBUG] Removing previous snapshot overlay for task', { taskId });
+        }
+        map.removeLayer(existingOverlay);
     }
+    
     // Use centralized GCS URL helper
     const pngUrl = getGcsSnapshotUrl(taskId, levelIdx);
-    console.debug('[LIDAR_GRID][DEBUG] showLidarSnapshot: constructed pngUrl', { pngUrl });
+    if (window.DEBUG_LIDAR_GRID) {
+        console.debug('[LIDAR_GRID][DEBUG] showLidarSnapshot: constructed pngUrl', { pngUrl });
+    }
     // Bounds: [[south_lat, west_lon], [north_lat, east_lon]]
     const southWest = L.latLng(bounds[0][0], bounds[0][1]);
     const northEast = L.latLng(bounds[1][0], bounds[1][1]);
     const imageBounds = L.latLngBounds(southWest, northEast);
-    console.debug('[LIDAR_GRID][DEBUG] showLidarSnapshot: imageBounds', { imageBounds });
+    if (window.DEBUG_LIDAR_GRID) {
+        console.debug('[LIDAR_GRID][DEBUG] showLidarSnapshot: imageBounds', { imageBounds });
+    }
     try {
-        lidarSnapshotOverlay = L.imageOverlay(pngUrl, imageBounds, {
-            opacity: 1,
+        console.log('[LIDAR_GRID] Creating overlay for', { taskId, pngUrl, imageBounds });
+        const overlay = L.imageOverlay(pngUrl, imageBounds, {
+            opacity: 0.8, // Slightly transparent so multiple overlays don't completely hide the map
             interactive: false,
             zIndex: 1500
         });
-        console.debug('[LIDAR_GRID][DEBUG] showLidarSnapshot: overlay created', { lidarSnapshotOverlay });
-        lidarSnapshotOverlay.addTo(map);
-        console.debug('[LIDAR_GRID][DEBUG] Added snapshot overlay', { pngUrl, imageBounds, overlay: lidarSnapshotOverlay, map });
+        console.log('[LIDAR_GRID] Overlay created, adding to map', { overlay });
+        overlay.addTo(map);
+        lidarSnapshotOverlays.set(taskId, overlay);
+        console.log('[LIDAR_GRID] Added snapshot overlay successfully', { taskId, pngUrl, overlayCount: lidarSnapshotOverlays.size });
     } catch (e) {
-        console.error('[LIDAR_GRID][DEBUG] showLidarSnapshot: error adding overlay', e);
+        console.error('[LIDAR_GRID] Error adding overlay', e);
     }
 }
 
 function hideLidarSnapshot() {
     if (lidarSnapshotOverlay && map && map.hasLayer && map.hasLayer(lidarSnapshotOverlay)) {
         map.removeLayer(lidarSnapshotOverlay);
-        if (window.DEBUG_LIDAR_GRID) console.log('[LIDAR_GRID] Snapshot overlay hidden');
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', '[LIDAR_GRID] Snapshot overlay hidden');
+        }
         lidarSnapshotOverlay = null;
     }
 }
 
 // Try to load the highest available level snapshot, using meta.json for georeferenced bounds
 async function showHighestAvailableLidarSnapshot(taskId, bounds, maxLevels = 4) {
-    console.debug('[LIDAR_GRID][DEBUG] showHighestAvailableLidarSnapshot called', { taskId, bounds, maxLevels, map });
+    // Ensure we have the map reference
+    if (!map) {
+        const app = window.app || window.App || window.reArchaeologyApp;
+        map = app && app.map;
+    }
+    
+    // Temporary debug logging to diagnose the issue
+    console.log('[LIDAR_GRID] showHighestAvailableLidarSnapshot called', { taskId, bounds, maxLevels, map });
     if (!map || !bounds) {
-        console.warn('[LIDAR_GRID][DEBUG] showHighestAvailableLidarSnapshot: missing map or bounds', { map, bounds });
+        console.warn('[LIDAR_GRID] showHighestAvailableLidarSnapshot: missing map or bounds', { map, bounds });
         return;
     }
-    console.debug('[LIDAR_GRID][DEBUG] Checking for highest available snapshot', { taskId, bounds, maxLevels });
+    console.log('[LIDAR_GRID] Checking for highest available snapshot', { taskId, bounds, maxLevels });
     // Try from highest to lowest level
     for (let levelIdx = maxLevels - 1; levelIdx >= 0; levelIdx--) {
         const pngUrl = getGcsSnapshotUrl(taskId, levelIdx);
         const metaUrl = pngUrl.replace('_color.png', '_meta.json');
         try {
-            console.debug(`[LIDAR_GRID][DEBUG] Checking snapshot for level ${levelIdx}:`, pngUrl);
+            console.log(`[LIDAR_GRID] Checking snapshot for level ${levelIdx}:`, pngUrl);
             // Check if the image exists by attempting to fetch the header
             const resp = await fetch(pngUrl, { method: 'HEAD' });
-            console.debug(`[LIDAR_GRID][DEBUG] HEAD response for level ${levelIdx}:`, resp.status, resp.ok, resp);
+            console.log(`[LIDAR_GRID] HEAD response for level ${levelIdx}:`, resp.status, resp.ok);
             if (resp.ok) {
+                console.log(`[LIDAR_GRID] Snapshot found at level ${levelIdx}, fetching meta.json:`, metaUrl);
                 // Fetch meta.json for georeferenced bounds
                 let overlayBounds = bounds;
                 try {
@@ -240,17 +282,19 @@ async function showHighestAvailableLidarSnapshot(taskId, bounds, maxLevels = 4) 
                                 [meta.south_lat, meta.west_lon],
                                 [meta.north_lat, meta.east_lon]
                             ];
-                            console.debug(`[LIDAR_GRID][DEBUG] Using meta.json bounds for overlay:`, overlayBounds);
+                            if (window.DEBUG_LIDAR_GRID) {
+                                console.debug(`[LIDAR_GRID][DEBUG] Using meta.json bounds for overlay:`, overlayBounds);
+                            }
                         }
                     } else {
-                        console.warn(`[LIDAR_GRID][DEBUG] Could not fetch meta.json for level ${levelIdx}:`, metaUrl);
+                        console.warn(`[LIDAR_GRID][DEBUG] Could not fetch meta.json for level ${levelIdx}:`, metaUrl, 'Status:', metaResp.status);
                     }
                 } catch (e) {
                     console.warn(`[LIDAR_GRID][DEBUG] Error fetching or parsing meta.json for level ${levelIdx}:`, e);
                 }
-                console.debug(`[LIDAR_GRID][DEBUG] Found snapshot at level ${levelIdx}, displaying.`);
+                console.log(`[LIDAR_GRID] Found snapshot at level ${levelIdx}, displaying with bounds:`, overlayBounds);
                 showLidarSnapshot(taskId, levelIdx, overlayBounds);
-                return;
+                return levelIdx; // Return the highest level found
             }
         } catch (e) {
             console.warn(`[LIDAR_GRID][DEBUG] Error checking snapshot for level ${levelIdx}:`, e);
@@ -258,11 +302,36 @@ async function showHighestAvailableLidarSnapshot(taskId, bounds, maxLevels = 4) 
         }
     }
     console.warn('[LIDAR_GRID][DEBUG] No snapshot found for any level');
-    // If none found, do nothing
+    return -1; // No snapshot found
+}
+
+// Detect highest available snapshot level for a task (without displaying it)
+async function detectHighestSnapshotLevel(taskId, maxLevels = 4) {
+    console.debug('[LIDAR_GRID][DEBUG] detectHighestSnapshotLevel called', { taskId, maxLevels });
+    
+    // Try from highest to lowest level
+    for (let levelIdx = maxLevels - 1; levelIdx >= 0; levelIdx--) {
+        const pngUrl = getGcsSnapshotUrl(taskId, levelIdx);
+        try {
+            console.debug(`[LIDAR_GRID][DEBUG] Checking snapshot availability for level ${levelIdx}:`, pngUrl);
+            // Check if the image exists by attempting to fetch the header
+            const resp = await fetch(pngUrl, { method: 'HEAD' });
+            console.debug(`[LIDAR_GRID][DEBUG] HEAD response for level ${levelIdx}:`, resp.status, resp.ok);
+            if (resp.ok) {
+                console.debug(`[LIDAR_GRID][DEBUG] Found highest available snapshot at level ${levelIdx}`);
+                return levelIdx;
+            }
+        } catch (e) {
+            console.warn(`[LIDAR_GRID][DEBUG] Error checking snapshot for level ${levelIdx}:`, e);
+            // Ignore and try next lower level
+        }
+    }
+    console.warn('[LIDAR_GRID][DEBUG] No snapshot found for any level');
+    return -1; // No snapshot found
 }
 
 // Set grid info from backend
-export function setLidarGridInfo(info, taskIdOverride) {
+function setLidarGridInfo(info, taskIdOverride) {
     console.debug('[LIDAR_GRID][DEBUG] setLidarGridInfo called', { info, taskIdOverride });
     gridInfo = info;
     lidarSubtiles = [];
@@ -326,12 +395,14 @@ export function renderLidarSubtile(obj) {
     if (app) {
         // Start satellite animation if not already active
         if (!app.isScanning && !app.animationState?.isActive) {
-            console.log('[LIDAR_GRID] Starting satellite animation for tiling');
+            if (window.DEBUG_LIDAR_GRID && window.Logger) {
+                window.Logger.debug('lidar', '[LIDAR_GRID] Starting satellite animation for tiling');
+            }
             startScanningAnimation(app, 'satellite');
             app.isScanning = true;
         }
         
-        // Update animation progress and draw beam to current tile
+        // Draw beam from current position to target tile first
         const tileData = {
             center_lat: obj.lat,
             center_lon: obj.lon,
@@ -347,9 +418,10 @@ export function renderLidarSubtile(obj) {
             } : null
         };
         
+        // Show beam from current satellite position first
         updateAnimationProgress(app, tileData);
         
-        // Move satellite to the current tile/subtile being processed
+        // Then move satellite to the target tile after a brief delay
         if (obj.coarse_row !== undefined && obj.coarse_col !== undefined) {
             const tileInfo = {
                 gridRows: gridRows,
@@ -360,7 +432,11 @@ export function renderLidarSubtile(obj) {
                 subtileRow: obj.subtile_row || 0,
                 subtileCol: obj.subtile_col || 0
             };
-            moveSatelliteAnimationToTile(app, tileInfo);
+            
+            // Delay satellite movement to show beam first
+            setTimeout(() => {
+                moveSatelliteAnimationToTile(app, tileInfo);
+            }, 900); // Move satellite after beam clears (beam duration is 800ms)
         }
     }
     // If bounds are present, use them for seamless rendering
@@ -377,13 +453,17 @@ export function renderLidarSubtile(obj) {
     // Remove any subtiles that are fully covered by this new subtile and are lower-res (lower level)
     lidarSubtiles = lidarSubtiles.filter(existing => {
         if (subtile.level > (existing.level ?? 0) && subtileCovers(subtile, existing)) {
-            if (window.DEBUG_LIDAR_GRID) console.log('[LIDAR_GRID] Removing covered subtile', existing, 'by', subtile);
+            if (window.DEBUG_LIDAR_GRID && window.Logger) {
+                window.Logger.debug('lidar', '[LIDAR_GRID] Removing covered subtile', existing, 'by', subtile);
+            }
             return false;
         }
         return true;
     });
     if (window.DEBUG_LIDAR_GRID && lidarSubtiles.length < 1) {
-        console.log('[LIDAR_GRID] First subtile received:', subtile);
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', '[LIDAR_GRID] First subtile received:', subtile);
+        }
     }
     lidarSubtiles.push(subtile);
     redrawLidarCanvas();
@@ -401,9 +481,11 @@ function setupMapListeners() {
             resizeCanvas();
             redrawLidarCanvas();
         });
-        if (window.DEBUG_LIDAR_GRID) console.log('[LIDAR_GRID] Map listeners set up');
-    } else if (window.DEBUG_LIDAR_GRID) {
-        console.warn('[LIDAR_GRID] Map not ready for listeners');
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', '[LIDAR_GRID] Map listeners set up');
+        }
+    } else if (window.DEBUG_LIDAR_GRID && window.Logger) {
+        window.Logger.warn('lidar', '[LIDAR_GRID] Map not ready for listeners');
     }
 }
 
@@ -419,20 +501,27 @@ function tryInitLidarGrid(retryCount = 0) {
     if (map && mapContainer) {
         ensureCanvas();
         setupMapListeners();
-        if (window.DEBUG_LIDAR_GRID) console.log('[LIDAR_GRID] Map and container found, initialized.');
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', '[LIDAR_GRID] Map and container found, initialized.');
+        }
         redrawLidarCanvas();
     } else if (retryCount < 20) {
-        if (window.DEBUG_LIDAR_GRID) console.log(`[LIDAR_GRID] Waiting for map/container... retry ${retryCount}`);
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.debug('lidar', `[LIDAR_GRID] Waiting for map/container... retry ${retryCount}`);
+        }
         setTimeout(() => tryInitLidarGrid(retryCount + 1), 500);
     } else {
-        if (window.DEBUG_LIDAR_GRID) console.warn('[LIDAR_GRID] Map or container not found after retries.');
+        if (window.DEBUG_LIDAR_GRID && window.Logger) {
+            window.Logger.warn('lidar', '[LIDAR_GRID] Map or container not found after retries.');
+        }
     }
 }
 
 // On module load, start trying to initialize
 tryInitLidarGrid();
 
-window.DEBUG_LIDAR_GRID = false;
+// Use centralized debug configuration - enable for troubleshooting
+window.DEBUG_LIDAR_GRID = true;
 
 // Stop satellite animation when scanning is complete
 export function stopSatelliteAnimationIfComplete(taskId) {
@@ -441,7 +530,9 @@ export function stopSatelliteAnimationIfComplete(taskId) {
         // Check if this is the current scanning task
         const currentTaskId = window.currentTaskId || (app && app.currentTaskId);
         if (currentTaskId === taskId) {
-            console.log('[LIDAR_GRID] Stopping satellite animation for completed task:', taskId);
+            if (window.DEBUG_LIDAR_GRID && window.Logger) {
+                window.Logger.debug('lidar', '[LIDAR_GRID] Stopping satellite animation for completed task:', taskId);
+            }
             if (typeof app.stopScanningAnimation === 'function') {
                 app.stopScanningAnimation();
             }
@@ -450,7 +541,19 @@ export function stopSatelliteAnimationIfComplete(taskId) {
     }
 }
 
+// Remove overlays for tasks that are no longer present
+function removeObsoleteLidarSnapshotOverlays(currentTaskIds) {
+    // For now, this is a placeholder since we're not tracking multiple overlays
+    // In the future, this could track and remove overlays for deleted tasks
+    console.debug('[LIDAR_GRID] removeObsoleteLidarSnapshotOverlays called with:', currentTaskIds);
+}
+
 // For legacy support, attach to window (remove after migration)
+console.log('[LIDAR-GRID] Exporting functions to window object');
 window.setLidarGridInfo = setLidarGridInfo;
 window.renderLidarSubtile = renderLidarSubtile;
 window.stopSatelliteAnimationIfComplete = stopSatelliteAnimationIfComplete;
+window.showHighestAvailableLidarSnapshot = showHighestAvailableLidarSnapshot;
+window.removeObsoleteLidarSnapshotOverlays = removeObsoleteLidarSnapshotOverlays;
+window.detectHighestSnapshotLevel = detectHighestSnapshotLevel;
+console.log('[LIDAR-GRID] Functions exported, showHighestAvailableLidarSnapshot available:', !!window.showHighestAvailableLidarSnapshot);

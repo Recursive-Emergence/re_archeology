@@ -156,25 +156,6 @@
                 <small>Diva of Archaeology</small>
             </header>
             
-            <!-- Authentication -->
-            <section class="auth-section" id="login-section">
-                <p class="login-prompt">Sign in to chat with Bella</p>
-                <div id="g_id_onload"
-                     data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
-                     data-callback="handleGoogleLogin"
-                     data-auto_prompt="false"
-                     data-itp_support="true">
-                </div>
-                <div class="g_id_signin" 
-                     data-type="standard" 
-                     data-size="medium" 
-                     data-theme="outline" 
-                     data-text="sign_in_with"
-                     data-shape="rectangular"
-                     data-logo_alignment="left">
-                </div>
-            </section>
-            
             <!-- Chat Messages -->
             <section class="chat-messages" id="chat-messages">
                 <div class="chat-welcome" id="chat-welcome">
@@ -195,6 +176,25 @@
                         Send
                     </button>
                 </form>
+            </section>
+            
+            <!-- Authentication -->
+            <section class="auth-section" id="login-section">
+                <p class="login-prompt">Sign in to chat with Bella</p>
+                <div id="g_id_onload"
+                     data-client_id="555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com"
+                     data-callback="handleGoogleLogin"
+                     data-auto_prompt="false"
+                     data-itp_support="true">
+                </div>
+                <div class="g_id_signin" 
+                     data-type="standard" 
+                     data-size="medium" 
+                     data-theme="outline" 
+                     data-text="sign_in_with"
+                     data-shape="rectangular"
+                     data-logo_alignment="left">
+                </div>
             </section>
             
             <!-- User Profile -->
@@ -233,7 +233,102 @@
     
     <!-- Map Visualization for LiDAR support -->
     <script src="js/map-visualization.js"></script>
-    <script type="module" src="js/lidar-grid.js"></script>
+    <script>
+        console.log('INLINE SCRIPT: Testing if scripts load at all');
+        
+        // Track overlays to prevent duplicates
+        window.snapshotOverlays = window.snapshotOverlays || new Map();
+        
+        // Simple snapshot function that tries different levels
+        window.showHighestAvailableLidarSnapshot = async function(taskId, bounds) {
+            console.log('[INLINE SNAPSHOT] Called for task:', taskId, 'bounds:', bounds);
+            
+            // Get map reference
+            const map = window.reArchaeologyApp && window.reArchaeologyApp.map;
+            if (!map) {
+                console.warn('[INLINE SNAPSHOT] No map available');
+                return;
+            }
+            
+            // Check if overlay already exists and is still on the map
+            const existingOverlay = window.snapshotOverlays.get(taskId);
+            if (existingOverlay && map.hasLayer(existingOverlay)) {
+                console.log('[INLINE SNAPSHOT] Overlay already exists for task:', taskId, 'skipping');
+                return; // Don't recreate if it already exists
+            }
+            
+            // Remove existing overlay only if it exists but not on map
+            if (existingOverlay) {
+                console.log('[INLINE SNAPSHOT] Cleaning up stale overlay for task:', taskId);
+                window.snapshotOverlays.delete(taskId);
+            }
+            
+            // Try levels from highest (3) to lowest (0)
+            for (let level = 3; level >= 0; level--) {
+                const pngUrl = `https://storage.googleapis.com/re_archaeology/tasks/${taskId}/snapshots/level_${level}_color.png`;
+                console.log(`[INLINE SNAPSHOT] Checking level ${level}:`, pngUrl);
+                
+                try {
+                    // Check if image exists with HEAD request
+                    const response = await fetch(pngUrl, { method: 'HEAD' });
+                    if (response.ok) {
+                        console.log(`[INLINE SNAPSHOT] Found snapshot at level ${level}, creating overlay`);
+                        
+                        // Create Leaflet image overlay
+                        const southWest = L.latLng(bounds[0][0], bounds[0][1]);
+                        const northEast = L.latLng(bounds[1][0], bounds[1][1]);
+                        const imageBounds = L.latLngBounds(southWest, northEast);
+                        
+                        console.log(`[INLINE SNAPSHOT] Image bounds:`, {
+                            southWest: [bounds[0][0], bounds[0][1]],
+                            northEast: [bounds[1][0], bounds[1][1]],
+                            center: imageBounds.getCenter(),
+                            currentMapView: map.getBounds()
+                        });
+                        
+                        const overlay = L.imageOverlay(pngUrl, imageBounds, {
+                            opacity: 1.0, // Make it fully opaque for testing
+                            interactive: false,
+                            zIndex: 2000, // Higher z-index to ensure it's on top
+                            className: 'lidar-snapshot-overlay'
+                        });
+                        
+                        // Add error handling
+                        overlay.on('load', function() {
+                            console.log(`[INLINE SNAPSHOT] Image loaded successfully for task ${taskId} at level ${level}`);
+                        });
+                        
+                        overlay.on('error', function(e) {
+                            console.error(`[INLINE SNAPSHOT] Image failed to load for task ${taskId} at level ${level}:`, e);
+                        });
+                        
+                        overlay.addTo(map);
+                        window.snapshotOverlays.set(taskId, overlay);
+                        console.log(`[INLINE SNAPSHOT] Overlay added to map for task ${taskId} at level ${level}`);
+                        
+                        // Disabled automatic zoom - let user navigate manually
+                        // if (window.snapshotOverlays.size === 1) {
+                        //     setTimeout(() => {
+                        //         map.fitBounds(imageBounds, { padding: [50, 50] });
+                        //         console.log(`[INLINE SNAPSHOT] Map zoomed to first snapshot bounds for task ${taskId}`);
+                        //     }, 1000);
+                        // }
+                        
+                        return level; // Success, return the level found
+                    }
+                } catch (error) {
+                    console.log(`[INLINE SNAPSHOT] Level ${level} not available for task ${taskId}`);
+                }
+            }
+            
+            console.warn(`[INLINE SNAPSHOT] No snapshot found for task ${taskId} at any level`);
+            return -1;
+        };
+        
+        console.log('[INLINE SCRIPT] showHighestAvailableLidarSnapshot function created');
+    </script>
+    <script src="js/lidar-grid-test.js"></script>
+    <script src="js/lidar-grid.js"></script>
     
     <!-- Task Management (ES modules) -->
     <script type="module" src="js/task-service.js"></script>

@@ -234,7 +234,7 @@ export function updateAnimationProgress(app, tileData) {
                 app.scanningIcon.style.transform = 'translateX(-50%) scale(1)';
                 app.scanningIcon.style.filter = 'drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(255, 255, 136, 0.6))';
             }
-        }, 1200);
+        }, 800); // Reduced from 1200ms to 800ms to clear before satellite moves
     }
 }
 
@@ -242,27 +242,37 @@ function drawSatelliteBeam(app, targetLatLng) {
     if (!app.map || !app.scanningIcon || !targetLatLng) return;
     if (app.satelliteBeam) app.map.removeLayer(app.satelliteBeam);
 
-    // Get the center of the scanning icon in page coordinates
-    const iconRect = app.scanningIcon.getBoundingClientRect();
-    const mapRect = app.map.getContainer().getBoundingClientRect();
-    const iconCenterX = iconRect.left + iconRect.width / 2 - mapRect.left;
-    const iconCenterY = iconRect.top + iconRect.height / 2 - mapRect.top;
-    // Convert to map lat/lng
-    const iconLatLng = app.map.containerPointToLatLng([iconCenterX, iconCenterY]);
-
-    app.satelliteBeam = L.polyline([iconLatLng, targetLatLng], {
+    // Create a custom pane for the beam to ensure it appears above tiles
+    if (!app.map.getPane('beamPane')) {
+        app.map.createPane('beamPane');
+        app.map.getPane('beamPane').style.zIndex = 10000; // Much higher than tiles (2000) and snapshots (1500)
+        app.map.getPane('beamPane').style.pointerEvents = 'none'; // Make sure it doesn't block mouse events
+    }
+    
+    // Create beam from a point above the target (simulating satellite beam from orbit)
+    const bounds = app.map.getBounds();
+    const center = bounds.getCenter();
+    
+    // Calculate beam origin point north of the target area
+    const beamOriginLat = targetLatLng.lat + (bounds.getNorth() - bounds.getSouth()) * 0.15; // 15% above target
+    const beamOriginLng = targetLatLng.lng + (Math.random() - 0.5) * 0.002; // Slight horizontal offset for variety
+    const beamOriginLatLng = L.latLng(beamOriginLat, beamOriginLng);
+    
+    app.satelliteBeam = L.polyline([beamOriginLatLng, targetLatLng], {
         color: '#ffff88',
-        weight: 2,
+        weight: 4,
         opacity: 0.9,
-        dashArray: '10, 6',
+        dashArray: '8, 4',
         interactive: false,
-        className: 'lidar-beam'
+        className: 'lidar-beam-orbital',
+        pane: 'beamPane'
     }).addTo(app.map);
+    
     if (app.satelliteBeam) {
         const beamElement = app.satelliteBeam.getElement?.();
         if (beamElement) {
             beamElement.style.animation = 'pulse-beam 0.8s ease-in-out infinite alternate';
-            beamElement.style.filter = 'drop-shadow(0 0 4px rgba(0, 255, 136, 0.6))';
+            beamElement.style.filter = 'drop-shadow(0 0 6px rgba(255, 255, 136, 0.8))';
         }
     }
 }

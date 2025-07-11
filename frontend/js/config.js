@@ -7,7 +7,7 @@ window.AppConfig = {
     // Logging configuration
     logging: {
         // Default log level: 'DEBUG', 'INFO', 'WARN', 'ERROR', 'SILENT'
-        level: 'INFO', // Set to SILENT to disable console noise by default
+        level: 'SILENT', // Set to SILENT to disable console noise by default
         
         // Enable/disable specific logging categories
         categories: {
@@ -99,9 +99,30 @@ window.setLogLevel = function(level) {
     if (window.Logger) {
         window.Logger.setLevel(level);
         window.AppConfig.logging.level = level.toUpperCase();
-        // console.log(`Log level set to: ${level.toUpperCase()}`); // Suppressed for clean UI
-        // console.log('Available levels: DEBUG, INFO, WARN, ERROR, SILENT'); // Suppressed for clean UI
-        // console.log('Example: setLogLevel("SILENT") to disable all logs'); // Suppressed for clean UI
+        console.log(`Log level set to: ${level.toUpperCase()}`);
+        console.log('Available levels: DEBUG, INFO, WARN, ERROR, SILENT');
+        console.log('Example: setLogLevel("SILENT") to disable all logs');
+    }
+};
+
+// Console helper to enable/disable debug logging
+window.enableDebug = function(enable = true) {
+    if (enable) {
+        window.AppConfig.logging.level = 'DEBUG';
+        window.AppConfig.logging.categories.app = true;
+        window.AppConfig.logging.categories.lidar = true;
+        window.AppConfig.logging.categories.map = true;
+        window.DEBUG_LIDAR_GRID = true;
+        if (window.Logger) window.Logger.setLevel('DEBUG');
+        console.log('✅ Debug logging enabled');
+    } else {
+        window.AppConfig.logging.level = 'SILENT';
+        window.AppConfig.logging.categories.app = false;
+        window.AppConfig.logging.categories.lidar = false;
+        window.AppConfig.logging.categories.map = false;
+        window.DEBUG_LIDAR_GRID = false;
+        if (window.Logger) window.Logger.setLevel('SILENT');
+        console.log('✅ Debug logging disabled');
     }
 };
 

@@ -10,8 +10,6 @@ class TaskList {
         this.refreshInterval = null;
         this.currentlySelectedTask = null;
         this.isFirstLoad = true; // Track if this is the first load for auto-navigation
-        this._rectangleZoomLevel = 3; // For cycling zoom on rectangle click
-        this._rectangleZoomLevels = [3, 5, 7, 9, 11, 13];
         
         this.init();
     }
@@ -253,6 +251,7 @@ class TaskList {
     }
 
     renderTaskRectangles() {
+        console.log(`[TASK-LIST DEBUG] renderTaskRectangles called with ${this.tasks.length} tasks`);
         // Clear existing rectangles
         this.taskRectangles.forEach((rectangle, taskId) => {
             if (this.map && rectangle) {
@@ -265,23 +264,10 @@ class TaskList {
         // Add new rectangles and show snapshots
         const currentTaskIds = [];
         for (const task of this.tasks) {
-            // Always compute bounds using the same logic as createTaskRectangle
-            let bounds = null;
-            if (task.bounds && Array.isArray(task.bounds) && task.bounds.length === 2) {
-                bounds = task.bounds;
-            } else if (task.start_coordinates && task.range) {
-                const [lat, lon] = task.start_coordinates;
-                const { width_km, height_km } = task.range || {};
-                if (typeof lat === 'number' && typeof lon === 'number' && typeof width_km === 'number' && typeof height_km === 'number') {
-                    const latOffset = height_km / 111;
-                    const lonOffset = width_km / (111 * Math.cos(lat * Math.PI / 180));
-                    bounds = [
-                        [lat - latOffset / 2, lon - lonOffset / 2], // Southwest
-                        [lat + latOffset / 2, lon + lonOffset / 2]  // Northeast
-                    ];
-                }
-            } else {
-                // No bounds, start_coordinates, or range for task; skipping overlay and rectangle
+            const bounds = this.calculateTaskBounds(task);
+            if (!bounds) {
+                console.warn(`[TASK_LIST] No bounds available for task ${task.id}`);
+                continue;
             }
             const rectangle = this.createTaskRectangle(task, bounds);
             if (rectangle && this.map) {
@@ -294,10 +280,17 @@ class TaskList {
             } else if (!rectangle) {
                 // Skipped rectangle for task due to missing or invalid bounds
             }
-            // Show overlay for each task with available bounds
-            if (window.showHighestAvailableLidarSnapshot) {
-                window.showHighestAvailableLidarSnapshot(task.id, bounds);
+            
+            // Show snapshot overlay for all tasks with bounds (not just completed)
+            if (bounds && window.showHighestAvailableLidarSnapshot) {
+                const boundsArray = [
+                    [bounds[0][0], bounds[0][1]], // southwest
+                    [bounds[1][0], bounds[1][1]]  // northeast
+                ];
+                console.log(`[TASK-LIST] Attempting to show snapshot for task ${task.id} (${task.status})`);
+                window.showHighestAvailableLidarSnapshot(task.id, boundsArray);
             }
+            
             currentTaskIds.push(task.id);
         }
         // Remove overlays for tasks that are no longer present
@@ -306,28 +299,18 @@ class TaskList {
         }
     }
 
-    createTaskRectangle(task, backendBounds = null) {
-        // Use backend bounds if available, else fallback to center-based calculation
-        let bounds = null;
-        let actualWidth = null, actualHeight = null;
-        if (backendBounds && Array.isArray(backendBounds) && backendBounds.length === 2) {
-            bounds = backendBounds;
-        } else if (task.bounds && Array.isArray(task.bounds) && task.bounds.length === 2) {
-            bounds = task.bounds;
-        } else if (task.start_coordinates && task.range) {
-            const [lat, lon] = task.start_coordinates;
-            const { width_km, height_km } = task.range;
-            actualWidth = width_km;
-            actualHeight = height_km;
-            const latOffset = actualHeight / 111;
-            const lonOffset = actualWidth / (111 * Math.cos(lat * Math.PI / 180));
-            bounds = [
-                [lat - latOffset / 2, lon - lonOffset / 2], // Southwest
-                [lat + latOffset / 2, lon + lonOffset / 2]  // Northeast
-            ];
-        } else {
-            // If neither bounds nor start_coordinates/range are available, skip
+    createTaskRectangle(task, providedBounds = null) {
+        // Use provided bounds or calculate from task data
+        const bounds = providedBounds || this.calculateTaskBounds(task);
+        if (!bounds) {
             return null;
+        }
+        
+        // Extract dimensions for tooltip (if available)
+        let actualWidth = null, actualHeight = null;
+        if (task.range) {
+            actualWidth = task.range.width_km;
+            actualHeight = task.range.height_km;
         }
         const statusColor = this.taskService.getStatusColor(task.status);
         const opacity = Math.max(0.3, task.decay_value);
@@ -338,40 +321,48 @@ class TaskList {
             fillColor: statusColor,
             fillOpacity: opacity * 0.2,
             className: `task-rectangle task-${task.status}`,
-            interactive: true,
+            interactive: false,
             bubblingMouseEvents: false
         });
         // Add pulsing animation for running tasks
         if (task.status === 'running') {
             rectangle.getElement()?.classList.add('pulse');
         }
-        // Add click handler for navigation
-        rectangle.on('click', (e) => {
-            L.DomEvent.stopPropagation(e);
-            if (this.map) {
-                const bounds = rectangle.getBounds();
-                const center = bounds.getCenter();
-                let idx = this._rectangleZoomLevels.indexOf(this._rectangleZoomLevel);
-                idx = (idx + 1) % this._rectangleZoomLevels.length;
-                this._rectangleZoomLevel = this._rectangleZoomLevels[idx];
-                this.map.setView(center, this._rectangleZoomLevel, { animate: true });
-            }
-        });
-        // Add tooltip
-        const tooltipContent = `
-            <div class="task-tooltip">
-                <strong>Task ${task.id.slice(0, 8)}</strong><br>
-                Status: ${this.taskService.getStatusText(task.status)}<br>
-                Findings: ${task.findings ? task.findings.length : 0}<br>
-                Requested: ${task.range && task.range.width_km && task.range.height_km ? `${task.range.width_km}×${task.range.height_km} km` : ''}
-                ${task.status === 'running' && actualWidth && actualHeight ? `<br>Scanning: ${actualWidth.toFixed(1)}×${actualHeight.toFixed(1)} km` : ''}
-            </div>
-        `;
-        rectangle.bindTooltip(tooltipContent, {
-            sticky: true,
-            direction: 'top'
-        });
         return rectangle;
+    }
+
+    /**
+     * Calculate bounds from task coordinates and range.
+     * 
+     * COORDINATE SYSTEM: Based on empirical testing with lidar snapshot alignment:
+     * - Latitude: start_coordinates represents the CENTER of the scan area
+     * - Longitude: start_coordinates represents the WEST EDGE of the scan area
+     * 
+     * This hybrid approach aligns task rectangles with lidar snapshot overlays.
+     */
+    calculateTaskBounds(task) {
+        // Use backend bounds if available
+        if (task.bounds && Array.isArray(task.bounds) && task.bounds.length === 2) {
+            return task.bounds;
+        }
+        
+        // Calculate from start_coordinates and range
+        if (task.start_coordinates && task.range) {
+            const [lat, lon] = task.start_coordinates;
+            const { width_km, height_km } = task.range;
+            
+            // Convert km to approximate degrees
+            const latOffset = height_km / 111;
+            const lonOffset = width_km / (111 * Math.cos(lat * Math.PI / 180));
+            
+            // Hybrid coordinate system: center latitude, west longitude
+            return [
+                [lat - latOffset / 2, lon], // Southwest: center latitude, west longitude
+                [lat + latOffset / 2, lon + lonOffset]  // Northeast: center + offset, west + offset
+            ];
+        }
+        
+        return null;
     }
 
     navigateToTask(taskId) {
@@ -392,19 +383,10 @@ class TaskList {
         
         try {
             // Use cached task bounds for instant navigation
-            let bounds;
-            if (task.bounds && Array.isArray(task.bounds)) {
-                bounds = task.bounds;
-            } else {
-                // Calculate bounds from task data
-                const [lat, lon] = task.start_coordinates;
-                const { width_km, height_km } = task.range;
-                const latOffset = height_km / 111;
-                const lonOffset = width_km / (111 * Math.cos(lat * Math.PI / 180));
-                bounds = [
-                    [lat - latOffset / 2, lon - lonOffset / 2], // Southwest
-                    [lat + latOffset / 2, lon + lonOffset / 2]  // Northeast
-                ];
+            const bounds = this.calculateTaskBounds(task);
+            if (!bounds) {
+                console.error('No bounds available for navigation to task:', task.id);
+                return;
             }
             
             // Fast navigation with shorter duration
@@ -459,18 +441,10 @@ class TaskList {
         
         try {
             // Calculate bounds from cached task data
-            let bounds;
-            if (task.bounds && Array.isArray(task.bounds)) {
-                bounds = task.bounds;
-            } else {
-                const [lat, lon] = task.start_coordinates;
-                const { width_km, height_km } = task.range;
-                const latOffset = height_km / 111;
-                const lonOffset = width_km / (111 * Math.cos(lat * Math.PI / 180));
-                bounds = [
-                    [lat - latOffset / 2, lon - lonOffset / 2],
-                    [lat + latOffset / 2, lon + lonOffset / 2]
-                ];
+            const bounds = this.calculateTaskBounds(task);
+            if (!bounds) {
+                console.error('No bounds available for smooth navigation to task:', task.id);
+                return;
             }
             
             const targetBounds = L.latLngBounds(bounds);
@@ -640,6 +614,17 @@ class TaskList {
             if (!this.lastRunningTaskIds || JSON.stringify(taskIds) !== JSON.stringify(this.lastRunningTaskIds)) {
                 // Auto-navigating to running task (silent)
                 this.lastRunningTaskIds = taskIds;
+                
+                // Trigger comprehensive catch-up for all running tasks with smart resume
+                console.log('[TASK-LIST] Triggering smart resume for running tasks:', runningTasks.map(t => t.id));
+                if (typeof window.triggerCatchupForRunningTasks === 'function') {
+                    window.triggerCatchupForRunningTasks(window.reArchaeologyApp, runningTasks);
+                } else {
+                    // Fallback: import and trigger catch-up
+                    import('./websocket.js').then(({ triggerCatchupForRunningTasks }) => {
+                        triggerCatchupForRunningTasks(window.reArchaeologyApp, runningTasks);
+                    }).catch(err => console.warn('Failed to import catch-up function:', err));
+                }
             }
             
             // Enable heatmap mode for running tasks
@@ -707,3 +692,4 @@ class TaskList {
 
 // Export the class
 window.TaskList = TaskList;
+console.log('[TASK-LIST] Module loaded and TaskList exported to window');

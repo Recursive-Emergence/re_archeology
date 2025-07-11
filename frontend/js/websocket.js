@@ -1,6 +1,88 @@
 // WebSocket connection and message handling
 let lidarResolutionFetched = false;
 
+/*
+ * Smart Resume WebSocket Messages:
+ * 
+ * Frontend -> Backend:
+ * {
+ *   type: 'request_catchup',
+ *   session_id: string,
+ *   task_id: string,
+ *   highest_snapshot_level: number,  // -1 if no snapshots found, 0-3 for levels
+ *   resume_from_level: number,       // next level to scan (highest_snapshot_level + 1)
+ *   timestamp: string
+ * }
+ * 
+ * {
+ *   type: 'resume_task',
+ *   task_id: string,
+ *   highest_snapshot_level: number,
+ *   resume_from_level: number,
+ *   timestamp: string
+ * }
+ * 
+ * Backend should use resume_from_level to determine where to restart scanning
+ * instead of starting from level 0.
+ */
+
+/**
+ * Trigger comprehensive catch-up for running tasks after page refresh
+ */
+export function triggerCatchupForRunningTasks(app, runningTasks) {
+    console.log('[WEBSOCKET] Triggering catch-up for running tasks:', runningTasks.map(t => t.id));
+    
+    runningTasks.forEach(async (task) => {
+        // Set session info if available
+        if (task.session_id || task.sessions?.scan) {
+            app.currentLidarSession = task.session_id || task.sessions.scan;
+        }
+        
+        // Detect highest available snapshot level for smart resume
+        let highestSnapshotLevel = -1;
+        if (window.detectHighestSnapshotLevel) {
+            try {
+                highestSnapshotLevel = await window.detectHighestSnapshotLevel(task.id);
+                console.log(`[WEBSOCKET] Detected highest snapshot level for task ${task.id}: ${highestSnapshotLevel}`);
+            } catch (err) {
+                console.warn(`[WEBSOCKET] Failed to detect snapshot level for task ${task.id}:`, err);
+            }
+        }
+        
+        // Load cached bitmap for visual restoration
+        if (app.loadCachedBitmapForTask) {
+            app.loadCachedBitmapForTask(task.id).catch(err => 
+                console.warn('[WEBSOCKET] Failed to load cached bitmap during catch-up:', err)
+            );
+        }
+        
+        // Load cached tiles for detailed restoration
+        if (app.loadCachedTilesForTask && task.grid_x && task.grid_y) {
+            const options = {
+                gridX: task.grid_x,
+                gridY: task.grid_y,
+                levels: task.levels || undefined
+            };
+            app.loadCachedTilesForTask(task.id, options).catch(err => 
+                console.warn('[WEBSOCKET] Failed to load cached tiles during catch-up:', err)
+            );
+        }
+        
+        // Send catch-up request with snapshot level information
+        if (app.websocket && app.websocket.readyState === WebSocket.OPEN && app.currentLidarSession) {
+            console.log('[WEBSOCKET] Sending smart catch-up request for session:', app.currentLidarSession);
+            app.websocket.send(JSON.stringify({
+                type: 'request_catchup',
+                session_id: app.currentLidarSession,
+                task_id: task.id,
+                highest_snapshot_level: highestSnapshotLevel,
+                resume_from_level: highestSnapshotLevel >= 0 ? highestSnapshotLevel + 1 : 0,
+                timestamp: new Date().toISOString()
+            }));
+        }
+    });
+}
+
 export function connectWebSocket(app) {
     try {
         if (app.websocket) {
@@ -18,6 +100,41 @@ export function connectWebSocket(app) {
                 type: 'ping',
                 timestamp: new Date().toISOString()
             }));
+            
+            // Request catch-up for any ongoing sessions with snapshot level detection
+            if (app.currentLidarSession && app.currentTaskId) {
+                console.log('[WEBSOCKET] Requesting catch-up for session:', app.currentLidarSession);
+                
+                // Try to detect highest snapshot level for smart resume
+                if (window.detectHighestSnapshotLevel) {
+                    window.detectHighestSnapshotLevel(app.currentTaskId).then(highestSnapshotLevel => {
+                        console.log(`[WEBSOCKET] Detected highest snapshot level for reconnection: ${highestSnapshotLevel}`);
+                        app.websocket.send(JSON.stringify({
+                            type: 'request_catchup',
+                            session_id: app.currentLidarSession,
+                            task_id: app.currentTaskId,
+                            highest_snapshot_level: highestSnapshotLevel,
+                            resume_from_level: highestSnapshotLevel >= 0 ? highestSnapshotLevel + 1 : 0,
+                            timestamp: new Date().toISOString()
+                        }));
+                    }).catch(err => {
+                        console.warn('[WEBSOCKET] Failed to detect snapshot level on reconnect:', err);
+                        // Fallback to basic catch-up request
+                        app.websocket.send(JSON.stringify({
+                            type: 'request_catchup',
+                            session_id: app.currentLidarSession,
+                            timestamp: new Date().toISOString()
+                        }));
+                    });
+                } else {
+                    // Fallback to basic catch-up request
+                    app.websocket.send(JSON.stringify({
+                        type: 'request_catchup',
+                        session_id: app.currentLidarSession,
+                        timestamp: new Date().toISOString()
+                    }));
+                }
+            }
         };
         app.websocket.onmessage = (event) => {
             try {
@@ -157,6 +274,16 @@ export function handleWebSocketMessage(app, data) {
                 }, 100);
             }
             
+            // Trigger catch-up for resumed task
+            if (data.task_id && app.loadCachedBitmapForTask) {
+                console.log('[WEBSOCKET] Triggering catch-up for resumed task:', data.task_id);
+                setTimeout(() => {
+                    app.loadCachedBitmapForTask(data.task_id).catch(err => 
+                        console.warn('[WEBSOCKET] Failed to catch-up bitmap for resumed task:', err)
+                    );
+                }, 200);
+            }
+            
             // Immediately refresh task list to show updated status
             if (app.taskList && typeof app.taskList.loadTasks === 'function') {
                 // Clear cache first to ensure fresh data
@@ -242,3 +369,58 @@ export function handleWebSocketMessage(app, data) {
             break;
     }
 }
+
+/**
+ * Smart resume function for individual tasks
+ */
+export async function smartResumeTask(app, taskId) {
+    console.log('[WEBSOCKET] Smart resume for task:', taskId);
+    
+    try {
+        // Detect highest available snapshot level
+        let highestSnapshotLevel = -1;
+        if (window.detectHighestSnapshotLevel) {
+            highestSnapshotLevel = await window.detectHighestSnapshotLevel(taskId);
+            console.log(`[WEBSOCKET] Detected highest snapshot level for task ${taskId}: ${highestSnapshotLevel}`);
+        }
+        
+        // Load cached bitmap for visual restoration
+        if (app.loadCachedBitmapForTask) {
+            await app.loadCachedBitmapForTask(taskId);
+        }
+        
+        // If WebSocket is connected, send smart resume request
+        if (app.websocket && app.websocket.readyState === WebSocket.OPEN) {
+            console.log('[WEBSOCKET] Sending smart resume request for task:', taskId);
+            app.websocket.send(JSON.stringify({
+                type: 'resume_task',
+                task_id: taskId,
+                highest_snapshot_level: highestSnapshotLevel,
+                resume_from_level: highestSnapshotLevel >= 0 ? highestSnapshotLevel + 1 : 0,
+                timestamp: new Date().toISOString()
+            }));
+            
+            return {
+                success: true,
+                resumeFromLevel: highestSnapshotLevel >= 0 ? highestSnapshotLevel + 1 : 0,
+                highestSnapshotLevel: highestSnapshotLevel
+            };
+        }
+        
+        return {
+            success: false,
+            error: 'WebSocket not connected'
+        };
+        
+    } catch (error) {
+        console.error('[WEBSOCKET] Failed to smart resume task:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// Make catch-up functions available globally
+window.triggerCatchupForRunningTasks = triggerCatchupForRunningTasks;
+window.smartResumeTask = smartResumeTask;

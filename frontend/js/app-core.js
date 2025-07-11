@@ -154,10 +154,10 @@ export class REArchaeologyApp {
             
             // Enable heatmap mode by default to be ready for resumed tasks
             if (this.mapVisualization && typeof this.mapVisualization.enableHeatmapMode === 'function') {
-                console.log('🔥 Enabling heatmap mode for resumed tasks');
+                if (window.Logger) window.Logger.debug('app', '🔥 Enabling heatmap mode for resumed tasks');
                 this.mapVisualization.enableHeatmapMode();
             } else {
-                console.warn('❌ Cannot enable heatmap mode - mapVisualization not ready');
+                if (window.Logger) window.Logger.warn('app', '❌ Cannot enable heatmap mode - mapVisualization not ready');
             }
             
             // Initialize task list
@@ -325,7 +325,7 @@ export class REArchaeologyApp {
 
     handleLidarTileUpdate(data) {
         if (window.DEBUG_LIDAR_GRID) {
-            console.log('[LIDAR_TILE] handleLidarTileUpdate received:', JSON.stringify(data));
+            if (window.Logger) window.Logger.debug('lidar', '[LIDAR_TILE] handleLidarTileUpdate received:', JSON.stringify(data));
         }
         // Accepts backend tile messages: {coarse_row, coarse_col, subtile_row, subtile_col, subtiles_per_side, level, elevation, ...}
         // Robustly map snake_case to camelCase for frontend rendering
@@ -376,7 +376,7 @@ export class REArchaeologyApp {
             const subtile_lon0 = data.subtile_lon0 ?? data.subtileLon0;
             const subtile_lon1 = data.subtile_lon1 ?? data.subtileLon1;
             if (window.DEBUG_LIDAR_GRID) {
-                console.log('[LIDAR_TILE] Rendering subtile:', {
+                if (window.Logger) window.Logger.debug('lidar', '[LIDAR_TILE] Rendering subtile:', {
                     gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol, level, color, elev, lat, lon,
                     subtile_lat0, subtile_lat1, subtile_lon0, subtile_lon1, dataset: data.dataset, resolution: data.resolution
                 });
@@ -387,7 +387,7 @@ export class REArchaeologyApp {
             });
         } else {
             if (window.DEBUG_LIDAR_GRID) {
-                console.warn('[LIDAR_TILE] window.renderLidarSubtile is not defined');
+                if (window.Logger) window.Logger.warn('lidar', '[LIDAR_TILE] window.renderLidarSubtile is not defined');
             }
         }
         // Move satellite animation to current tile/subtile
@@ -406,15 +406,17 @@ export class REArchaeologyApp {
 
     // --- Map and scan area helpers ---
     initializeMapVisualization() { 
-        console.log('🗺️ Initializing map visualization...');
-        console.log('   - window.MapVisualization:', typeof window.MapVisualization);
-        console.log('   - this.map:', !!this.map);
+        if (window.Logger) {
+            window.Logger.debug('app', '🗺️ Initializing map visualization...');
+            window.Logger.debug('app', '   - window.MapVisualization:', typeof window.MapVisualization);
+            window.Logger.debug('app', '   - this.map:', !!this.map);
+        }
         
         if (typeof window.MapVisualization === 'function' && this.map) {
             this.mapVisualization = new window.MapVisualization(this.map);
-            console.log('✅ MapVisualization initialized');
+            if (window.Logger) window.Logger.debug('app', '✅ MapVisualization initialized');
         } else {
-            console.warn('❌ MapVisualization initialization failed');
+            if (window.Logger) window.Logger.warn('app', '❌ MapVisualization initialization failed');
         }
     }
     calculateOptimalBorderWeight() { return this.map ? (this.map.getZoom() >= 16 ? 3 : this.map.getZoom() >= 14 ? 2.5 : this.map.getZoom() >= 12 ? 2 : 1.5) : 2; }
@@ -729,20 +731,37 @@ export class REArchaeologyApp {
     setupGoogleAuth() {
         // Attach Google login callback
         window.handleGoogleLogin = this.handleGoogleLogin.bind(this);
-        // Explicitly render the Google button if needed
-        if (window.google && window.google.accounts && window.google.accounts.id) {
-            window.google.accounts.id.initialize({
-                client_id: window.AppConfig.googleClientId,
-                callback: window.handleGoogleLogin,
-                auto_select: false
-            });
-            window.google.accounts.id.renderButton(
-                document.querySelector('.g_id_signin'),
-                { theme: 'outline', size: 'medium' }
-            );
-        } else {
-            // If Google script hasn't loaded yet, try again shortly
+        
+        // Check if Google script has loaded
+        if (typeof window.google === 'undefined' || !window.google.accounts) {
+            // Google script hasn't loaded yet, try again shortly
             setTimeout(() => this.setupGoogleAuth(), 500);
+            return;
+        }
+        
+        try {
+            // Initialize Google Auth
+            window.google.accounts.id.initialize({
+                client_id: window.AppConfig.googleClientId || '555743158084-ribsom4oerhv0jgohosoit190p8bh72n.apps.googleusercontent.com',
+                callback: window.handleGoogleLogin,
+                auto_select: false,
+                cancel_on_tap_outside: false
+            });
+            
+            // Render the button
+            const buttonContainer = document.querySelector('.g_id_signin');
+            if (buttonContainer) {
+                window.google.accounts.id.renderButton(buttonContainer, {
+                    theme: 'outline',
+                    size: 'medium',
+                    text: 'sign_in_with',
+                    shape: 'rectangular'
+                });
+            }
+        } catch (error) {
+            if (window.Logger) window.Logger.error('app', 'Google Auth setup failed:', error);
+            // Try again after a delay
+            setTimeout(() => this.setupGoogleAuth(), 1000);
         }
     }
 
@@ -848,7 +867,7 @@ export class REArchaeologyApp {
         if (this.discoveredSitesBounds && this.taskList) {
             const runningTasks = this.taskList.tasks.filter(task => task.status === 'running');
             if (runningTasks.length === 0) {
-                console.log('No running tasks found, smoothly transitioning to discovered sites');
+                if (window.Logger) window.Logger.debug('app', 'No running tasks found, smoothly transitioning to discovered sites');
                 // Smooth transition to discovered sites
                 this.map.flyToBounds(this.discoveredSitesBounds, { 
                     padding: [40, 40], 
@@ -896,7 +915,7 @@ export class REArchaeologyApp {
         const seenTiles = new Set();
         this.lidarGridRows = gridY;
         this.lidarGridCols = gridX;
-        console.log('[LIDAR_RESTORE] loadCachedTilesForTask', { taskId, gridX, gridY, levels });
+        if (window.Logger) window.Logger.debug('lidar', '[LIDAR_RESTORE] loadCachedTilesForTask', { taskId, gridX, gridY, levels });
         for (let levelIdx = 0; levelIdx < levels.length; ++levelIdx) {
             const subtiles = levels[levelIdx].subtiles;
             for (let coarseRow = 0; coarseRow < gridY; ++coarseRow) {
@@ -906,7 +925,7 @@ export class REArchaeologyApp {
                             const tileKey = `${levelIdx}-${coarseRow}-${coarseCol}-${subtileRow}-${subtileCol}`;
                             if (seenTiles.has(tileKey)) continue;
                             const url = `${gcsBaseUrl}level_${levelIdx}/tile_${coarseRow}_${coarseCol}/subtile_${subtileRow}_${subtileCol}.json`;
-                            console.log('[LIDAR_RESTORE] Fetching tile', url);
+                            if (window.Logger) window.Logger.debug('lidar', '[LIDAR_RESTORE] Fetching tile', url);
                             try {
                                 const resp = await fetch(url);
                                 if (!resp.ok) continue;
@@ -934,5 +953,73 @@ export class REArchaeologyApp {
         if (!this._restoredTileKeys) return false;
         const key = `${tileData.level}-${tileData.coarse_row}-${tileData.coarse_col}-${tileData.subtile_row}-${tileData.subtile_col}`;
         return this._restoredTileKeys.has(key);
+    }
+
+    /**
+     * Load cached bitmap snapshots for a task to restore visual state after page refresh
+     * This uses the existing snapshot loading system in lidar-grid.js
+     */
+    async loadCachedBitmapForTask(taskId) {
+        try {
+            console.log('[BITMAP_RESTORE] Loading cached bitmap for task:', taskId);
+            
+            // Get task data from task list to determine bounds
+            const task = this.taskList?.tasks?.find(t => t.id === taskId);
+            if (!task) {
+                console.warn('[BITMAP_RESTORE] Task not found in task list:', taskId);
+                return;
+            }
+            
+            // Calculate bounds for the task
+            let bounds = null;
+            if (task.bounds && Array.isArray(task.bounds) && task.bounds.length === 2) {
+                bounds = task.bounds;
+            } else if (task.start_coordinates && task.range) {
+                const [lat, lon] = task.start_coordinates;
+                const { width_km, height_km } = task.range;
+                const latOffset = height_km / 111;
+                const lonOffset = width_km / (111 * Math.cos(lat * Math.PI / 180));
+                bounds = [
+                    [lat - latOffset / 2, lon - lonOffset / 2], // Southwest
+                    [lat + latOffset / 2, lon + lonOffset / 2]  // Northeast
+                ];
+            }
+            
+            if (!bounds) {
+                console.warn('[BITMAP_RESTORE] No bounds available for task:', taskId);
+                return;
+            }
+            
+            // Use the existing snapshot loading system
+            if (window.showHighestAvailableLidarSnapshot) {
+                console.log('[BITMAP_RESTORE] Calling showHighestAvailableLidarSnapshot for task:', taskId);
+                await window.showHighestAvailableLidarSnapshot(taskId, bounds);
+                console.log('[BITMAP_RESTORE] Successfully loaded cached bitmap for task:', taskId);
+            } else {
+                console.warn('[BITMAP_RESTORE] showHighestAvailableLidarSnapshot not available');
+            }
+            
+        } catch (error) {
+            console.error('[BITMAP_RESTORE] Failed to load cached bitmap for task:', taskId, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Clear cached bitmap overlays for cleanup
+     */
+    clearCachedBitmaps() {
+        try {
+            console.log('[BITMAP_RESTORE] Clearing cached bitmap overlays');
+            
+            // Use the existing overlay removal system
+            if (window.removeObsoleteLidarSnapshotOverlays) {
+                window.removeObsoleteLidarSnapshotOverlays([]);
+            }
+            
+            console.log('[BITMAP_RESTORE] Successfully cleared cached bitmap overlays');
+        } catch (error) {
+            console.error('[BITMAP_RESTORE] Failed to clear cached bitmap overlays:', error);
+        }
     }
 } // End of class
