@@ -1,7 +1,10 @@
 import ee
 import numpy as np
 import logging
+import threading
+import signal
 from typing import Dict, Optional, Any
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from .registry import DatasetMetadata # Assuming registry.py is in the same directory
 
 # Configure logging
@@ -17,7 +20,7 @@ class LidarConnector:
         """Initialize the connector, e.g., authenticate with a service."""
         raise NotImplementedError
 
-    def fetch_patch(self, lat: float, lon: float, size_m: int, target_resolution_m: float, data_type_to_fetch: str) -> Optional[np.ndarray]:
+    def fetch_patch(self, lat: float, lon: float, size_m: int, target_resolution_m: float, data_type_to_fetch: str, stop_event: Optional[threading.Event] = None) -> Optional[np.ndarray]:
         """
         Fetch a patch of LIDAR data for a specific data type (e.g., DSM, DTM).
 
@@ -27,6 +30,7 @@ class LidarConnector:
             size_m: Desired size of the patch in meters (square).
             target_resolution_m: Desired resolution in meters per pixel.
             data_type_to_fetch: The type of data product to fetch (e.g., "DSM", "DTM").
+            stop_event: Optional threading event to check for cancellation.
 
         Returns:
             A NumPy array containing the elevation data, or None if fetching fails.
@@ -80,7 +84,75 @@ class GEEConnector(LidarConnector):
         # Set the instance flag to match the class flag
         self.ee_initialized = GEEConnector._ee_initialized
 
-    def fetch_patch(self, lat: float, lon: float, size_m: int, target_resolution_m: float, data_type_to_fetch: str) -> Optional[np.ndarray]:
+    def _get_info_with_timeout(self, ee_object, stop_event: Optional[threading.Event] = None, timeout: float = 30.0):
+        """
+        Execute Earth Engine getInfo() with timeout and cancellation support.
+        
+        Args:
+            ee_object: Earth Engine object to call getInfo() on
+            stop_event: Threading event to check for cancellation
+            timeout: Maximum time to wait for the operation (seconds)
+            
+        Returns:
+            Result of getInfo() or None if cancelled/timeout
+        """
+        import signal
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+        
+        def get_info_worker():
+            """Worker function that calls getInfo() in a separate thread."""
+            try:
+                return ee_object.getInfo()
+            except Exception as e:
+                logger.error(f"Earth Engine getInfo() failed: {e}")
+                return None
+        
+        # Check if already cancelled
+        if stop_event and stop_event.is_set():
+            logger.info(f"Stop requested before getInfo for {self.dataset_metadata.name}")
+            return None
+        
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                # Submit the Earth Engine operation
+                future = executor.submit(get_info_worker)
+                
+                # Poll for completion while checking stop_event
+                poll_interval = 0.5  # Check every 500ms
+                elapsed = 0.0
+                
+                while elapsed < timeout:
+                    # Check if stop was requested
+                    if stop_event and stop_event.is_set():
+                        logger.info(f"Stop requested during getInfo for {self.dataset_metadata.name}")
+                        future.cancel()  # Try to cancel (may not work if already running)
+                        return None
+                    
+                    # Check if the operation completed
+                    if future.done():
+                        try:
+                            result = future.result(timeout=0.1)
+                            logger.debug(f"Earth Engine getInfo completed for {self.dataset_metadata.name}")
+                            return result
+                        except Exception as e:
+                            logger.error(f"Earth Engine getInfo failed for {self.dataset_metadata.name}: {e}")
+                            return None
+                    
+                    # Wait before next poll
+                    import time
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+                
+                # Timeout reached
+                logger.warning(f"Earth Engine getInfo timeout after {timeout}s for {self.dataset_metadata.name}")
+                future.cancel()
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in timeout wrapper for {self.dataset_metadata.name}: {e}")
+            return None
+
+    def fetch_patch(self, lat: float, lon: float, size_m: int, target_resolution_m: float, data_type_to_fetch: str, stop_event: Optional[threading.Event] = None) -> Optional[np.ndarray]:
         """
         Fetch a specific LIDAR data product (e.g., DSM, DTM) from Google Earth Engine.
         """
@@ -94,6 +166,11 @@ class GEEConnector(LidarConnector):
             return None
 
         try:
+            # Check if stop requested before starting
+            if stop_event and stop_event.is_set():
+                logger.info(f"Stop requested before fetching GEE data for {self.dataset_metadata.name}")
+                return None
+
             logger.info(f"Fetching GEE data for {self.dataset_metadata.name} ({data_type_to_fetch} using band '{band_name}') at ({lat:.4f}, {lon:.4f}), size: {size_m}m, target_res: {target_resolution_m}m/px")
 
             center = ee.Geometry.Point([lon, lat])
@@ -101,6 +178,11 @@ class GEEConnector(LidarConnector):
             # Create a proper square bounds in meters using buffer
             # This should create a more square result than using degrees
             square_bounds = center.buffer(size_m / 2.0).bounds()
+
+            # Check stop event after geometry operations
+            if stop_event and stop_event.is_set():
+                logger.info(f"Stop requested during geometry setup for {self.dataset_metadata.name}")
+                return None
 
             # Get the GEE image or image collection ID from provider_info
             image_asset_id: Optional[str] = None
@@ -124,6 +206,11 @@ class GEEConnector(LidarConnector):
             # UTM zone is better for square patches than lat/lon
             image_reprojected = image.reproject(crs='EPSG:3857', scale=target_resolution_m)  # Web Mercator for better square sampling
 
+            # Check stop event before expensive operations
+            if stop_event and stop_event.is_set():
+                logger.info(f"Stop requested before pixel calculation for {self.dataset_metadata.name}")
+                return None
+
             # Calculate expected dimensions for validation
             expected_pixels_dim = int(size_m / target_resolution_m)
             expected_total_pixels = expected_pixels_dim * expected_pixels_dim
@@ -137,6 +224,11 @@ class GEEConnector(LidarConnector):
                 logger.info(f"Auto-adjusting resolution from {target_resolution_m}m to {new_resolution:.1f}m for {self.dataset_metadata.name}")
                 image_reprojected = image.reproject(crs='EPSG:3857', scale=new_resolution)
             
+            # Check stop event before sampleRectangle (can be time-consuming)
+            if stop_event and stop_event.is_set():
+                logger.info(f"Stop requested before sampleRectangle for {self.dataset_metadata.name}")
+                return None
+
             try:
                 rect_data = image_reprojected.sampleRectangle(
                     region=square_bounds,
@@ -150,7 +242,13 @@ class GEEConnector(LidarConnector):
                     logger.error(f"GEE Error fetching {self.dataset_metadata.name} (band: {band_name}) data: {e}")
                     return None
             
-            elev_block = rect_data.get(band_name).getInfo()
+            # Check stop event before the most expensive operation (getInfo)
+            if stop_event and stop_event.is_set():
+                logger.info(f"Stop requested before getInfo for {self.dataset_metadata.name}")
+                return None
+
+            # Use timeout wrapper for the critical getInfo() call
+            elev_block = self._get_info_with_timeout(rect_data.get(band_name), stop_event, timeout=30.0)
             
             if elev_block is None:
                 logger.error(f"No data returned from sampleRectangle for band '{band_name}' in {self.dataset_metadata.name}")

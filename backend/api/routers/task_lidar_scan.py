@@ -23,11 +23,11 @@ class LidarScanTaskManager:
         self.session_stopped_callbacks = {}  # task_id -> callback
         self.logger = logging.getLogger("backend.api.routers.task_lidar_scan")
         
-        # Resource throttling configuration
+        # Resource throttling configuration - optimized for smooth frontend tiling
         self.max_concurrent_scans = int(os.getenv("LIDAR_MAX_CONCURRENT_SCANS", "1"))
-        self.tile_processing_delay = float(os.getenv("LIDAR_TILE_DELAY_MS", "50")) / 1000.0  # Convert to seconds
-        self.batch_size = int(os.getenv("LIDAR_BATCH_SIZE", "10"))  # Process N tiles before yielding
-        self.websocket_batch_size = int(os.getenv("LIDAR_WS_BATCH_SIZE", "5"))  # Send N messages before yielding
+        self.tile_processing_delay = float(os.getenv("LIDAR_TILE_DELAY_MS", "10")) / 1000.0  # Reduced from 50ms to 10ms
+        self.batch_size = int(os.getenv("LIDAR_BATCH_SIZE", "25"))  # Increased from 10 to 25 tiles
+        self.websocket_batch_size = int(os.getenv("LIDAR_WS_BATCH_SIZE", "15"))  # Increased from 5 to 15 messages
         
         # Create limited thread pool for scanning
         self.scan_executor = ThreadPoolExecutor(
@@ -248,18 +248,6 @@ class LidarScanTaskManager:
                 }))
             finally:
                 loop.close()
-            if height_km >= 0:
-                north_lat = start_lat + height_km / 2 / 111
-                south_lat = start_lat - height_km / 2 / 111
-            else:
-                north_lat = start_lat
-                south_lat = start_lat
-            lats = np.linspace(north_lat, south_lat, grid_y + 1)
-            mean_lat_rad = np.deg2rad((north_lat + south_lat) / 2)
-            lon_scale = np.cos(mean_lat_rad)
-            if lon_scale < 1e-6:
-                lon_scale = 1e-6
-            lons = np.linspace(start_lon, start_lon + width_km / (111 * lon_scale), grid_x + 1)
             factory = LidarMapFactory()
             for level_idx, level in enumerate(levels):
                 # Skip levels that have already been completed
@@ -271,6 +259,13 @@ class LidarScanTaskManager:
                 if stop_event.is_set():
                     self.logger.info(f"[SCAN] Stop event set for task_id={task_id}, breaking out of scan loop.")
                     break
+                
+                # Check if task still exists before processing level
+                if self.parent_task_manager:
+                    task_obj = self.parent_task_manager.get_task(task_id)
+                    if not task_obj:
+                        self.logger.info(f"[SCAN] Task {task_id} no longer exists, stopping scan")
+                        return
                 res = level["res"]
                 subtiles_per_side = level["subtiles"]
                 img_w = grid_x * subtiles_per_side
@@ -334,22 +329,37 @@ class LidarScanTaskManager:
                                     self.logger.info(f"[SCAN] Stop event set for task_id={task_id}, exiting inner scan loop.")
                                     return
                                 
+                                # Check if task still exists before processing subtile
+                                if self.parent_task_manager:
+                                    task_obj = self.parent_task_manager.get_task(task_id)
+                                    if not task_obj:
+                                        self.logger.info(f"[SCAN] Task {task_id} no longer exists, stopping subtile processing")
+                                        return
+                                
                                 # Resource throttling: yield control periodically
                                 tile_index_throttle = (coarse_row * grid_x * subtiles_per_side * subtiles_per_side + 
                                                      coarse_col * subtiles_per_side * subtiles_per_side + 
                                                      subtile_row * subtiles_per_side + subtile_col)
                                 
-                                if tile_index_throttle % self.batch_size == 0:
-                                    # Yield control to allow other threads/processes
-                                    time.sleep(self.tile_processing_delay)
-                                    
-                                    # Process queued WebSocket messages in batches
+                                # Flush websocket messages more frequently for smooth updates
+                                if tile_index_throttle % (self.batch_size // 3) == 0:
                                     self._flush_websocket_queue()
                                     
-                                    # Check for stop event more frequently during yielding
+                                if tile_index_throttle % self.batch_size == 0:
+                                    # Minimal yield for responsiveness - reduced delay
+                                    time.sleep(self.tile_processing_delay)
+                                    
+                                    # Check for stop event
                                     if stop_event.is_set():
                                         self.logger.info(f"[SCAN] Stop event detected during throttling for task_id={task_id}")
                                         return
+                                    
+                                    # Check if task still exists during throttling
+                                    if self.parent_task_manager:
+                                        task_obj = self.parent_task_manager.get_task(task_id)
+                                        if not task_obj:
+                                            self.logger.info(f"[SCAN] Task {task_id} no longer exists during throttling, stopping")
+                                            return
                                 frac_y0 = real_subtile_row / subtiles_per_side
                                 frac_y1 = (real_subtile_row + 1) / subtiles_per_side
                                 frac_x0 = subtile_col / subtiles_per_side
@@ -404,7 +414,7 @@ class LidarScanTaskManager:
                                     lon = tile_lon0 + (tile_lon1 - tile_lon0) * frac_x
                                     patch_size = 40 / subtiles_per_side
                                     patch_res = res
-                                    patch = factory.get_patch(lat, lon, size_m=patch_size, preferred_resolution_m=patch_res, preferred_data_type="DSM")
+                                    patch = factory.get_patch(lat, lon, size_m=patch_size, preferred_resolution_m=patch_res, preferred_data_type="DSM", stop_event=stop_event)
                                     dataset = patch.source_dataset if patch else None
                                     elev = float(np.nanmean(patch.data)) if patch and patch.data is not None else 0
                                     color = self.elevation_to_color(elev)
@@ -447,6 +457,7 @@ class LidarScanTaskManager:
                                     "subtile_lon1": float(subtile_lon1),
                                     "task_id": task_id
                                 }
+                                # Use optimized message queuing for reliable delivery
                                 self._queue_websocket_message(message)
                                 # --- Progress tracking and update ---
                                 # Calculate tile index for progress
@@ -582,30 +593,120 @@ class LidarScanTaskManager:
             raise  # Re-raise to let _cleanup_session handle it
 
     async def stop_scan(self, task_id: str, on_stopped_callback=None):
-        """Stop a running LiDAR scan session."""
+        """Stop a running LiDAR scan session with enhanced robustness."""
         session_data = self.active_sessions.get(task_id)
         if not session_data:
             self.logger.warning(f"[SCAN] No active session found for task_id={task_id}")
+            # Clean up any orphaned callback or queued messages
+            self._cleanup_task_resources(task_id)
             return False
         
         if on_stopped_callback:
             self.session_stopped_callbacks[task_id] = on_stopped_callback
         
-        # Set stop event
+        self.logger.info(f"[SCAN] Stopping scan for task_id={task_id}...")
+        
+        # Set stop event to signal graceful shutdown
         stop_event = session_data['stop_event']
         stop_event.set()
         
-        # Cancel the background task
+        # Cancel the background task with timeout
         task = session_data.get('task')
         if task and not task.done():
             task.cancel()
             try:
-                await task
+                # Wait for task cancellation with timeout
+                await asyncio.wait_for(task, timeout=5.0)
             except asyncio.CancelledError:
                 self.logger.info(f"[SCAN] Task {task_id} cancelled successfully")
+            except asyncio.TimeoutError:
+                self.logger.warning(f"[SCAN] Task {task_id} cancellation timed out")
+            except Exception as e:
+                self.logger.error(f"[SCAN] Error cancelling task {task_id}: {e}")
         
-        self.logger.info(f"[SCAN] Stop requested for task_id={task_id}")
+        # Force cleanup of session data and resources
+        self._cleanup_session(task_id, None)
+        self._cleanup_task_resources(task_id)
+        
+        self.logger.info(f"[SCAN] Stop completed for task_id={task_id}")
         return True
+    
+    def _cleanup_task_resources(self, task_id: str):
+        """Clean up any remaining resources for a task."""
+        # Clean up WebSocket message queue
+        with self.ws_queue_lock:
+            original_count = len(self.ws_message_queue)
+            self.ws_message_queue = [
+                msg for msg in self.ws_message_queue 
+                if msg.get('task_id') != task_id
+            ]
+            cleaned_count = original_count - len(self.ws_message_queue)
+            if cleaned_count > 0:
+                self.logger.debug(f"[SCAN] Cleaned {cleaned_count} queued messages for task {task_id}")
+        
+        # Remove any orphaned callbacks
+        self.session_stopped_callbacks.pop(task_id, None)
+        
+        # Force remove from active sessions if still present
+        if task_id in self.active_sessions:
+            self.active_sessions.pop(task_id, None)
+            self.logger.debug(f"[SCAN] Force removed session data for task {task_id}")
+    
+    def stop_scan_sync(self, task_id: str, on_stopped_callback=None, timeout: float = 10.0):
+        """Synchronous wrapper for stop_scan with timeout."""
+        import concurrent.futures
+        import threading
+        
+        try:
+            # Use thread-safe approach that works within existing event loops
+            result_container = {'result': None, 'exception': None}
+            finished_event = threading.Event()
+            
+            def run_stop_scan():
+                try:
+                    # Create new event loop in this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(
+                            asyncio.wait_for(
+                                self.stop_scan(task_id, on_stopped_callback), 
+                                timeout=timeout
+                            )
+                        )
+                        result_container['result'] = result
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    result_container['exception'] = e
+                finally:
+                    finished_event.set()
+            
+            # Run in separate thread to avoid event loop conflicts
+            thread = threading.Thread(target=run_stop_scan, daemon=True)
+            thread.start()
+            
+            # Wait for completion with timeout
+            if finished_event.wait(timeout=timeout):
+                if result_container['exception']:
+                    raise result_container['exception']
+                return result_container['result']
+            else:
+                self.logger.error(f"[SCAN] Stop scan timeout for task {task_id}")
+                # Force cleanup even on timeout
+                self._cleanup_task_resources(task_id)
+                return False
+                
+        except asyncio.TimeoutError:
+            self.logger.error(f"[SCAN] Stop scan timeout for task {task_id}")
+            # Force cleanup even on timeout
+            self._cleanup_task_resources(task_id)
+            return False
+        except Exception as e:
+            self.logger.error(f"[SCAN] Error in stop_scan_sync for task {task_id}: {e}")
+            # Force cleanup on error
+            self._cleanup_task_resources(task_id)
+            return False
 
     async def stop_all_scans(self):
         """Stop all active LiDAR scan sessions."""
@@ -642,6 +743,23 @@ class LidarScanTaskManager:
             'exception': str(task.exception()) if task and task.exception() else None
         }
     
+    def _send_websocket_message_immediate(self, message):
+        """Send a WebSocket message immediately for smooth frontend updates."""
+        # Use a separate thread to avoid blocking the scan loop
+        def send_message_async():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(frontend_backend_messenger.send_message(message))
+                finally:
+                    loop.close()
+            except Exception as e:
+                self.logger.warning(f"[SCAN] Failed to send immediate websocket message: {e}")
+        
+        # Use daemon thread for immediate, non-blocking send
+        threading.Thread(target=send_message_async, daemon=True).start()
+
     def _queue_websocket_message(self, message):
         """Queue a WebSocket message for batch processing."""
         with self.ws_queue_lock:

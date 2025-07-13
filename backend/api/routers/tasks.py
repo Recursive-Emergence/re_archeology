@@ -201,7 +201,7 @@ async def navigate_to_task(task_id: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error calculating navigation data: {str(e)}")
 
-async def start_task_scanning_session(task_data: Dict[str, Any]):
+async def start_task_scanning_session(task_data: Dict[str, Any], stop_event: Optional[threading.Event] = None):
     """
     Start the scanning session for a task using the new Lidar scan logic from demo_ws_tiles.py.
     """
@@ -226,9 +226,14 @@ async def start_task_scanning_session(task_data: Dict[str, Any]):
         findings = []
         for row in range(grid_y):
             for col in range(grid_x):
+                # Check if stop requested
+                if stop_event and stop_event.is_set():
+                    task.logger.info(f"[SCAN] Stop requested during scanning for task {task.id}")
+                    return
+                
                 lat = lats[row]
                 lon = lons[col]
-                patch = factory.get_patch(lat, lon, size_m=40, preferred_resolution_m=5, preferred_data_type="DSM")
+                patch = factory.get_patch(lat, lon, size_m=40, preferred_resolution_m=5, preferred_data_type="DSM", stop_event=stop_event)
                 elev = float(np.nanmean(patch.data)) if patch and patch.data is not None else None
                 if elev is not None and elev > 0:
                     findings.append({
@@ -450,11 +455,21 @@ class TaskManager:
         if not admin_status:
             self.logger.warning(f"[TaskManager] Non-admin attempted to delete task {task_id}")
             return False
-        # Stop any running lidar scan for this task
+        # Stop any running lidar scan for this task with enhanced robustness
         try:
-            lidar_scan_task_manager.stop_scan(task_id)
+            self.logger.info(f"[TaskManager] Stopping LiDAR scan for task deletion: {task_id}")
+            success = lidar_scan_task_manager.stop_scan_sync(task_id, timeout=15.0)
+            if success:
+                self.logger.info(f"[TaskManager] LiDAR scan stopped successfully for deleted task {task_id}")
+            else:
+                self.logger.warning(f"[TaskManager] Failed to stop LiDAR scan for deleted task {task_id}")
         except Exception as e:
-            self.logger.warning(f"[TaskManager] Exception while stopping lidar scan for deleted task {task_id}: {e}")
+            self.logger.error(f"[TaskManager] Exception while stopping lidar scan for deleted task {task_id}: {e}")
+            # Force cleanup even on exception
+            try:
+                lidar_scan_task_manager._cleanup_task_resources(task_id)
+            except Exception as cleanup_e:
+                self.logger.error(f"[TaskManager] Failed to cleanup resources for deleted task {task_id}: {cleanup_e}")
         # Move the task JSON to archive folder in GCS
         try:
             client = gcs_utils.get_gcs_client()
@@ -548,12 +563,23 @@ class TaskManager:
                 if not task:
                     self.logger.warning(f"[TaskManager] {action} failed: Task {task_id} not found.")
                     return {"success": False, "message": f"Task {task_id} not found."}
-                # --- Patch: Wait for lidar scan to stop before updating status ---
+                # --- Enhanced: Use synchronous wrapper with proper timeout ---
                 scan_stopped = threading.Event()
                 def on_scan_stopped(_):
                     scan_stopped.set()
-                lidar_scan_task_manager.stop_scan(task_id, on_stopped_callback=on_scan_stopped)
-                scan_stopped.wait(timeout=10)  # Wait up to 10s for scan to stop
+                
+                # Use synchronous wrapper for proper async handling
+                success = lidar_scan_task_manager.stop_scan_sync(
+                    task_id, 
+                    on_stopped_callback=on_scan_stopped, 
+                    timeout=10.0
+                )
+                
+                if success:
+                    scan_stopped.wait(timeout=2)  # Brief wait for callback
+                    self.logger.info(f"[TaskManager] LiDAR scan stopped successfully for task {task_id}")
+                else:
+                    self.logger.warning(f"[TaskManager] Failed to stop LiDAR scan for task {task_id}")
                 task.update_status("paused")
                 return {"success": True, "message": f"Task {task_id} paused/stopped and lidar scan session stopped.", "task_id": task_id}
             elif action == "status":

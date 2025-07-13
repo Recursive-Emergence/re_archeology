@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RE-Archaeology Framework - Archaeological Discovery Platform</title>
     
+    <!-- Preload critical external resources -->
+    <link rel="preload" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" as="style">
+    <link rel="preload" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" as="script">
+    
     <!-- Google OAuth -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     
@@ -14,6 +18,7 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/status-enhancements.css">
     <link rel="stylesheet" href="css/visualization-enhancements.css">
+    <link rel="stylesheet" href="css/lidar-animation.css">
     <link rel="stylesheet" href="css/main-styles.css">
     <link rel="stylesheet" href="css/task-list.css">
     <link rel="stylesheet" href="css/bitmap-cache.css">
@@ -237,63 +242,33 @@
         // Track overlays to prevent duplicates
         window.snapshotOverlays = window.snapshotOverlays || new Map();
         
-        // Snapshot function that tries different levels
-        window.showHighestAvailableLidarSnapshot = async function(taskId, bounds) {
-            // Get map reference
-            const map = window.reArchaeologyApp && window.reArchaeologyApp.map;
-            if (!map) return;
-            
-            // Check if overlay already exists and is still on the map
-            const existingOverlay = window.snapshotOverlays.get(taskId);
-            if (existingOverlay && map.hasLayer(existingOverlay)) {
-                return; // Don't recreate if it already exists
-            }
-            
-            // Remove existing overlay only if it exists but not on map
-            if (existingOverlay) {
-                window.snapshotOverlays.delete(taskId);
-            }
-            
-            // Try levels from highest (3) to lowest (0)
-            for (let level = 3; level >= 0; level--) {
-                const pngUrl = `https://storage.googleapis.com/re_archaeology/tasks/${taskId}/snapshots/level_${level}_color.png`;
-                
-                try {
-                    // Check if image exists with HEAD request
-                    const response = await fetch(pngUrl, { method: 'HEAD' });
-                    if (response.ok) {
-                        // Create Leaflet image overlay
-                        const southWest = L.latLng(bounds[0][0], bounds[0][1]);
-                        const northEast = L.latLng(bounds[1][0], bounds[1][1]);
-                        const imageBounds = L.latLngBounds(southWest, northEast);
-                        
-                        const overlay = L.imageOverlay(pngUrl, imageBounds, {
-                            opacity: 0.8,
-                            interactive: false,
-                            zIndex: 1500,
-                            className: 'lidar-snapshot-overlay'
-                        });
-                        
-                        overlay.addTo(map);
-                        window.snapshotOverlays.set(taskId, overlay);
-                        return level; // Success, return the level found
-                    }
-                } catch (error) {
-                    // Continue to next level
-                }
-            }
-            
-            return -1; // No snapshot found
-        };
+        // Placeholder - will be replaced by lidar-grid.js
+        window.showHighestAvailableLidarSnapshot = null;
     </script>
-    <script src="js/lidar-grid.js"></script>
     
-    <!-- Task Management (ES modules) -->
-    <script type="module" src="js/task-service.js"></script>
-    <script type="module" src="js/task-list.js"></script>
-
-    <!-- Main Application (modular) -->
-    <script type="module" src="js/main.js"></script>
+    <!-- Load all ES modules in parallel for better performance -->
+    <script type="module">
+        // Import and initialize animation system first
+        import { LidarAnimationSystem, ANIMATION_CONFIG } from './js/lidar-animation-system.js';
+        
+        // Make available globally for backward compatibility
+        window.LidarAnimationSystem = LidarAnimationSystem;
+        window.LIDAR_ANIMATION_CONFIG = ANIMATION_CONFIG;
+        
+        console.log('[INIT] LiDAR Animation System loaded');
+        
+        // Load main application first to initialize map
+        await import('./js/main.js');
+        
+        // Load supporting modules in parallel for faster loading
+        const [taskService, taskList, lidarGrid] = await Promise.all([
+            import('./js/task-service.js'),
+            import('./js/task-list.js'),
+            import('./js/lidar-grid.js')
+        ]);
+        
+        console.log('[INIT] All modules loaded successfully');
+    </script>
     <!-- <script src="js/new-app.js"></script> -->
 </body>
 </html>

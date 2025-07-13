@@ -1,6 +1,8 @@
 /**
  * Task List Component - Handles task display and navigation
  */
+console.log('[TASK-LIST] Module loading...');
+
 class TaskList {
     constructor(mapInstance) {
         this.map = mapInstance;
@@ -39,10 +41,10 @@ class TaskList {
             // Check for newly running tasks and trigger appropriate actions
             const currentRunningTasks = this.tasks.filter(task => task.status === 'running');
             
-            // Auto-navigate to running task if this is the first load
+            // Auto-navigate to running task if this is the first load (streamlined)
             if (this.isFirstLoad) {
                 this.isFirstLoad = false;
-                await this.checkAndNavigateToRunningTask();
+                this.checkAndNavigateToRunningTaskFast();
             } else {
                 // Check for newly running tasks (tasks that weren't running before but are now)
                 const newlyRunningTasks = currentRunningTasks.filter(currentTask => 
@@ -56,28 +58,35 @@ class TaskList {
                     const newlyRunningTask = newlyRunningTasks[0];
                     await this.navigateToTaskSmoothly(newlyRunningTask.id);
                     
-                    // Trigger scanning visualization if not already active
-                    if (window.reArchaeologyApp && !window.reArchaeologyApp.isScanning) {
-                        // Stop any existing animation first to prevent duplicates
-                        if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
-                            window.reArchaeologyApp.stopScanningAnimation();
-                        }
-                        
-                        // Start new animation after a short delay
-                        setTimeout(() => {
-                            if (typeof window.reArchaeologyApp.startScanningAnimation === 'function') {
-                                window.reArchaeologyApp.startScanningAnimation('satellite');
-                                window.reArchaeologyApp.isScanning = true;
-                                // Started scanning animation for newly running task
-                            }
-                        }, 100);
-                    }
+                    // Animation now handled by LidarAnimationSystem in lidar-grid.js when tiles are received
+                    // Legacy animation system disabled to prevent duplicate satellites
+                    // if (window.reArchaeologyApp && !window.reArchaeologyApp.isScanning) {
+                    //     if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
+                    //         window.reArchaeologyApp.stopScanningAnimation();
+                    //     }
+                    //     setTimeout(() => {
+                    //         if (typeof window.reArchaeologyApp.startScanningAnimation === 'function') {
+                    //             window.reArchaeologyApp.startScanningAnimation('satellite');
+                    //             window.reArchaeologyApp.isScanning = true;
+                    //         }
+                    //     }, 100);
+                    // }
                 }
             }
             
             // Always check and trigger visualization for running tasks
             // This ensures visualization works even if websocket messages are missed
             await this.triggerVisualizationForRunningTasks();
+            
+            // Start GCS polling for running tasks (replaced WebSocket system)
+            if (currentRunningTasks.length > 0) {
+                if (window.reArchaeologyApp && window.reArchaeologyApp.gcsPollingService) {
+                    console.log('[TASK-LIST] Starting GCS polling for', currentRunningTasks.length, 'running tasks');
+                    currentRunningTasks.forEach(task => {
+                        window.reArchaeologyApp.gcsPollingService.startPolling(task.id);
+                    });
+                }
+            }
         } catch (error) {
             this.showErrorState();
             console.error('Failed to load tasks:', error);
@@ -262,12 +271,24 @@ class TaskList {
             }
             
             // Show snapshot overlay for all tasks with bounds
-            if (bounds && window.showHighestAvailableLidarSnapshot) {
+            // Only load snapshots if we have an active websocket connection or the task is running
+            const app = window.app || window.App || window.reArchaeologyApp;
+            const hasActiveConnection = app && app.websocket;
+            const isRunningTask = task.status === 'running' || task.status === 'scanning';
+            
+            if (bounds && window.showHighestAvailableLidarSnapshot && typeof window.showHighestAvailableLidarSnapshot === 'function' && (hasActiveConnection || isRunningTask)) {
                 const boundsArray = [
                     [bounds[0][0], bounds[0][1]], // southwest
                     [bounds[1][0], bounds[1][1]]  // northeast
                 ];
-                window.showHighestAvailableLidarSnapshot(task.id, boundsArray);
+                try {
+                    window.showHighestAvailableLidarSnapshot(task.id, boundsArray);
+                } catch (error) {
+                    console.warn('[TASK-LIST] Error calling showHighestAvailableLidarSnapshot:', error);
+                }
+            } else if (bounds && window.DEBUG_LIDAR_GRID && !hasActiveConnection && !isRunningTask) {
+                // Skip snapshot loading during initial page load without active connection
+                console.log('[TASK-LIST] Skipping snapshot check for task', task.id.slice(0,8), '- no active connection');
             }
             currentTaskIds.push(task.id);
         }
@@ -417,24 +438,16 @@ class TaskList {
                         }
                     }
                     if (window.reArchaeologyApp && typeof window.reArchaeologyApp.loadCachedBitmapForTask === 'function') {
-                        console.debug('[navigateToTaskSmoothly] Calling loadCachedBitmapForTask', taskId);
                         await window.reArchaeologyApp.loadCachedBitmapForTask(taskId);
                     }
                     // Use navData as grid info for setLidarGridInfo
                     const gridInfo = navData;
-                    console.debug('[navigateToTaskSmoothly] gridInfo:', gridInfo, 'taskId:', taskId);
-                    console.debug('[navigateToTaskSmoothly] typeof window.setLidarGridInfo:', typeof window.setLidarGridInfo);
-                    console.debug('[navigateToTaskSmoothly] typeof window.reArchaeologyApp.setLidarGridInfo:', window.reArchaeologyApp && typeof window.reArchaeologyApp.setLidarGridInfo);
                     try {
                         if (typeof window.setLidarGridInfo === 'function') {
-                            console.debug('[navigateToTaskSmoothly] Calling setLidarGridInfo', gridInfo, taskId);
-                            const result = window.setLidarGridInfo(gridInfo, taskId);
-                            console.debug('[navigateToTaskSmoothly] setLidarGridInfo result:', result);
+                            window.setLidarGridInfo(gridInfo, taskId);
                         } else if (window.reArchaeologyApp && typeof window.reArchaeologyApp.setLidarGridInfo === 'function') {
-                            console.debug('[navigateToTaskSmoothly] Calling reArchaeologyApp.setLidarGridInfo', gridInfo, taskId);
-                            const result = window.reArchaeologyApp.setLidarGridInfo(gridInfo, taskId);
-                            console.debug('[navigateToTaskSmoothly] reArchaeologyApp.setLidarGridInfo result:', result);
-                        } else {
+                            window.reArchaeologyApp.setLidarGridInfo(gridInfo, taskId);
+                        } else if (window.DEBUG_LIDAR_GRID) {
                             console.warn('[navigateToTaskSmoothly] No setLidarGridInfo function found!');
                         }
                     } catch (err) {
@@ -455,23 +468,15 @@ class TaskList {
                                 }
                             }
                         }
-                        console.debug('[navigateToTaskSmoothly] (delayed) Calling loadCachedBitmapForTask', taskId);
                         await window.reArchaeologyApp.loadCachedBitmapForTask(taskId);
                         // Use navData as grid info for setLidarGridInfo
                         const gridInfo = navData;
-                        console.debug('[navigateToTaskSmoothly] (delayed) gridInfo:', gridInfo, 'taskId:', taskId);
-                        console.debug('[navigateToTaskSmoothly] (delayed) typeof window.setLidarGridInfo:', typeof window.setLidarGridInfo);
-                        console.debug('[navigateToTaskSmoothly] (delayed) typeof window.reArchaeologyApp.setLidarGridInfo:', window.reArchaeologyApp && typeof window.reArchaeologyApp.setLidarGridInfo);
                         try {
                             if (typeof window.setLidarGridInfo === 'function') {
-                                console.debug('[navigateToTaskSmoothly] (delayed) Calling setLidarGridInfo', gridInfo, taskId);
-                                const result = window.setLidarGridInfo(gridInfo, taskId);
-                                console.debug('[navigateToTaskSmoothly] (delayed) setLidarGridInfo result:', result);
+                                window.setLidarGridInfo(gridInfo, taskId);
                             } else if (window.reArchaeologyApp && typeof window.reArchaeologyApp.setLidarGridInfo === 'function') {
-                                console.debug('[navigateToTaskSmoothly] (delayed) Calling reArchaeologyApp.setLidarGridInfo', gridInfo, taskId);
-                                const result = window.reArchaeologyApp.setLidarGridInfo(gridInfo, taskId);
-                                console.debug('[navigateToTaskSmoothly] (delayed) reArchaeologyApp.setLidarGridInfo result:', result);
-                            } else {
+                                window.reArchaeologyApp.setLidarGridInfo(gridInfo, taskId);
+                            } else if (window.DEBUG_LIDAR_GRID) {
                                 console.warn('[navigateToTaskSmoothly] (delayed) No setLidarGridInfo function found!');
                             }
                         } catch (err) {
@@ -558,18 +563,19 @@ class TaskList {
                 const newlyRunningTask = newlyRunningTasks[0];
                 await this.navigateToTaskSmoothly(newlyRunningTask.id);
                 
-                if (window.reArchaeologyApp && !window.reArchaeologyApp.isScanning) {
-                    if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
-                        window.reArchaeologyApp.stopScanningAnimation();
-                    }
-                    
-                    setTimeout(() => {
-                        if (typeof window.reArchaeologyApp.startScanningAnimation === 'function') {
-                            window.reArchaeologyApp.startScanningAnimation('satellite');
-                            window.reArchaeologyApp.isScanning = true;
-                        }
-                    }, 100);
-                }
+                // Animation now handled by LidarAnimationSystem in lidar-grid.js when tiles are received
+                // Legacy animation system disabled to prevent duplicate satellites
+                // if (window.reArchaeologyApp && !window.reArchaeologyApp.isScanning) {
+                //     if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
+                //         window.reArchaeologyApp.stopScanningAnimation();
+                //     }
+                //     setTimeout(() => {
+                //         if (typeof window.reArchaeologyApp.startScanningAnimation === 'function') {
+                //             window.reArchaeologyApp.startScanningAnimation('satellite');
+                //             window.reArchaeologyApp.isScanning = true;
+                //         }
+                //     }, 100);
+                // }
             }
             
             await this.triggerVisualizationForRunningTasks();
@@ -583,6 +589,40 @@ class TaskList {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
+        }
+    }
+
+    // Fast navigation for streamlined loading
+    checkAndNavigateToRunningTaskFast() {
+        const runningTasks = this.tasks.filter(task => task.status === 'running');
+        
+        if (runningTasks.length > 0) {
+            const runningTask = runningTasks[0];
+            console.log('[TASK-LIST] Fast navigation to running task:', runningTask.id);
+            
+            // Immediate navigation without delays
+            if (window.reArchaeologyApp?.map) {
+                // Navigate to task bounds with max zoom level of 7
+                const task = runningTasks[0];
+                const bounds = this.calculateTaskBounds(task);
+                if (bounds) {
+                    window.reArchaeologyApp.map.flyToBounds(bounds, {
+                        padding: [50, 50],
+                        maxZoom: 7,  // Limit zoom to 7 instead of full screen
+                        duration: 0.8
+                    });
+                    console.log('[TASK-LIST] Immediately jumped to task area with zoom limit 7');
+                } else {
+                    // Fallback to center coordinates if bounds not available
+                    window.reArchaeologyApp.map.setView([7.6, -67.2], 7);
+                    console.log('[TASK-LIST] Fallback to center coordinates with zoom 7');
+                }
+            }
+            
+            // Enable heatmap mode immediately
+            if (window.reArchaeologyApp?.mapVisualization?.enableHeatmapMode) {
+                window.reArchaeologyApp.mapVisualization.enableHeatmapMode();
+            }
         }
     }
 
@@ -609,7 +649,9 @@ class TaskList {
             }, 1500);
         } else {
             // No running tasks, let the app decide whether to show discovered sites
-            console.log('No running tasks found');
+            if (window.DEBUG_LIDAR_GRID) {
+                console.log('No running tasks found');
+            }
             if (window.reArchaeologyApp && typeof window.reArchaeologyApp.fitToDiscoveredSitesIfNeeded === 'function') {
                 setTimeout(() => window.reArchaeologyApp.fitToDiscoveredSitesIfNeeded(), 1500);
             }
@@ -653,23 +695,20 @@ class TaskList {
                 }
             }
             
-            // Start scanning animation if not already active
-            if (!window.reArchaeologyApp.isScanning) {
-                // Stop any existing animation first to prevent duplicates
-                if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
-                    window.reArchaeologyApp.stopScanningAnimation();
-                }
-                
-                // Start new animation after a short delay
-                setTimeout(() => {
-                    if (typeof window.reArchaeologyApp.startScanningAnimation === 'function' && 
-                        !window.reArchaeologyApp.isScanning) {
-                        window.reArchaeologyApp.startScanningAnimation('satellite');
-                        window.reArchaeologyApp.isScanning = true;
-                        // Started scanning animation for running tasks (silent)
-                    }
-                }, 150);
-            }
+            // Animation now handled by LidarAnimationSystem in lidar-grid.js when tiles are received
+            // Legacy animation system disabled to prevent duplicate satellites
+            // if (!window.reArchaeologyApp.isScanning) {
+            //     if (typeof window.reArchaeologyApp.stopScanningAnimation === 'function') {
+            //         window.reArchaeologyApp.stopScanningAnimation();
+            //     }
+            //     setTimeout(() => {
+            //         if (typeof window.reArchaeologyApp.startScanningAnimation === 'function' && 
+            //             !window.reArchaeologyApp.isScanning) {
+            //             window.reArchaeologyApp.startScanningAnimation('satellite');
+            //             window.reArchaeologyApp.isScanning = true;
+            //         }
+            //     }, 150);
+            // }
             
             // Set session info
             if (runningTask.session_id || runningTask.sessions?.scan) {
@@ -696,3 +735,4 @@ class TaskList {
 
 // Export the class
 window.TaskList = TaskList;
+console.log('[TASK-LIST] TaskList class exported to window.TaskList');

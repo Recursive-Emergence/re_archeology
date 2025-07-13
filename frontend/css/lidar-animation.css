@@ -1,0 +1,341 @@
+/**
+ * LiDAR Animation System Styles
+ * Clean, coordinated visual effects for LiDAR scanning
+ */
+
+/* ===========================================
+   ANIMATION KEYFRAMES
+   =========================================== */
+
+@keyframes lidar-beam-pulse {
+    0% {
+        opacity: 0.6;
+        stroke-width: 2;
+        filter: drop-shadow(0 0 4px rgba(102, 255, 136, 0.6));
+    }
+    100% {
+        opacity: 0.9;
+        stroke-width: 3;
+        filter: drop-shadow(0 0 8px rgba(102, 255, 136, 0.9));
+    }
+}
+
+@keyframes satellite-idle-pulse {
+    0%, 100% {
+        opacity: 0.7;
+        transform: translateX(-50%) scale(1);
+    }
+    50% {
+        opacity: 0.9;
+        transform: translateX(-50%) scale(1.05);
+    }
+}
+
+@keyframes satellite-scanning-active {
+    0% {
+        transform: translate(-50%, -50%) scale(1.1);
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.3);
+        filter: drop-shadow(0 0 12px rgba(102, 255, 136, 0.8));
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1.1);
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+    }
+}
+
+@keyframes tile-appear {
+    0% {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    100% {
+        opacity: 0.8;
+        transform: scale(1);
+    }
+}
+
+/* ===========================================
+   SATELLITE ICON STYLES
+   =========================================== */
+
+.lidar-satellite-icon {
+    position: absolute;
+    z-index: 1400; /* Defined in animation system */
+    pointer-events: none;
+    font-size: 24px;
+    user-select: none;
+    transition: all 0.3s ease;
+    will-change: transform, opacity, filter;
+    
+    /* Default idle animation */
+    animation: satellite-idle-pulse 3s ease-in-out infinite;
+}
+
+.lidar-satellite-icon.airplane {
+    font-size: 28px;
+}
+
+.lidar-satellite-icon.satellite {
+    font-size: 24px;
+}
+
+/* Satellite states */
+.lidar-satellite-icon[data-state="idle"] {
+    opacity: 0.7;
+    animation: satellite-idle-pulse 3s ease-in-out infinite;
+}
+
+.lidar-satellite-icon[data-state="scanning"] {
+    opacity: 1.0;
+    animation: satellite-scanning-active 1s ease-in-out;
+}
+
+.lidar-satellite-icon[data-state="moving"] {
+    opacity: 0.9;
+    animation: none;
+}
+
+/* Remove animation when satellite is actively moving */
+.lidar-satellite-icon.moving {
+    animation: none !important;
+}
+
+/* ===========================================
+   SCANNING BEAM STYLES
+   =========================================== */
+
+.lidar-scan-beam {
+    pointer-events: none !important;
+    z-index: 1300; /* Defined in animation system */
+}
+
+/* Beam path styling */
+.lidar-scan-beam path {
+    stroke: #66ff88 !important;
+    stroke-width: 2 !important;
+    stroke-opacity: 0.8 !important;
+    stroke-dasharray: 8, 4 !important;
+    fill: none !important;
+    animation: lidar-beam-pulse 0.5s ease-in-out infinite alternate;
+}
+
+/* Beam fade out effect */
+.lidar-scan-beam.fading path {
+    transition: opacity 200ms ease !important;
+    opacity: 0 !important;
+}
+
+/* ===========================================
+   LIDAR TILE OVERLAY STYLES
+   =========================================== */
+
+/* Canvas overlay for real-time tiles */
+#lidar-canvas {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    pointer-events: none !important;
+    z-index: 1200 !important; /* Between beams and cached overlays */
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+/* Cached bitmap overlays */
+.cached-bitmap-overlay,
+.lidar-snapshot-overlay {
+    z-index: 1100 !important; /* Below real-time canvas */
+    opacity: 0.75 !important;
+    transition: opacity 0.5s ease !important;
+    pointer-events: none !important;
+}
+
+.cached-bitmap-overlay:hover,
+.lidar-snapshot-overlay:hover {
+    opacity: 0.6 !important;
+}
+
+/* Heatmap tiles with clean rendering */
+.lidar-heatmap-tile {
+    pointer-events: none !important;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    image-rendering: -webkit-optimize-contrast;
+    transition: opacity 0.5s ease;
+    opacity: 0;
+    z-index: 1000; /* Base tile layer */
+}
+
+.lidar-heatmap-tile.visible {
+    opacity: 0.8;
+    animation: tile-appear 0.5s ease-out;
+}
+
+/* ===========================================
+   LEAFLET MAP PANE OVERRIDES
+   =========================================== */
+
+/* Ensure proper pane ordering */
+.leaflet-pane.leaflet-lidarTiles-pane {
+    z-index: 1000 !important;
+}
+
+.leaflet-pane.leaflet-cachedOverlays-pane {
+    z-index: 1100 !important;
+}
+
+.leaflet-pane.leaflet-lidarCanvas-pane {
+    z-index: 1200 !important;
+}
+
+.leaflet-pane.leaflet-satelliteBeams-pane {
+    z-index: 1300 !important;
+    pointer-events: none !important;
+}
+
+.leaflet-pane.leaflet-satelliteIcon-pane {
+    z-index: 1400 !important;
+    pointer-events: none !important;
+}
+
+/* ===========================================
+   SCANNING PROGRESS INDICATORS
+   =========================================== */
+
+.lidar-scanning-progress {
+    position: absolute;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(26, 26, 26, 0.95);
+    color: #66ff88;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #66ff88;
+    box-shadow: 0 4px 12px rgba(102, 255, 136, 0.3);
+    z-index: 1500;
+    backdrop-filter: blur(4px);
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.lidar-scanning-progress.hidden {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+}
+
+/* ===========================================
+   RESOLUTION INDICATOR
+   =========================================== */
+
+.lidar-resolution-indicator {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #66ff88;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    z-index: 1500;
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(102, 255, 136, 0.3);
+    transition: all 0.3s ease;
+}
+
+.lidar-resolution-indicator.high-res {
+    color: #ffaa00;
+    border-color: rgba(255, 170, 0, 0.3);
+}
+
+/* ===========================================
+   CLEAN UP STYLES FOR OLD SYSTEM
+   =========================================== */
+
+/* Hide old scanning icons to prevent conflicts */
+.scanning-icon:not(.lidar-satellite-icon) {
+    display: none !important;
+}
+
+/* Override old beam styles */
+.lidar-beam-orbital {
+    display: none !important;
+}
+
+/* Clean up old overlay z-index conflicts */
+.leaflet-pane.leaflet-beamPane-pane {
+    display: none !important;
+}
+
+/* ===========================================
+   RESPONSIVE DESIGN
+   =========================================== */
+
+@media (max-width: 768px) {
+    .lidar-satellite-icon {
+        font-size: 20px;
+    }
+    
+    .lidar-satellite-icon.airplane {
+        font-size: 24px;
+    }
+    
+    .lidar-scanning-progress {
+        font-size: 11px;
+        padding: 6px 12px;
+    }
+    
+    .lidar-resolution-indicator {
+        font-size: 10px;
+        padding: 3px 6px;
+    }
+}
+
+/* ===========================================
+   ACCESSIBILITY & PERFORMANCE
+   =========================================== */
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .lidar-satellite-icon,
+    .lidar-scan-beam path,
+    .lidar-heatmap-tile {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .lidar-scan-beam path {
+        stroke: #00ff00 !important;
+        stroke-width: 3 !important;
+    }
+    
+    .lidar-scanning-progress,
+    .lidar-resolution-indicator {
+        border-width: 2px;
+        box-shadow: 0 0 10px rgba(102, 255, 136, 0.8);
+    }
+}
+
+/* Performance optimizations */
+.lidar-satellite-icon,
+.lidar-scan-beam,
+.lidar-heatmap-tile {
+    will-change: transform, opacity;
+    backface-visibility: hidden;
+    perspective: 1000px;
+}
+
+/* Ensure smooth animations on all devices */
+* {
+    -webkit-transform-style: preserve-3d;
+    transform-style: preserve-3d;
+}

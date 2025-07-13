@@ -1,6 +1,6 @@
 // Core application logic and main class
 import { setupMap, setupLayers } from './map.js';
-import { setupUI, updateScanButtonText, updateLidarScanButtonStates, updateButtonStates, startScanUI, cleanupAfterStop, updateResolutionDisplay, updateAnimationForResolution, startScanningAnimation, stopScanningAnimation, updateAnimationProgress, showResolutionBadge, hideResolutionBadge, moveSatelliteAnimationToTile } from './ui.js';
+import { setupUI, updateScanButtonText, updateLidarScanButtonStates, updateButtonStates, startScanUI, cleanupAfterStop, updateResolutionDisplay, updateAnimationForResolution, updateAnimationProgress, showResolutionBadge, hideResolutionBadge } from './ui.js';
 import { startDetectionAnimation, stopDetectionAnimation, handlePatchResult, createDetectionLens, ensureDetectionLensReady, updateLensVisualFeedback, completeDetectionAnimation, updateDetectionProfileText } from './detection.js';
 import { connectWebSocket, handleWebSocketMessage } from './websocket.js';
 import { calculateAreaBounds } from './utils.js';
@@ -140,12 +140,27 @@ export class REArchaeologyApp {
             setupMap(this);
             setupLayers(this);
             
+            console.log('[APP-CORE] Map setup completed, map object:', this.map);
+            console.log('[APP-CORE] Dispatching mapReady event');
+            
+            // Notify that map is ready
+            window.dispatchEvent(new CustomEvent('mapReady', { detail: { map: this.map, app: this } }));
+            
+            // Initialize clean animation system
+            this.initializeLidarAnimationSystem();
+            
             // Initialize map visualization for heatmap tiles
             this.initializeMapVisualization();
             
             this.setupMapUrlSync();
-            await this.loadAvailableStructureTypes?.();
-            await this.loadDiscoveredSites();
+            // Skip structure types loading for streamlined performance
+            // await this.loadAvailableStructureTypes?.();
+            
+            // Load discovered sites in background to avoid blocking page load
+            this.loadDiscoveredSites().catch(err => {
+                window.Logger?.app('warn', 'Failed to load discovered sites:', err);
+            });
+            
             setupUI(this);
             const enableDetection = document.getElementById('enableDetection')?.checked || false;
             updateScanButtonText(this, enableDetection);
@@ -160,8 +175,8 @@ export class REArchaeologyApp {
                 if (window.Logger) window.Logger.warn('app', '❌ Cannot enable heatmap mode - mapVisualization not ready');
             }
             
-            // Initialize task list
-            this.initializeTaskList();
+            // Defer task list initialization to allow modules to load
+            setTimeout(() => this.initializeTaskList(), 100);
             
             // Start periodic task refresh to ensure ground truth synchronization
             this.startPeriodicTaskRefresh();
@@ -292,8 +307,17 @@ export class REArchaeologyApp {
     updateButtonStates() { if (typeof updateButtonStates === 'function') updateButtonStates(this); }
     showResolutionBadge(resolution) { if (typeof showResolutionBadge === 'function') showResolutionBadge(this, resolution); }
     hideResolutionBadge() { if (typeof hideResolutionBadge === 'function') hideResolutionBadge(this); }
-    startScanningAnimation(iconType) { if (typeof startScanningAnimation === 'function') startScanningAnimation(this, iconType); }
-    stopScanningAnimation() { if (typeof stopScanningAnimation === 'function') stopScanningAnimation(this); }
+    // Legacy animation functions disabled to prevent duplicate satellites - now using LidarAnimationSystem
+    startScanningAnimation(iconType) { 
+        if (this.lidarAnimationSystem && !this.lidarAnimationSystem.getState().isActive) {
+            this.lidarAnimationSystem.startScanning(iconType);
+        }
+    }
+    stopScanningAnimation() { 
+        if (this.lidarAnimationSystem && this.lidarAnimationSystem.getState().isActive) {
+            this.lidarAnimationSystem.stopScanning();
+        }
+    }
     updateAnimationProgress(tileData) { if (typeof updateAnimationProgress === 'function') updateAnimationProgress(this, tileData); }
     initializeDetectionOverlay() {
         if (!this.detectionOverlay && typeof document !== 'undefined') {
@@ -390,12 +414,12 @@ export class REArchaeologyApp {
                 if (window.Logger) window.Logger.warn('lidar', '[LIDAR_TILE] window.renderLidarSubtile is not defined');
             }
         }
-        // Move satellite animation to current tile/subtile
-        if (typeof moveSatelliteAnimationToTile === 'function') {
-            moveSatelliteAnimationToTile(this, {
-                gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol
-            });
-        }
+        // Legacy satellite animation disabled - now using LidarAnimationSystem for clean single satellite at top
+        // if (typeof moveSatelliteAnimationToTile === 'function') {
+        //     moveSatelliteAnimationToTile(this, {
+        //         gridRows, gridCols, coarseRow, coarseCol, subtiles, subtileRow, subtileCol
+        //     });
+        // }
         // Optionally, update progress bar or stats if needed
     }
     handleLidarHeatmapTileUpdate(data) { if (typeof this.mapVisualization?.addLidarHeatmapTile === 'function') this.mapVisualization.addLidarHeatmapTile(data.tile_data); this.updateAnimationProgress?.(data.tile_data); }
@@ -405,6 +429,21 @@ export class REArchaeologyApp {
     handleSessionFailed(data) { /* implement as needed */ }
 
     // --- Map and scan area helpers ---
+    initializeLidarAnimationSystem() {
+        if (window.Logger) {
+            window.Logger.debug('app', '🎬 Initializing LiDAR animation system...');
+            window.Logger.debug('app', '   - window.LidarAnimationSystem:', typeof window.LidarAnimationSystem);
+            window.Logger.debug('app', '   - this.map:', !!this.map);
+        }
+        
+        if (typeof window.LidarAnimationSystem === 'function' && this.map) {
+            this.lidarAnimationSystem = new window.LidarAnimationSystem(this.map);
+            if (window.Logger) window.Logger.debug('app', '✅ LidarAnimationSystem initialized');
+        } else {
+            if (window.Logger) window.Logger.warn('app', '❌ LidarAnimationSystem not available - will use legacy system');
+        }
+    }
+
     initializeMapVisualization() { 
         if (window.Logger) {
             window.Logger.debug('app', '🗺️ Initializing map visualization...');
@@ -849,7 +888,7 @@ export class REArchaeologyApp {
         return typeMap[structureType] || structureType.replace(/[_-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     }
 
-    initializeTaskList() {
+    initializeTaskList(retryCount = 0) {
         if (this.map && window.TaskList) {
             try {
                 this.taskList = new TaskList(this.map);
@@ -858,7 +897,12 @@ export class REArchaeologyApp {
                 window.Logger?.app('error', 'Failed to initialize task list:', error);
             }
         } else {
-            window.Logger?.app('warn', 'Cannot initialize task list - map or TaskList class not available');
+            if (retryCount < 10) {
+                window.Logger?.app('debug', `Task list retry ${retryCount} - map: ${!!this.map}, TaskList: ${!!window.TaskList}`);
+                setTimeout(() => this.initializeTaskList(retryCount + 1), 200);
+            } else {
+                window.Logger?.app('warn', 'Cannot initialize task list - map or TaskList class not available after retries');
+            }
         }
     }
 
@@ -918,8 +962,13 @@ export class REArchaeologyApp {
         const seenTiles = new Set();
         this.lidarGridRows = gridY;
         this.lidarGridCols = gridX;
+        let consecutive404s = 0;
+        const max404s = 20; // Stop after 20 consecutive 404s
+        let foundAnyTiles = false;
+        
         if (window.Logger) window.Logger.debug('lidar', '[LIDAR_RESTORE] loadCachedTilesForTask', { taskId, gridX, gridY, levels });
-        for (let levelIdx = 0; levelIdx < levels.length; ++levelIdx) {
+        
+        outerLoop: for (let levelIdx = 0; levelIdx < levels.length; ++levelIdx) {
             const subtiles = levels[levelIdx].subtiles;
             for (let coarseRow = 0; coarseRow < gridY; ++coarseRow) {
                 for (let coarseCol = 0; coarseCol < gridX; ++coarseCol) {
@@ -927,16 +976,29 @@ export class REArchaeologyApp {
                         for (let subtileCol = 0; subtileCol < subtiles; ++subtileCol) {
                             const tileKey = `${levelIdx}-${coarseRow}-${coarseCol}-${subtileRow}-${subtileCol}`;
                             if (seenTiles.has(tileKey)) continue;
+                            
+                            // Stop if we've hit too many consecutive 404s
+                            if (consecutive404s >= max404s) {
+                                if (window.Logger) window.Logger.debug('lidar', `[LIDAR_RESTORE] Stopping after ${consecutive404s} consecutive 404s`);
+                                break outerLoop;
+                            }
+                            
                             const url = `${gcsBaseUrl}level_${levelIdx}/tile_${coarseRow}_${coarseCol}/subtile_${subtileRow}_${subtileCol}.json`;
                             if (window.Logger) window.Logger.debug('lidar', '[LIDAR_RESTORE] Fetching tile', url);
                             try {
                                 const resp = await fetch(url);
-                                if (!resp.ok) continue;
+                                if (!resp.ok) {
+                                    consecutive404s++;
+                                    continue;
+                                }
                                 const tileData = await resp.json();
+                                consecutive404s = 0; // Reset counter on success
+                                foundAnyTiles = true;
                                 seenTiles.add(tileKey);
                                 console.log('[LIDAR_RESTORE] Restoring tile', tileKey, tileData);
                                 this.handleLidarTileUpdate(tileData);
                             } catch (e) {
+                                consecutive404s++;
                                 console.warn('[LIDAR_RESTORE] Failed to fetch/restore tile', url, e);
                                 continue;
                             }
@@ -944,6 +1006,10 @@ export class REArchaeologyApp {
                     }
                 }
             }
+        }
+        
+        if (!foundAnyTiles) {
+            if (window.Logger) window.Logger.debug('lidar', `[LIDAR_RESTORE] No cached tiles found for task ${taskId}`);
         }
         // Store seenTiles for deduplication with websocket
         this._restoredTileKeys = seenTiles;
@@ -993,8 +1059,8 @@ export class REArchaeologyApp {
                 return;
             }
             
-            // Use the existing snapshot loading system
-            if (window.showHighestAvailableLidarSnapshot) {
+            // Only load snapshots if we have an active websocket connection
+            if (window.showHighestAvailableLidarSnapshot && this.websocket) {
                 await window.showHighestAvailableLidarSnapshot(taskId, bounds);
             }
             

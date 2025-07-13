@@ -123,25 +123,34 @@ export function updateAnimationForResolution(app, actualResolution, isHighResolu
 }
 
 export function startScanningAnimation(app, iconType = 'satellite') {
-    // Only stop existing animation if we're not already in the process of starting one
+    // Check if new animation system is available and initialized
+    if (app.lidarAnimationSystem && typeof app.lidarAnimationSystem.startScanning === 'function') {
+        window.Logger?.animation('info', `Using clean animation system for ${iconType} scanning`);
+        app.lidarAnimationSystem.startScanning(iconType);
+        app.animationState = {
+            isActive: true,
+            iconType: iconType,
+            usingCleanSystem: true
+        };
+        return;
+    }
+    
+    // Fallback to legacy system
     if (app.scanningIcon && app.animationState?.isActive) {
-        // Already have an active animation, just update the icon type if needed
         if (app.animationState.iconType === iconType) {
-            window.Logger?.animation('info', `Scanning animation already active with ${iconType} icon`);
+            window.Logger?.animation('info', `Legacy scanning animation already active with ${iconType} icon`);
             return;
         }
     }
     
-    // Stop any existing animation
     stopScanningAnimation(app);
     
-    // Add a small delay to ensure cleanup is complete before starting new animation
     setTimeout(() => {
-        window.Logger?.animation('info', `Starting ${iconType} scanning animation`);
+        window.Logger?.animation('info', `Starting legacy ${iconType} scanning animation`);
         const scanIcon = document.createElement('div');
-        scanIcon.className = `scanning-icon ${iconType}`;
+        scanIcon.className = `scanning-icon-legacy ${iconType}`;
         scanIcon.innerHTML = iconType === 'airplane' ? '🚁' : '🛰️';
-        scanIcon.style.cssText = `position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 3000; pointer-events: none; font-size: ${iconType === 'airplane' ? '32px' : '28px'}; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(0, 255, 136, 0.6)); transition: all 0.3s ease; opacity: 1; background: transparent; padding: 8px; border-radius: 0; border: none; box-shadow: none;`;
+        scanIcon.style.cssText = `position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1400; pointer-events: none; font-size: ${iconType === 'airplane' ? '32px' : '28px'}; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 8px rgba(0, 255, 136, 0.6)); transition: all 0.3s ease; opacity: 1; background: transparent; padding: 8px; border-radius: 0; border: none; box-shadow: none;`;
         app.map.getContainer().appendChild(scanIcon);
         app.scanningIcon = scanIcon;
         app.animationState = {
@@ -149,7 +158,8 @@ export function startScanningAnimation(app, iconType = 'satellite') {
             startTime: Date.now(),
             isActive: true,
             iconType: iconType,
-            isProcessingTile: false
+            isProcessingTile: false,
+            usingCleanSystem: false
         };
         startIdleAnimation(app, scanIcon);
     }, 50);
@@ -176,6 +186,15 @@ function startIdleAnimation(app, iconElement) {
 }
 
 export function stopScanningAnimation(app) {
+    // Check if using new animation system
+    if (app.animationState?.usingCleanSystem && app.lidarAnimationSystem) {
+        window.Logger?.animation('info', 'Stopping clean animation system');
+        app.lidarAnimationSystem.stopScanning();
+        app.animationState = null;
+        return;
+    }
+    
+    // Legacy system cleanup
     if (app.animationState) {
         app.animationState.isActive = false;
     }
@@ -190,10 +209,10 @@ export function stopScanningAnimation(app) {
         }, 200);
     }
     
-    // Clean up any orphaned icons
+    // Clean up any orphaned icons from both systems
     const mapContainer = app.map?.getContainer();
     if (mapContainer) {
-        const orphanedIcons = mapContainer.querySelectorAll('.scanning-icon');
+        const orphanedIcons = mapContainer.querySelectorAll('.scanning-icon, .scanning-icon-legacy, .lidar-satellite-icon');
         orphanedIcons.forEach(icon => {
             if (icon.parentNode) {
                 icon.parentNode.removeChild(icon);

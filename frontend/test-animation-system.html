@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiDAR Animation System Test</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/lidar-animation.css">
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        #map { width: 100%; height: 400px; margin-bottom: 20px; }
+        .controls { margin-bottom: 20px; }
+        button { margin: 5px; padding: 10px 15px; }
+        .status { margin-top: 10px; padding: 10px; background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>LiDAR Animation System Test</h1>
+    
+    <div id="map"></div>
+    
+    <div class="controls">
+        <button onclick="startAnimation('satellite')">Start Satellite Animation</button>
+        <button onclick="startAnimation('airplane')">Start Airplane Animation</button>
+        <button onclick="stopAnimation()">Stop Animation</button>
+        <button onclick="testTileScanning()">Test Tile Scanning</button>
+        <button onclick="checkSystemStatus()">Check System Status</button>
+    </div>
+    
+    <div class="status" id="status">
+        Loading animation system...
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script type="module">
+        import { LidarAnimationSystem, ANIMATION_CONFIG } from './js/lidar-animation-system.js';
+        
+        // Global variables for testing
+        window.animationSystem = null;
+        window.testMap = null;
+        
+        // Initialize map
+        window.testMap = L.map('map').setView([51.505, -0.09], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(window.testMap);
+        
+        // Initialize animation system
+        window.animationSystem = new LidarAnimationSystem(window.testMap);
+        
+        // Make functions available globally for buttons
+        window.startAnimation = function(iconType) {
+            updateStatus(`Starting ${iconType} animation...`);
+            window.animationSystem.startScanning(iconType);
+            updateStatus(`${iconType} animation started. State: ${JSON.stringify(window.animationSystem.getState())}`);
+        };
+        
+        window.stopAnimation = function() {
+            updateStatus('Stopping animation...');
+            window.animationSystem.stopScanning();
+            updateStatus(`Animation stopped. State: ${JSON.stringify(window.animationSystem.getState())}`);
+        };
+        
+        window.testTileScanning = function() {
+            const tileData = {
+                center_lat: 51.505,
+                center_lon: -0.09,
+                tile_bounds: {
+                    north: 51.510,
+                    south: 51.500,
+                    east: -0.085,
+                    west: -0.095
+                }
+            };
+            
+            updateStatus('Testing tile scanning animation...');
+            window.animationSystem.animateTileScanning(tileData);
+            updateStatus(`Tile scanning animation triggered for coordinates: ${tileData.center_lat}, ${tileData.center_lon}`);
+        };
+        
+        window.checkSystemStatus = function() {
+            const state = window.animationSystem.getState();
+            const config = ANIMATION_CONFIG;
+            
+            updateStatus(`
+                <strong>Animation System Status:</strong><br>
+                Active: ${state.isActive}<br>
+                Has Icon: ${state.hasIcon}<br>
+                Has Beam: ${state.hasBeam}<br>
+                Queue Length: ${state.queueLength}<br>
+                <br>
+                <strong>Z-Index Configuration:</strong><br>
+                ${JSON.stringify(config.Z_INDEX, null, 2)}<br>
+                <br>
+                <strong>Timing Configuration:</strong><br>
+                ${JSON.stringify(config.TIMING, null, 2)}
+            `);
+        };
+        
+        function updateStatus(message) {
+            document.getElementById('status').innerHTML = message;
+        }
+        
+        // Initial status
+        updateStatus('Animation system loaded successfully! Ready for testing.');
+        
+        console.log('LiDAR Animation System Test initialized');
+        console.log('Animation System:', window.animationSystem);
+        console.log('Configuration:', ANIMATION_CONFIG);
+    </script>
+</body>
+</html>

@@ -1,6 +1,8 @@
 /**
  * Task Service - Handles API calls for task management
  */
+console.log('[TASK-SERVICE] Module loading...');
+
 class TaskService {
     constructor() {
         this.baseUrl = window.AppConfig.apiBase;
@@ -188,3 +190,4 @@ class TaskService {
 
 // Export the service
 window.TaskService = TaskService;
+console.log('[TASK-SERVICE] TaskService class exported to window.TaskService');

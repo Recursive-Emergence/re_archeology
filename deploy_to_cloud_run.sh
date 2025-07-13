@@ -26,7 +26,7 @@ REQUIRED_FILES=(
     "start_server.py"
     "backend/api/main.py"
     "Dockerfile"
-    ".env.cloudrun"
+    ".env"
     "requirements.cloudrun.txt"
     "sage-striker-294302-b89a8b7e205b.json"
 )
@@ -123,6 +123,12 @@ if [ "$SHOULD_REBUILD" = true ]; then
 else
     echo "📤 Pushing existing image to Google Container Registry..."
     docker push ${IMAGE_NAME}
+fi
+
+# Generate .env.cloudrun.yaml from .env.cloudrun if needed
+if [ ! -f ".env.cloudrun.yaml" ] && [ -f ".env.cloudrun" ]; then
+    echo "🛠️  Generating .env.cloudrun.yaml from .env.cloudrun ..."
+    awk -F= '/^[A-Za-z0-9_]+=/{gsub(/\r/, ""); printf "%s: \"%s\"\n", $1, $2}' .env.cloudrun > .env.cloudrun.yaml
 fi
 
 # Deploy to Cloud Run with optimized configuration

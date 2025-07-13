@@ -4,6 +4,12 @@ let lidarResolutionFetched = false;
 /*
  * Smart Resume WebSocket Messages:
  * 
+ * Resume Strategy:
+ * 1. Frontend loads snapshot overlay showing progress up to highest_snapshot_level
+ * 2. Backend resumes scanning from resume_from_level (highest_snapshot_level + 1)
+ * 3. Only NEW tiles beyond the snapshot are streamed to frontend
+ * 4. No re-fetching of cached tiles that are already visible in snapshot
+ * 
  * Frontend -> Backend:
  * {
  *   type: 'request_catchup',
@@ -32,53 +38,68 @@ let lidarResolutionFetched = false;
 export function triggerCatchupForRunningTasks(app, runningTasks) {
     console.log('[WEBSOCKET] Triggering catch-up for running tasks:', runningTasks.map(t => t.id));
     
+    // Show restoration status
+    if (runningTasks.length > 0) {
+        console.log(`[WEBSOCKET] 🔄 Restoring ${runningTasks.length} running task(s) after page refresh...`);
+    }
+    
     runningTasks.forEach(async (task) => {
         // Set session info if available
         if (task.session_id || task.sessions?.scan) {
             app.currentLidarSession = task.session_id || task.sessions.scan;
         }
         
-        // Detect highest available snapshot level for smart resume
+        // Only perform restoration if websocket is connected
         let highestSnapshotLevel = -1;
-        if (window.detectHighestSnapshotLevel) {
-            try {
-                highestSnapshotLevel = await window.detectHighestSnapshotLevel(task.id);
-                console.log(`[WEBSOCKET] Detected highest snapshot level for task ${task.id}: ${highestSnapshotLevel}`);
-            } catch (err) {
-                console.warn(`[WEBSOCKET] Failed to detect snapshot level for task ${task.id}:`, err);
+        if (app.websocket && app.websocket.readyState === WebSocket.OPEN) {
+            // Detect highest available snapshot level for smart resume
+            if (window.detectHighestSnapshotLevel) {
+                try {
+                    highestSnapshotLevel = await window.detectHighestSnapshotLevel(task.id);
+                    console.log(`[WEBSOCKET] Detected highest snapshot level for task ${task.id}: ${highestSnapshotLevel}`);
+                } catch (err) {
+                    console.warn(`[WEBSOCKET] Failed to detect snapshot level for task ${task.id}:`, err);
+                }
+            }
+            
+            // Load cached bitmap for visual restoration
+            if (app.loadCachedBitmapForTask) {
+                app.loadCachedBitmapForTask(task.id).catch(err => 
+                    console.warn('[WEBSOCKET] Failed to load cached bitmap during catch-up:', err)
+                );
             }
         }
         
-        // Load cached bitmap for visual restoration
-        if (app.loadCachedBitmapForTask) {
-            app.loadCachedBitmapForTask(task.id).catch(err => 
-                console.warn('[WEBSOCKET] Failed to load cached bitmap during catch-up:', err)
-            );
-        }
-        
-        // Load cached tiles for detailed restoration
-        if (app.loadCachedTilesForTask && task.grid_x && task.grid_y) {
-            const options = {
-                gridX: task.grid_x,
-                gridY: task.grid_y,
-                levels: task.levels || undefined
-            };
-            app.loadCachedTilesForTask(task.id, options).catch(err => 
-                console.warn('[WEBSOCKET] Failed to load cached tiles during catch-up:', err)
-            );
+        // Resume Strategy: Use snapshots + new streaming tiles
+        // 1. Snapshot overlay shows the existing state up to highest_snapshot_level
+        // 2. Backend will stream NEW tiles from resume_from_level onwards
+        // 3. No need to re-fetch cached individual tiles from GCS
+        if (window.Logger) {
+            window.Logger.debug('websocket', `[WEBSOCKET] Resume strategy: snapshot overlay + new streaming tiles for task ${task.id}`);
         }
         
         // Send catch-up request with snapshot level information
-        if (app.websocket && app.websocket.readyState === WebSocket.OPEN && app.currentLidarSession) {
-            console.log('[WEBSOCKET] Sending smart catch-up request for session:', app.currentLidarSession);
-            app.websocket.send(JSON.stringify({
-                type: 'request_catchup',
-                session_id: app.currentLidarSession,
-                task_id: task.id,
-                highest_snapshot_level: highestSnapshotLevel,
-                resume_from_level: highestSnapshotLevel >= 0 ? highestSnapshotLevel + 1 : 0,
-                timestamp: new Date().toISOString()
-            }));
+        if (app.websocket && app.websocket.readyState === WebSocket.OPEN) {
+            // Set session if available from task data
+            if (task.session_id || task.sessions?.scan) {
+                app.currentLidarSession = task.session_id || task.sessions.scan;
+            }
+            
+            if (app.currentLidarSession) {
+                console.log('[WEBSOCKET] Sending smart catch-up request for session:', app.currentLidarSession);
+                app.websocket.send(JSON.stringify({
+                    type: 'request_catchup',
+                    session_id: app.currentLidarSession,
+                    task_id: task.id,
+                    highest_snapshot_level: highestSnapshotLevel,
+                    resume_from_level: highestSnapshotLevel >= 0 ? highestSnapshotLevel + 1 : 0,
+                    timestamp: new Date().toISOString()
+                }));
+            } else {
+                console.log('[WEBSOCKET] No session ID available for catch-up request');
+            }
+        } else {
+            console.warn('[WEBSOCKET] WebSocket not ready for catch-up request');
         }
     });
 }
@@ -95,7 +116,7 @@ export function connectWebSocket(app) {
         // console.log('🔌 Connecting to WebSocket:', wsUrl); // Suppressed for clean UI
         app.websocket = new WebSocket(wsUrl);
         app.websocket.onopen = () => {
-            // console.log('✅ WebSocket connected successfully'); // Suppressed for clean UI
+            console.log('✅ WebSocket connected successfully to', wsUrl);
             app.websocket.send(JSON.stringify({
                 type: 'ping',
                 timestamp: new Date().toISOString()
@@ -139,20 +160,25 @@ export function connectWebSocket(app) {
         app.websocket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
+                console.log('[WEBSOCKET] Message received:', data.type, data);
                 handleWebSocketMessage(app, data);
             } catch (error) {
-                // console.error('❌ WebSocket message error:', error); // Suppressed for clean UI
+                console.error('❌ WebSocket message error:', error);
             }
         };
         app.websocket.onclose = (event) => {
-            // console.log('🔌 WebSocket disconnected:', event.code, event.reason); // Suppressed for clean UI
+            console.log('🔌 WebSocket disconnected:', event.code, event.reason);
             app.websocket = null;
-            if (app.currentLidarSession) {
-                setTimeout(() => connectWebSocket(app), 2000);
-            }
+            
+            // Always attempt to reconnect (not just when session is active)
+            // This ensures page refresh scenarios work properly
+            setTimeout(() => {
+                console.log('[WEBSOCKET] Attempting to reconnect...');
+                connectWebSocket(app);
+            }, 2000);
         };
         app.websocket.onerror = (error) => {
-            // console.error('❌ WebSocket error:', error); // Suppressed for clean UI
+            console.error('❌ WebSocket error:', error);
         };
     } catch (error) {
         // console.error('❌ Failed to connect WebSocket:', error); // Suppressed for clean UI
@@ -201,13 +227,14 @@ export function handleWebSocketMessage(app, data) {
             }
             break;
         case 'lidar_tile':
-            // Start scanning animation if not already started
-            if (!app.isScanning && !app.animationState?.isActive) {
-                if (typeof app.startScanningAnimation === 'function') {
-                    app.startScanningAnimation('satellite');
-                }
-                app.isScanning = true;
-            }
+            // Animation now handled by LidarAnimationSystem in lidar-grid.js when tiles are received
+            // Legacy animation system disabled to prevent duplicate satellites
+            // if (!app.isScanning && !app.animationState?.isActive) {
+            //     if (typeof app.startScanningAnimation === 'function') {
+            //         app.startScanningAnimation('satellite');
+            //     }
+            //     app.isScanning = true;
+            // }
             // Deduplicate: skip if this tile was already restored from cache
             if (typeof app.isTileRestored === 'function' && app.isTileRestored(data)) {
                 // Optionally log: console.log('Skipping duplicate websocket tile', data);
@@ -260,18 +287,20 @@ export function handleWebSocketMessage(app, data) {
             // Start scanning animation to show activity (with delay for proper initialization)
             if (!app.isScanning && !app.animationState?.isActive) {
                 // Stop any existing animation first to prevent duplicates
-                if (typeof app.stopScanningAnimation === 'function') {
-                    app.stopScanningAnimation();
-                }
-                
-                setTimeout(() => {
-                    if (typeof app.startScanningAnimation === 'function' && 
-                        !app.isScanning && !app.animationState?.isActive) {
-                        app.startScanningAnimation('satellite');
-                        app.isScanning = true;
-                        app.currentLidarSession = data.session_id;
-                    }
-                }, 100);
+                // Animation now handled by LidarAnimationSystem in lidar-grid.js
+                // Legacy animation system disabled to prevent duplicate satellites
+                // if (typeof app.stopScanningAnimation === 'function') {
+                //     app.stopScanningAnimation();
+                // }
+                // setTimeout(() => {
+                //     if (typeof app.startScanningAnimation === 'function' && 
+                //         !app.isScanning && !app.animationState?.isActive) {
+                //         app.startScanningAnimation('satellite');
+                //         app.isScanning = true;
+                //         app.currentLidarSession = data.session_id;
+                //     }
+                // }, 100);
+                app.currentLidarSession = data.session_id;
             }
             
             // Trigger catch-up for resumed task
@@ -298,18 +327,20 @@ export function handleWebSocketMessage(app, data) {
                 // This is a restarted session, ensure satellite animation starts properly
                 if (!app.isScanning && !app.animationState?.isActive) {
                     // Stop any existing animation first
-                    if (typeof app.stopScanningAnimation === 'function') {
-                        app.stopScanningAnimation();
-                    }
-                    
-                    setTimeout(() => {
-                        if (typeof app.startScanningAnimation === 'function' && 
-                            !app.isScanning && !app.animationState?.isActive) {
-                            app.startScanningAnimation('satellite');
-                            app.isScanning = true;
-                            app.currentLidarSession = data.session_id;
-                        }
-                    }, 300);
+                    // Animation now handled by LidarAnimationSystem in lidar-grid.js
+                    // Legacy animation system disabled to prevent duplicate satellites
+                    // if (typeof app.stopScanningAnimation === 'function') {
+                    //     app.stopScanningAnimation();
+                    // }
+                    // setTimeout(() => {
+                    //     if (typeof app.startScanningAnimation === 'function' && 
+                    //         !app.isScanning && !app.animationState?.isActive) {
+                    //         app.startScanningAnimation('satellite');
+                    //         app.isScanning = true;
+                    //         app.currentLidarSession = data.session_id;
+                    //     }
+                    // }, 300);
+                    app.currentLidarSession = data.session_id;
                 }
                 
                 // Immediately refresh task list to show updated status (silent refresh)
@@ -351,6 +382,18 @@ export function handleWebSocketMessage(app, data) {
             }
             app.isScanning = false;
             app.currentLidarSession = null;
+            break;
+        case 'catchup_response':
+            // Backend confirmed catch-up for active session
+            console.log('[WEBSOCKET] Catch-up response received:', data.message);
+            if (data.status === 'active' && data.session_id) {
+                app.currentLidarSession = data.session_id;
+                console.log('[WEBSOCKET] Session restored:', data.session_id);
+            }
+            break;
+        case 'task_resume_response':
+            // Backend acknowledged task resume request
+            console.log('[WEBSOCKET] Task resume response:', data.message);
             break;
         default:
             break;

@@ -16,11 +16,17 @@ export function setupMap(app) {
     app.map = L.map(container, {
         center: [20, 0], // Start with a global view
         zoom: 2,
-        zoomControl: true,
+        zoomControl: false, // Disable default zoom control
         attributionControl: true,
         minZoom: 3,
         maxZoom: 19
     });
+    
+    // Add custom zoom control to ensure proper functionality
+    L.control.zoom({
+        position: 'topleft'
+    }).addTo(app.map);
+    
     addBaseLayers(app);
     setupMapEvents(app);
 }

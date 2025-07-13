@@ -164,6 +164,45 @@ async def websocket_discovery_endpoint(
                     'connection_stats': frontend_backend_messenger.get_connection_stats(),
                     'timestamp': datetime.now().isoformat()
                 })
+            elif message.get('type') == 'request_catchup':
+                # Handle catch-up request for running tasks after page refresh
+                session_id = message.get('session_id')
+                task_id = message.get('task_id')
+                highest_snapshot_level = message.get('highest_snapshot_level', -1)
+                resume_from_level = message.get('resume_from_level', 0)
+                
+                logger.info(f"[WEBSOCKET] Catch-up request: session={session_id}, task={task_id}, resume_from_level={resume_from_level}")
+                
+                # Check if this session/task is active
+                if session_id and session_id in active_sessions:
+                    # Send catch-up response
+                    await frontend_backend_messenger.send_to_connection(websocket, {
+                        'type': 'catchup_response',
+                        'session_id': session_id,
+                        'task_id': task_id,
+                        'status': 'active',
+                        'message': 'Catching up with active session',
+                        'timestamp': datetime.now().isoformat()
+                    })
+                else:
+                    logger.warning(f"[WEBSOCKET] Catch-up requested for inactive session: {session_id}")
+                    
+            elif message.get('type') == 'resume_task':
+                # Handle smart resume for specific task
+                task_id = message.get('task_id')
+                highest_snapshot_level = message.get('highest_snapshot_level', -1)
+                resume_from_level = message.get('resume_from_level', 0)
+                
+                logger.info(f"[WEBSOCKET] Resume task request: task={task_id}, resume_from_level={resume_from_level}")
+                
+                # Send acknowledgment
+                await frontend_backend_messenger.send_to_connection(websocket, {
+                    'type': 'task_resume_response',
+                    'task_id': task_id,
+                    'resume_from_level': resume_from_level,
+                    'message': 'Task resume request received',
+                    'timestamp': datetime.now().isoformat()
+                })
             else:
                 logger.warning(f"Unknown WebSocket message type: {message.get('type')}")
                 await frontend_backend_messenger.send_to_connection(websocket, {

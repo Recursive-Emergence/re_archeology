@@ -1,5 +1,6 @@
 import numpy as np
 import logging
+import threading
 from typing import Dict, Optional, List, Any
 from dataclasses import dataclass
 
@@ -77,7 +78,8 @@ class LidarMapFactory:
                   preferred_resolution_m: Optional[float] = None,
                   exact_dataset_name: Optional[str] = None,
                   preferred_data_type: Optional[str] = None,
-                  use_cache: bool = True) -> Optional[LidarPatchResult]:
+                  use_cache: bool = True,
+                  stop_event: Optional[threading.Event] = None) -> Optional[LidarPatchResult]:
         """
         Fetches a LIDAR data patch for the given location and parameters with cloud caching.
 
@@ -96,7 +98,7 @@ class LidarMapFactory:
             preferred_data_type: The desired data product type (e.g., "DSM", "DTM").
                                  Defaults to DEFAULT_DATA_TYPE if None.
             use_cache: Whether to use cache for this request.
-            cache_strategy: Cache strategy to use ("local", "gcs", "hybrid").
+            stop_event: Optional threading event to signal cancellation of the operation.
 
         Returns:
             A LidarPatchResult containing the elevation data and metadata (resolution, 
@@ -182,7 +184,7 @@ class LidarMapFactory:
                     continue
 
                 # Fetch from source
-                patch_data = connector_instance.fetch_patch(lat, lon, size_m, target_res_for_fetch, data_type_to_fetch)
+                patch_data = connector_instance.fetch_patch(lat, lon, size_m, target_res_for_fetch, data_type_to_fetch, stop_event)
 
                 if patch_data is not None and patch_data.size > 0:
                     logger.info(f"✅ Successfully fetched '{data_type_to_fetch}' patch from {ds_meta.name}. Shape: {patch_data.shape}")
@@ -226,7 +228,8 @@ class LidarMapFactory:
                            preferred_resolution_m: Optional[float] = None,
                            exact_dataset_name: Optional[str] = None,
                            preferred_data_type: Optional[str] = None,
-                           use_cache: bool = True) -> Optional[np.ndarray]:
+                           use_cache: bool = True,
+                           stop_event: Optional[threading.Event] = None) -> Optional[np.ndarray]:
         """
         Backward-compatible method that returns only the numpy array data.
         
@@ -234,7 +237,7 @@ class LidarMapFactory:
         For new code, use get_patch() which returns LidarPatchResult with metadata.
         """
         result = LidarMapFactory.get_patch(lat, lon, size_m, preferred_resolution_m, 
-                                         exact_dataset_name, preferred_data_type, use_cache)
+                                         exact_dataset_name, preferred_data_type, use_cache, stop_event)
         return result.data if result else None
 
     @staticmethod
